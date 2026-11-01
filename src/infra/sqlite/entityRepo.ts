@@ -83,6 +83,31 @@ export function resolveAlias(db: Db, alias: string): Entity[] {
   return rows.map(rowToEntity);
 }
 
+/**
+ * 别名正查（带置信度与实体类型，按 confidence 降序）。
+ * 与 `resolveAlias` 的区别：查询串识别要的是"这个形态值多少分、是哪类实体"，
+ * 消解只要实体本身。不排除 merged loser，由调用方按场景决定。
+ */
+export function searchAliases(
+  db: Db,
+  alias: string,
+): { entityId: string; name: string; etype: EntityType; confidence: number }[] {
+  const rows = db
+    .prepare(
+      `SELECT a.entity_id, a.confidence, e.canonical_name AS name, e.etype
+         FROM alias a JOIN entity e ON e.id = a.entity_id
+        WHERE a.alias = ?
+        ORDER BY a.confidence DESC`,
+    )
+    .all(alias) as { entity_id: string; confidence: number; name: string; etype: string }[];
+  return rows.map((r) => ({
+    entityId: r.entity_id,
+    name: r.name,
+    etype: r.etype as EntityType,
+    confidence: r.confidence,
+  }));
+}
+
 export function aliasesOf(db: Db, entityId: string): Alias[] {
   const rows = db
     .prepare('SELECT * FROM alias WHERE entity_id = ? ORDER BY created_at ASC')
