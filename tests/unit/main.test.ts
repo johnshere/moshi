@@ -6,14 +6,19 @@ describe('app/main 入口', () => {
     expect(parseMode([])).toBe('daemon');
   });
 
-  it('识别 version', () => {
+  it('识别 version', async () => {
     expect(parseMode(['--version'])).toBe('version');
-    expect(main(['--version'])).toBe(0);
+    expect(await main(['--version'])).toBe(0);
   });
 
-  it('未知模式返回码 2', () => {
-    expect(() => parseMode(['nope'])).toThrow(/unknown mode/);
-    expect(main(['nope'])).toBe(2);
+  it('未知命令走 CLI 并返回码 2', async () => {
+    expect(parseMode(['nope'])).toBe('cli');
+    expect(await main(['nope'])).toBe(2);
+  });
+
+  it('--help 打印用法并返回 0', async () => {
+    expect(parseMode(['--help'])).toBe('cli');
+    expect(await main(['--help'])).toBe(0);
   });
 
   it('版本号与 package.json 一致', async () => {
