@@ -113,6 +113,7 @@ export function ingestEvent(db: Db, event: RawEvent): IngestResult {
     dedupKey: dedupKeyOf(event),
     payloadJson: canonicalJson(payload),
     channel: 'tool_parse',
+    origin: 'tool_parse',
   });
 
   return {

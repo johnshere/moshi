@@ -12,7 +12,7 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { loadConfig } from '../../src/app/config.js';
 import { callTool, findTool, TOOL_SPECS } from '../../src/app/mcp/tools.js';
-import { runMemoryQuery } from '../../src/app/mcp/query.js';
+import { runMemoryQuery, PROTOCOL_HINT } from '../../src/app/mcp/query.js';
 import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
 import { runMemoryFeedback } from '../../src/app/mcp/feedback.js';
 import { runMemoryCorrect } from '../../src/app/mcp/correct.js';
@@ -166,6 +166,29 @@ describe('memory_query', () => {
     expect(txt).toContain('[M1]');
     expect(txt).not.toContain('fact_id');
   });
+
+  it('json 结果带 protocol_hint（P2-20）', async () => {
+    const deps = makeDeps(freshDb());
+    const r = await runMemoryQuery(deps, { ...baseQuery, format: 'json' });
+    expect(r.protocol_hint).toContain('```moshi');
+    expect(r.protocol_hint).toContain('moshi://protocol/ann-v1');
+  });
+
+  it('text 格式末尾带 protocol_hint（P2-20）', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'aaa' });
+    syncFts(db);
+    const deps = makeDeps(db);
+    const r = await callTool(deps, 'memory_query', {
+      query: 'aaa',
+      top_k: 5,
+      scope: 'global',
+      include_history: false,
+      format: 'text',
+    });
+    const txt = textOf(r);
+    expect(txt).toContain(PROTOCOL_HINT);
+  });
 });
 
 describe('memory_annotate', () => {
@@ -188,6 +211,8 @@ describe('memory_annotate', () => {
     expect(r.accepted[0]!.startsWith('an_')).toBe(true);
     expect(r.quarantined).toHaveLength(0);
     expect(annotationRepo.countPending(db)).toBe(1);
+    const row = annotationRepo.get(db, r.accepted[0]!);
+    expect(row?.origin).toBe('mcp_direct');
   });
 
   it('重复调用返回相同 id（幂等）', () => {

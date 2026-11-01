@@ -60,7 +60,11 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
       const pack = await runMemoryQuery(deps, input);
       if (input.format === 'text') {
         // 给不支持结构化内容的宿主：只给编号列表，不带 fact_id（详设 §4.4 字段纪律）
-        return { content: [{ type: 'text', text: pack.numbered_list }] };
+        return {
+          content: [
+            { type: 'text', text: `${pack.numbered_list}\n\n${pack.protocol_hint}` },
+          ],
+        };
       }
       return jsonResult(pack);
     },

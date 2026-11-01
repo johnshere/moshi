@@ -110,6 +110,7 @@ export function runMemoryAnnotate(deps: McpDeps, input: AnnotateInput): Annotate
         dedupKey: annotateDedupKey(payload),
         payloadJson: canonicalJson(payload),
         channel: 'annotate',
+        origin: 'mcp_direct',
       });
       result.accepted.push(inserted.id);
     });

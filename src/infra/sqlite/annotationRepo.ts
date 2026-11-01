@@ -14,7 +14,7 @@ import { newId } from '../../domain/ids.js';
 import { nowIso } from '../../domain/time.js';
 import type { Db } from './db.js';
 
-export const CHANNELS = ['annotate', 'harvest', 'tool_parse'] as const;
+export const CHANNELS = ['annotate', 'harvest', 'tool_parse', 'agent_format'] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export interface AnnotationRow {
@@ -22,6 +22,7 @@ export interface AnnotationRow {
   dedupKey: string;
   payloadJson: string;
   channel: Channel;
+  origin: string | null;
   receivedAt: string;
   harvestedAt: string | null;
   error: string | null;
@@ -33,6 +34,7 @@ function rowToAnnotation(r: Record<string, unknown>): AnnotationRow {
     dedupKey: String(r['dedup_key']),
     payloadJson: String(r['payload_json']),
     channel: String(r['channel']) as Channel,
+    origin: (r['origin'] as string | null) ?? null,
     receivedAt: String(r['received_at']),
     harvestedAt: (r['harvested_at'] as string | null) ?? null,
     error: (r['error'] as string | null) ?? null,
@@ -48,13 +50,19 @@ function rowToAnnotation(r: Record<string, unknown>): AnnotationRow {
  */
 export function insert(
   db: Db,
-  input: { dedupKey: string; payloadJson: string; channel: Channel; receivedAt?: string },
+  input: {
+    dedupKey: string;
+    payloadJson: string;
+    channel: Channel;
+    origin?: string | null;
+    receivedAt?: string;
+  },
 ): { id: string; created: boolean } {
   const id = newId('annotation');
   const info = db
     .prepare(
-      `INSERT INTO annotation (id, dedup_key, payload_json, channel, received_at, harvested_at, error)
-       VALUES (@id, @dedup, @payload, @channel, @ts, NULL, NULL)
+      `INSERT INTO annotation (id, dedup_key, payload_json, channel, origin, received_at, harvested_at, error)
+       VALUES (@id, @dedup, @payload, @channel, @origin, @ts, NULL, NULL)
        ON CONFLICT (dedup_key) DO NOTHING`,
     )
     .run({
@@ -62,6 +70,7 @@ export function insert(
       dedup: input.dedupKey,
       payload: input.payloadJson,
       channel: input.channel,
+      origin: input.origin ?? null,
       ts: input.receivedAt ?? nowIso(),
     });
   if (info.changes > 0) return { id, created: true };

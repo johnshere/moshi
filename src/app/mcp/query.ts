@@ -45,10 +45,16 @@ export interface EvidencePackJson {
   topic_hint: TopicHint;
   /** 宿主视图：编号列表拼成一个字符串（§4.4 字段纪律：不含 fact_id） */
   numbered_list: string;
+  /** 采集协议提示：宿主可埋 ```moshi 块（详设 §5.12.1） */
+  protocol_hint: string;
   /** 会话内缓存命中（详设 §6.11） */
   cached: boolean;
   stats: { candidates: number; packed: number; tokens: number; latency_ms: number };
 }
+
+export const PROTOCOL_HINT =
+  'Tip: embed structured facts in a ` ```moshi ` block to submit them deterministically. ' +
+  'See resource `moshi://protocol/ann-v1` for the format.';
 
 /** cfg → 编排参数（core 不认识 Config 类型，映射留在 app 层） */
 export function searchParamsOf(cfg: McpDeps['cfg']): Partial<SearchParams> {
@@ -86,6 +92,7 @@ function toJson(pack: EvidencePackage, cached: boolean): EvidencePackJson {
     dependency_summary: pack.dependency_summary,
     topic_hint: pack.topic_hint,
     numbered_list: pack.numbered_list.join('\n'),
+    protocol_hint: PROTOCOL_HINT,
     cached,
     stats: pack.stats,
   };

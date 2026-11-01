@@ -81,13 +81,15 @@ export type Cardinality = (typeof CARDINALITY)[number];
 export const STATUS = ['ok', 'degraded'] as const;
 export type Status = (typeof STATUS)[number];
 
-/** 隔离原因（详设 §5.9 表）：每一条都必须能说清"为什么这条不能入图" */
+/** 隔离原因（详设 §5.9 表 + §5.12.5 采集协议失败语义）：每一条都必须能说清"为什么这条不能入图" */
 export const QUARANTINE_REASON = [
   'low_confidence',
   'too_long',
   'binary_like',
   'unserializable',
   'mutex_storm',
+  'ann_malformed',
+  'ann_version_unknown',
 ] as const;
 export type QuarantineReason = (typeof QUARANTINE_REASON)[number];
 

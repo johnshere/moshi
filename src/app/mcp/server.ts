@@ -28,6 +28,32 @@ export const MCP_PATH = '/mcp';
 /** 1 MB：够 50 条 × 2 KB 的事实再乘十倍，同时不至于让一次误发拖垮进程 */
 export const MAX_BODY_BYTES = 1024 * 1024;
 
+/** 埋点协议 v1 的机读规范（详设 §4.2 `moshi://protocol/ann-v1`） */
+const PROTOCOL_ANN_V1_TEXT = `moshi annotation protocol v1
+
+When you change something on this machine, wrap a structured annotation in a \`\`\`moshi code block. This lets the memory daemon extract facts deterministically instead of guessing from conversation text.
+
+Block format:
+\`\`\`moshi
+{"v":1,
+ "facts":[
+   {"subject":"daemon","predicate":"port","value":"53000",
+    "content":"daemon listens on port 53000","confidence":0.95,"source":"tool_obs"}
+ ],
+ "edges":[
+   {"from":"k:daemon.port","to":"k:proxy.noproxy","etype":"depends_on",
+    "note":"curl via proxy caused loopback failure"}
+]}
+\`\`\`
+
+Rules:
+- \`v\` must be 1. Unknown versions are ignored.
+- Each fact needs subject, predicate, value. content is optional.
+- confidence is optional (default 0.9). source is optional (default llm_claim).
+- Edge endpoints use \`f:<fact_id>\` or \`k:<canonical_key>\`. Unresolved references become pending candidates.
+- Only depends_on, co_occur, derived_from edges may be declared directly.
+- One block: up to 20 facts and 20 edges.`;
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
@@ -65,12 +91,24 @@ export function createMcpServer(deps: McpDeps): McpServer {
   const server = new McpServer(
     { name: 'moshi', version: VERSION },
     {
-      capabilities: { tools: {} },
+      capabilities: { tools: {}, resources: {} },
       instructions:
         'Local memory of this machine: ports, processes, packages, versions, paths and build ' +
         'results observed from previous sessions. Query it when a question depends on this ' +
         "machine's current state.",
     },
+  );
+
+  server.resource(
+    'ann-v1',
+    'moshi://protocol/ann-v1',
+    {
+      mimeType: 'text/plain',
+      description: 'moshi annotation protocol v1: structured facts and edges in ```moshi blocks',
+    },
+    (uri) => ({
+      contents: [{ uri: uri.href, mimeType: 'text/plain', text: PROTOCOL_ANN_V1_TEXT }],
+    }),
   );
 
   for (const spec of TOOL_SPECS) {
