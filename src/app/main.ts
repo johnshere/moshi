@@ -10,6 +10,7 @@ import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
 import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
+import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRunner.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { VERSION } from './version.js';
@@ -58,6 +59,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let instance;
   let sidecar: SidecarClient | undefined;
   let runner: HarvestRunner | undefined;
+  let schemaRunner: SchemaInferRunner | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
@@ -68,6 +70,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         // 先起 runner 再建 app——/mcp 上线时 wake 必须已经可用，否则第一批
         // "记住"要等 15s 兜底扫描才生效。
         runner = startHarvestRunner({ db, log });
+        // P1-24 互斥裁决的前置：ontology 里得有谓词基数性。启动即算一次，
+        // 之后按 schema_rev 脏检查兜底重算（见 schemaInferRunner）。
+        schemaRunner = startSchemaInferRunner({ db, log });
         const { server } = await buildHttpApp({
           db,
           cfg: booted,
@@ -104,6 +109,17 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.error({ event: 'fts.sync.failed', err: (err as Error).message }, 'fts sync failed');
   }
 
+  // P1-24 启动即补一次谓词基数性：已有库的历史事实不必等 60s 兜底轮询，
+  // 否则第一次查询时 ontology 还是空的、互斥裁决仍不触发。
+  try {
+    const schema = schemaRunner?.runOnce() ?? null;
+    if (schema !== null) {
+      log.info({ event: 'schema.infer.boot', predicates: schema.predicates.length }, 'schema infer done');
+    }
+  } catch (err) {
+    log.error({ event: 'schema.infer.failed', err: (err as Error).message }, 'schema infer failed');
+  }
+
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
   // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
@@ -130,6 +146,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');
     // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
     runner?.stop();
+    schemaRunner?.stop();
     await sidecar?.shutdown();
     await instance.close();
     await built.close();

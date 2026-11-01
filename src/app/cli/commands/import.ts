@@ -19,6 +19,7 @@ import { createSource } from '../../../core/adapters/index.js';
 import { CursorStore } from '../../../core/adapters/cursor.js';
 import { ingestSession } from '../../../core/write/ingest.js';
 import { harvest } from '../../../core/write/harvest.js';
+import { runSchemaInfer } from '../../../core/lifecycle/schema-infer.js';
 import { openDb, closeDb } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { rebuildDegree, rebuildFts, tableCounts } from '../../../infra/sqlite/maintenance.js';
@@ -42,6 +43,8 @@ export interface ImportResult {
   failed: number;
   /** 找到但没有可用适配器的源名 */
   unavailable: string[];
+  /** P1-24：导入后写入/更新谓词基数性的条数 */
+  promoted: number;
   ms: number;
 }
 
@@ -147,6 +150,7 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
     skipped: 0,
     failed: 0,
     unavailable: [],
+    promoted: 0,
     ms: 0,
   };
 
@@ -203,6 +207,11 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
     }
   }
 
+  // P1-24：谓词基数性是互斥裁决的前置（adjudicate ② 见不到 single-valued 就不判冲突）。
+  // 导入是"批量写事实"的唯一入口，这里算一次；daemon 启动另有 schemaInferRunner 兜底。
+  const schema = runSchemaInfer(db);
+  result.promoted = schema.predicates.filter((p) => p.action !== 'observe').length;
+
   rebuildFts(db);
   rebuildDegree(db);
   result.ms = Date.now() - started;
@@ -257,7 +266,8 @@ export const importCommand: Command = {
         `\n导入完成：${String(result.sessions)} 个会话、${String(result.turns)} 个回合、` +
           `${String(result.facts)} 条新事实（刷新 ${String(result.refreshed)}）、` +
           `${String(result.quarantined)} 条进隔离区、${String(result.skipped)} 条未识别、` +
-          `${String(result.failed)} 条失败，用时 ${(result.ms / 1000).toFixed(1)}s\n` +
+          `${String(result.failed)} 条失败、谓词基数性更新 ${String(result.promoted)} 条，` +
+          `用时 ${(result.ms / 1000).toFixed(1)}s\n` +
           `当前库：${Object.entries(counts)
             .map(([k, v]) => `${k}=${String(v)}`)
             .join(' ')}\n`,
