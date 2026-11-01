@@ -44,7 +44,21 @@ describe('启动即建库（详设 §3.4 第 4 步）', () => {
     expect(existsSync(inst.paths.db)).toBe(true);
     expect(inst.migration.applied).toEqual(['001_init.sql']);
     expect(inst.db.pragma('user_version', { simple: true })).toBe(1);
-    expect(inst.vectorEnabled).toBe(false);
+    // vectorEnabled 由本机 sqlite-vec 探测决定；与迁移结果一致：
+    // 装了 → fact_vec 已建；没装 → 打降级标记
+    const vecRow = inst.db.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='fact_vec'",
+    ).get();
+    const disabled = inst.db
+      .prepare("SELECT value FROM meta WHERE key='vector_disabled'")
+      .get() as { value: string } | undefined;
+    if (inst.vectorEnabled) {
+      expect(vecRow).toBeDefined();
+      expect(disabled).toBeUndefined();
+    } else {
+      expect(vecRow).toBeUndefined();
+      expect(disabled?.value).toBe('1');
+    }
   });
 });
 

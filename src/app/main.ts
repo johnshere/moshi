@@ -9,6 +9,7 @@ import { loadConfig } from './config.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
+import { syncFactVectors } from '../infra/vec/index.js';
 import { VERSION } from './version.js';
 
 export { VERSION };
@@ -79,6 +80,28 @@ export async function main(argv: readonly string[]): Promise<number> {
     { event: 'daemon.start', port: instance.port, data_dir: cfg.storage.data_dir },
     'daemon started',
   );
+
+  // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
+  // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
+  // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
+  // encode 返回 null → missing（不炸，正确降级为 no_vector）。
+  void (async () => {
+    try {
+      await sidecar?.ensureStarted();
+      const res = await syncFactVectors(instance.db, {
+        encode: async (content) => {
+          if (sidecar === undefined) return null;
+          const v = await sidecar.encode([content]);
+          return v === null ? null : Float32Array.from(v[0]!);
+        },
+        batchSize: 200,
+        concurrency: 4,
+      });
+      log.info({ event: 'vec.sync', ...res }, 'vector index synced');
+    } catch (err) {
+      log.error({ event: 'vec.sync.failed', err: (err as Error).message }, 'vector sync failed');
+    }
+  })();
 
   const shutdown = async (signal: string): Promise<void> => {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');

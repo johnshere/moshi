@@ -47,7 +47,18 @@ export function connectTransport(target: TransportTarget): Promise<SidecarTransp
 
 class PipeTransport implements SidecarTransport {
   private buffer = '';
-  private pending: { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout } | null = null;
+  private queue: {
+    path: string;
+    body: unknown;
+    timeoutMs: number;
+    resolve: (v: unknown) => void;
+    reject: (e: Error) => void;
+  }[] = [];
+  private active: {
+    resolve: (v: unknown) => void;
+    reject: (e: Error) => void;
+    timer: NodeJS.Timeout;
+  } | null = null;
 
   constructor(private readonly sock: net.Socket) {
     this.sock.setEncoding('utf8');
@@ -58,45 +69,61 @@ class PipeTransport implements SidecarTransport {
   private onData(chunk: string): void {
     this.buffer += chunk;
     const nl = this.buffer.indexOf('\n');
-    if (nl < 0 || this.pending === null) return;
+    if (nl < 0 || this.active === null) return;
     const line = this.buffer.slice(0, nl).trim();
     this.buffer = this.buffer.slice(nl + 1);
     if (line === '') return;
-    const p = this.pending;
-    this.pending = null;
+    const p = this.active;
+    this.active = null;
     clearTimeout(p.timer);
     try {
       p.resolve(JSON.parse(line));
     } catch (err) {
       p.reject(err instanceof Error ? err : new Error('响应不是合法 JSON'));
     }
+    this.pump();
   }
 
   private onClosed(): void {
-    if (this.pending !== null) {
-      const p = this.pending;
-      this.pending = null;
+    if (this.active !== null) {
+      const p = this.active;
+      this.active = null;
       clearTimeout(p.timer);
       p.reject(new Error('sidecar 连接已关闭'));
+    }
+    const waiting = this.queue;
+    this.queue = [];
+    for (const item of waiting) {
+      item.reject(new Error('sidecar 连接已关闭'));
     }
   }
 
   request(path: string, body: unknown, timeoutMs: number): Promise<unknown> {
-    if (this.pending !== null) {
-      return Promise.reject(new Error('sidecar 传输忙：上一个请求未返回'));
-    }
     if (this.sock.destroyed) {
       return Promise.reject(new Error('sidecar 连接已断开'));
     }
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending = null;
-        this.sock.destroy();
-        reject(new Error(`sidecar 请求超时（${path}）`));
-      }, timeoutMs);
-      this.pending = { resolve, reject, timer };
-      this.sock.write(`${JSON.stringify({ path, body })}\n`);
+      this.queue.push({ path, body, timeoutMs, resolve, reject });
+      this.pump();
     });
+  }
+
+  /** 只发出一个在途请求；响应/超时后取队列下一个。请求并发安全：排队而非失败。 */
+  private pump(): void {
+    if (this.active !== null || this.queue.length === 0) return;
+    const item = this.queue.shift()!;
+    const timer = setTimeout(() => {
+      // 超时：当前请求失败；销毁连接会让 onClosed 连带拒绝排队的后续请求
+      this.sock.destroy();
+      if (this.active !== null) {
+        const p = this.active;
+        this.active = null;
+        clearTimeout(p.timer);
+        p.reject(new Error(`sidecar 请求超时（${item.path}）`));
+      }
+    }, item.timeoutMs);
+    this.active = { resolve: item.resolve, reject: item.reject, timer };
+    this.sock.write(`${JSON.stringify({ path: item.path, body: item.body })}\n`);
   }
 
   close(): void {

@@ -61,23 +61,17 @@ describe.skipIf(!pythonOk)('sidecar 集成（真进程 + 命名管道）', () =>
   beforeAll(() => {
     // 管道名固定 `\\.\pipe\moshi-infer`：清掉上次失败残留的孤儿 sidecar 进程，
     // 避免旧进程抢先 Accept 导致连错进程（只杀 moshi_sidecar 的，不动 daemon）。
+    // 注意：tasklist /V 的列是窗口标题、不含命令行，匹配不到 python -m moshi_sidecar；
+    // 必须用 Get-CimInstance 按 CommandLine 过滤。
     try {
-      const lines = execSync('tasklist /V /FO CSV /FI "IMAGENAME eq python.exe"', {
-        encoding: 'utf8',
-      }).split(/\r?\n/);
-      for (const line of lines) {
-        if (!line.includes('moshi_sidecar')) continue;
-        const pid = line.match(/"(\d+)"\s*$/)?.[1];
-        if (pid) {
-          try {
-            execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-          } catch {
-            // 已经退出
-          }
-        }
-      }
+      const lines = execSync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'moshi_sidecar' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }"`,
+        { stdio: 'pipe', encoding: 'utf8' },
+      );
+      // 幂等：没孤儿时 powershell 无输出，有则逐条输出 taskkill 结果
+      void lines;
     } catch {
-      // tasklist 不可用则跳过——干净环境不需要清
+      // 清理失败不致命——干净环境不需要清
     }
   });
 

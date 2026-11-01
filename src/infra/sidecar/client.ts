@@ -202,8 +202,19 @@ export class SidecarClient {
         /* 尽力而为 */
       }
     }
+    // 还在启动中（waitReady 未返回）时没有可用传输：直接杀进程树，
+    // 否则 shutdown 会留一个孤儿 sidecar + 挂着日志流（目录被删后 ENOENT）
+    if (this.spawned !== null && this.ready === null) {
+      try {
+        this.spawned.kill();
+      } catch {
+        /* 尽力而为 */
+      }
+    }
     this.transport?.close();
     this.transport = null;
+    this.spawned = null;
+    this.ready = null;
     this.state = 'stopped';
   }
 

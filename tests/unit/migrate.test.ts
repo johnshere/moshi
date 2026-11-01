@@ -117,10 +117,9 @@ describe('连接 PRAGMA（详设 §2.2 第 0 段）', () => {
 });
 
 describe('向量表降级（详设 §2.2 末段）', () => {
-  it('sqlite-vec 不可用时跳过 fact_vec 并打标记，其余表照常建', () => {
-    const { db, dir, vectorEnabled } = tempDb();
-    expect(vectorEnabled).toBe(false); // 当前未安装 sqlite-vec
-    const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
+  it('vectorEnabled=false 时跳过 fact_vec 并打标记，其余表照常建', () => {
+    const { db, dir } = tempDb();
+    const res = migrate(db, { backupsDir: path.join(dir, 'backups'), vectorEnabled: false });
     expect(res.vectorEnabled).toBe(false);
 
     const tables = listTables(db);

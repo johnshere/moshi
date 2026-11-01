@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Db } from '../../infra/sqlite/db.js';
 import type { SidecarClient } from '../../infra/sidecar/client.js';
+import { countFact, countVec, vectorDisabled, VEC_DIM } from '../../infra/vec/index.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
 import type { McpDeps } from '../mcp/deps.js';
@@ -55,12 +56,22 @@ export async function buildHttpApp(deps: HttpDeps) {
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
 
-  // ── 状态条：daemon + sidecar（概设 §10.1 三灯的最小版）──
+  // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──
   app.get('/api/status', async (_req, reply) => {
-    const status = { daemon: 'ok', sidecar: null as unknown };
+    const status: Record<string, unknown> = { daemon: 'ok' };
     if (deps.sidecar !== undefined) {
       status.sidecar = deps.sidecar.status();
     }
+    // 向量路（P1-02）：meta.vector_disabled 为关；否则显示已索引/总数
+    const disabled = vectorDisabled(deps.db);
+    const total = countFact(deps.db);
+    const indexed = countVec(deps.db);
+    status.vector = {
+      state: disabled ? 'off' : 'on',
+      dim: VEC_DIM,
+      indexed,
+      total,
+    };
     return reply.send(status);
   });
 

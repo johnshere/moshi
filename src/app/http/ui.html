@@ -201,6 +201,7 @@ async function openDetail(id) {
     <div class="field"><label>强度</label><div class="value">${fmt(f.strength)}</div></div>
     <div class="field"><label>状态</label><div class="value">${f.epistemic_status}</div></div>
     <div class="field"><label>有效时间</label><div class="value">${f.valid_at || '-'} → ${f.valid_to || '至今'}</div></div>
+    <div class="field"><label>向量</label><div class="value">${f.vector ? (f.vector.indexed ? `已索引 · 前 8 维 [${f.vector.head.join(', ')}]` : '未索引') : '-'}</div></div>
     <div class="field"><label>审计历史</label><div class="audit-list">${auditHtml}</div></div>
   `;
   document.getElementById('overlay').classList.add('show');
@@ -289,6 +290,15 @@ async function loadStatus() {
     const res = await api('/api/status');
     const st = await res.json();
     const parts = [`<span><span class="dot dot-ok"></span>daemon 运行中</span>`];
+    const v = st.vector;
+    if (v) {
+      const pct = v.total > 0 ? Math.round((v.indexed / v.total) * 100) : 0;
+      parts.push(
+        v.state === 'off'
+          ? `<span><span class="dot dot-off"></span>向量索引 未启用（sqlite-vec 缺失）</span>`
+          : `<span><span class="dot ${v.indexed >= v.total ? 'dot-ok' : 'dot-warn'}"></span>向量 ${v.dim} 维 · 已索引 ${v.indexed}/${v.total}${v.indexed >= v.total ? '' : `（${pct}%）`}</span>`,
+      );
+    }
     const s = st.sidecar;
     if (!s) {
       parts.push(`<span><span class="dot dot-off"></span>推理未启用（纯符号模式）</span>`);

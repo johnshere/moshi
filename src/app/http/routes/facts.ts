@@ -12,6 +12,7 @@ import * as factRepo from '../../../infra/sqlite/factRepo.js';
 import * as auditRepo from '../../../infra/sqlite/auditRepo.js';
 import type { Epistemic } from '../../../domain/enums.js';
 import { withTransaction } from '../../../infra/sqlite/tx.js';
+import { getVec } from '../../../infra/vec/index.js';
 
 interface FactRoutesOpts {
   db: Db;
@@ -90,6 +91,8 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
       return reply.code(404).send({ error: 'E_NOT_FOUND', message: `fact 不存在：${id}` });
     }
     const audits = auditRepo.auditByRow(db, 'fact', id);
+    // 向量信息（P1-02）：详情弹窗展示该事实是否已进向量索引 + 前 8 维摘要
+    const vec = getVec(db, id);
     // 字段命名必须与列表接口一致（snake_case JSON），前端按同一套字段渲染
     return {
       id: fact.id,
@@ -105,6 +108,12 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
       valid_at: fact.validAt,
       valid_to: fact.validTo,
       recorded_at: fact.recordedAt,
+      vector: vec === null
+        ? { indexed: false }
+        : {
+            indexed: true,
+            head: Array.from(vec.slice(0, 8)).map((x) => +x.toFixed(4)),
+          },
       audits: audits.map((a) => ({
         field: a.field,
         before: a.beforeJson,
