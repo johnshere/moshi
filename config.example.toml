@@ -20,6 +20,7 @@ harvest_batch = 200
 import_batch = 500
 max_fact_bytes = 2048
 quarantine_confidence = 0.25
+# field_map = { ts = "timestamp", session_id = "sessionId" }   # 通用 JSONL 的字段名映射
 
 [confidence]
 prior_tool_obs = 0.95

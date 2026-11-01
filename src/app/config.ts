@@ -46,6 +46,11 @@ const IngestSchema = z
     import_batch: positiveInt.default(500),
     max_fact_bytes: positiveInt.default(2048),
     quarantine_confidence: prob.default(0.25),
+    /**
+     * 通用 JSONL 适配器的字段映射（详设 §5.2.2）：左=内部名，右=对方 JSON 的键名。
+     * 不写就按默认 `{ts, role, text, tool, session_id, cwd}`。
+     */
+    field_map: z.record(z.string(), z.string()).default({}),
   })
   .strict();
 
