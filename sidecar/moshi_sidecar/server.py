@@ -27,8 +27,9 @@ try:
     import pywintypes
     import win32file
     import win32pipe
+    import winerror
 except ImportError:  # 非 Windows：用 AF_UNIX（unix 平台）
-    pywintypes = win32file = win32pipe = None
+    pywintypes = win32file = win32pipe = winerror = None
 
 PIPE_BUFSIZE = 1 << 20
 READ_CHUNK = 1 << 16
@@ -176,7 +177,9 @@ def _read_line(pipe) -> bytes | None:
         try:
             _hr, data = win32file.ReadFile(pipe, READ_CHUNK)
         except pywintypes.error as e:
-            if e.winerror in (win32pipe.ERROR_BROKEN_PIPE, win32pipe.ERROR_PIPE_NOT_CONNECTED):
+            # win32pipe 里没有 ERROR_* 常量（旧代码因此 AttributeError 把整个管道线程打死），
+            # 错误码在 winerror 模块里
+            if e.winerror in (winerror.ERROR_BROKEN_PIPE, winerror.ERROR_PIPE_NOT_CONNECTED):
                 return None
             raise
         if not data:
