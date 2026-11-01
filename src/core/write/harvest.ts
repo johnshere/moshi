@@ -272,6 +272,12 @@ export interface HarvestOptions {
   ontology?: (predicate: string) => OntologyHint | null;
   /** 片间是否让出事件循环；测试里关掉可以跑得更快（默认开） */
   yieldBetweenBatches?: boolean;
+  /**
+   * 最多处理几片（默认不限）。`import` 用它把大批量拆成"一片一次调用"，
+   * 好在片间做限速与进度输出；不限的话一次调用会把整个队列吸干，
+   * 首次导入会长时间占住事件循环。
+   */
+  maxBatches?: number;
 }
 
 export interface HarvestResult {
@@ -521,6 +527,7 @@ export async function harvest(db: Db, opts: HarvestOptions = {}): Promise<Harves
     });
 
     stats.batches += 1;
+    if (opts.maxBatches !== undefined && stats.batches >= opts.maxBatches) break;
     if (rows.length < batchSize) break;
     if (opts.yieldBetweenBatches !== false) {
       await new Promise<void>((resolve) => {

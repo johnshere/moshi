@@ -8,3 +8,4 @@ coverage/
 .workbuddy-ai/
 # 测试用临时目录
 .tmp/
+.tmp-smoke/

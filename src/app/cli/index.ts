@@ -1,23 +1,15 @@
 /**
  * CLI 分派。命令按 Phase 逐个注册，`moshi --help` 永远反映真实可用命令。
  */
-import { loadConfig, type Config } from '../config.js';
+import os from 'node:os';
+import { loadConfig } from '../config.js';
+import { importCommand } from './commands/import.js';
+import type { Command, CommandContext } from './types.js';
 
-export interface CommandContext {
-  cfg: Config;
-  args: readonly string[];
-  stdout: (s: string) => void;
-  stderr: (s: string) => void;
-}
-
-export interface Command {
-  name: string;
-  summary: string;
-  run: (ctx: CommandContext) => Promise<number>;
-}
+export type { Command, CommandContext };
 
 /** 已注册命令（随 Phase 增加） */
-export const COMMANDS: readonly Command[] = [];
+export const COMMANDS: readonly Command[] = [importCommand];
 
 export function usage(): string {
   const lines = [
@@ -34,7 +26,15 @@ export function usage(): string {
   return `${lines.join('\n')}\n`;
 }
 
-export async function runCli(argv: readonly string[]): Promise<number> {
+export interface RunCliOptions {
+  /** 覆盖家目录（测试用）；不传即 `os.homedir()`。配置与会话扫描共用这一个值 */
+  home?: string;
+}
+
+export async function runCli(
+  argv: readonly string[],
+  options: RunCliOptions = {},
+): Promise<number> {
   const name = argv[0];
   if (name === undefined || name === '--help' || name === '-h' || name === 'help') {
     process.stdout.write(usage());
@@ -47,9 +47,11 @@ export async function runCli(argv: readonly string[]): Promise<number> {
     return 2;
   }
 
-  const cfg = loadConfig();
+  const home = options.home ?? os.homedir();
+  const cfg = loadConfig({ home });
   return cmd.run({
     cfg,
+    home,
     args: argv.slice(1),
     stdout: (s) => process.stdout.write(s),
     stderr: (s) => process.stderr.write(s),

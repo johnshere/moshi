@@ -322,6 +322,7 @@ export function dataPaths(cfg: Config): {
   tmp: string;
   lock: string;
   cursors: string;
+  importCursors: string;
   backups: string;
 } {
   const root = cfg.storage.data_dir;
@@ -332,6 +333,8 @@ export function dataPaths(cfg: Config): {
     tmp: path.join(root, 'tmp'),
     lock: path.join(root, 'daemon.lock'),
     cursors: path.join(root, 'cursors.json'),
+    // import 用独立游标（详设 §5.11）：与日常游标混用会把增量读丢
+    importCursors: path.join(root, 'cursors.import.json'),
     backups: path.join(root, 'backups'),
   };
 }
