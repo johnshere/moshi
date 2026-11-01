@@ -23,7 +23,8 @@
     "lint:desc": "tsx tools/lint-descriptions.ts",
     "verify": "pnpm typecheck && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm test",
     "lint:lifecycle": "tsx tools/check-lifecycle.ts",
-    "lint:writes": "tsx tools/check-writes.ts"
+    "lint:writes": "tsx tools/check-writes.ts",
+    "bench": "tsx tools/bench.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
