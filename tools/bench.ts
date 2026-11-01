@@ -19,10 +19,12 @@ import { migrate } from '../src/infra/sqlite/migrate.js';
 import { insertFact } from '../src/infra/sqlite/factRepo.js';
 import { insertEdge } from '../src/infra/sqlite/edgeRepo.js';
 import { runMemoryQuery } from '../src/app/mcp/query.js';
+import { encodeViaSidecar, type EncodeFn, type McpDeps } from '../src/app/mcp/deps.js';
+import { SidecarClient } from '../src/infra/sidecar/client.js';
+import { syncFactVectors } from '../src/infra/vec/index.js';
 import { loadConfig } from '../src/app/config.js';
 import { nowIso } from '../src/domain/time.js';
 import { checkBlock, percentile } from '../src/core/ops/bench.js';
-import type { McpDeps } from '../src/app/mcp/deps.js';
 
 async function main(): Promise<number> {
   const argv = process.argv.slice(2);
@@ -95,7 +97,24 @@ async function main(): Promise<number> {
   }
 
   // 不注入 cache：测的是读取通路本身，不是会话内缓存（§6.11 的命中会把延迟抹平）
-  const deps: McpDeps = { db, cfg: loadConfig({ home: dir }) };
+  // B-4：--vector 才拉起 sidecar 建向量索引；默认纯符号路（CI 不依赖 python）。
+  const useVector = argv.includes('--vector');
+  let sidecar: SidecarClient | undefined;
+  let encode: EncodeFn | undefined;
+  let vectorBuildMs = 0;
+  if (useVector) {
+    const silent = { info: () => {}, warn: () => {}, error: () => {} };
+    sidecar = new SidecarClient({ cfg: loadConfig({ home: dir }), logger: silent });
+    await sidecar.ensureStarted();
+    encode = encodeViaSidecar(sidecar);
+    const buildStarted = Date.now();
+    const synced = await syncFactVectors(db, { encode, batchSize: 200, concurrency: 8 });
+    vectorBuildMs = Date.now() - buildStarted;
+    // eslint-disable-next-line no-console
+    console.error(`[bench] 向量索引：编码 ${synced.synced} 条，缺 ${synced.missing}，失败 ${synced.failed}，耗时 ${vectorBuildMs}ms`);
+  }
+
+  const deps: McpDeps = { db, cfg: loadConfig({ home: dir }), encode };
   const samples: number[] = [];
   for (let q = 0; q < queriesN; q += 1) {
     const query = `端口 ${3000 + (q % 100)}`;
@@ -134,12 +153,15 @@ async function main(): Promise<number> {
         threshold_ms: thresholdMs,
         prev_p95: prev?.p95 ?? null,
         blocked: block.blocked,
+        vector: useVector,
+        vector_build_ms: vectorBuildMs,
       },
       null,
       2,
     ),
   );
 
+  await sidecar?.shutdown();
   closeDb(db);
   return block.blocked ? 1 : 0;
 }

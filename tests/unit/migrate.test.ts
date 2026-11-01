@@ -159,4 +159,15 @@ describe('向量表降级（详设 §2.2 末段）', () => {
       | undefined;
     expect(row?.value).toBe('1');
   });
+
+  it('默认按连接能力探测 vec0：装了扩展就建 fact_vec 且不打降级标记（B-4）', () => {
+    const { db, dir } = tempDb();
+    // openDb 已经尝试加载 sqlite-vec；没装扩展的机器上这条不成立，跳过
+    if (!capabilities(db).vector) return;
+    const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
+    expect(res.vectorEnabled).toBe(true);
+    expect(listTables(db)).toContain('fact_vec');
+    const row = db.prepare("SELECT value FROM meta WHERE key='vector_disabled'").get();
+    expect(row).toBeUndefined();
+  });
 });

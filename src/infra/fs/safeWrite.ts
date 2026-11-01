@@ -8,7 +8,7 @@
  * 三种写面都要覆盖（台账 P0-20 坑）：writeFile / appendFile / createWriteStream，漏一种就白做。
  * 目录创建同样校验——mkdir 到白名单外（例如误建到工作区）也是外置系统污染宿主。
  */
-import { appendFileSync, closeSync, createWriteStream, mkdirSync, openSync, unlinkSync, writeSync, type WriteStream } from 'node:fs';
+import { appendFileSync, closeSync, createWriteStream, mkdirSync, openSync, rmSync, unlinkSync, writeSync, type WriteStream } from 'node:fs';
 import path from 'node:path';
 import { MoshiError } from '../../domain/errors.js';
 import { writeFileAtomic } from './atomic.js';
@@ -85,4 +85,15 @@ export function safeRemoveFile(file: string, roots: WriteRoots): void {
   } catch {
     // 不存在即已达成目的
   }
+}
+
+/**
+ * 递归删除目录（`eval` 的临时副本用）。
+ *
+ * 只允许删白名单内的路径：调用方传的根就是它自己临时建的那个目录，
+ * 校验通过才动手，避免"删错目录"变成静默的数据损失。
+ */
+export function safeRemoveDir(dir: string, roots: WriteRoots): void {
+  assertWritablePath(dir, roots);
+  rmSync(dir, { recursive: true, force: true });
 }

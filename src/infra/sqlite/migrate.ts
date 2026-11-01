@@ -75,6 +75,15 @@ function backup(db: Db, dir: string, from: number): string {
 }
 
 /** fact_vec 依赖 sqlite-vec，扩展不在时跳过并打标记（详设 §2.2 末段） */
+/** 探测 vec0 模块是否已加载（openDb 在连接上装了 sqlite-vec 才为真） */
+function hasVec0(db: Db): boolean {
+  try {
+    return db.prepare("SELECT 1 AS v FROM pragma_module_list WHERE name = 'vec0'").get() !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 function ensureVectorTable(db: Db, enabled: boolean): boolean {
   if (!enabled) {
     db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('vector_disabled','1')").run();
@@ -103,7 +112,7 @@ export function migrate(db: Db, opts: MigrateOptions = {}): MigrateResult {
   const from = userVersion(db);
 
   if (from === target) {
-    const vectorEnabled = ensureVectorTable(db, opts.vectorEnabled ?? false);
+    const vectorEnabled = ensureVectorTable(db, opts.vectorEnabled ?? hasVec0(db));
     return { from, to: target, applied: [], backupPath: null, vectorEnabled };
   }
   if (from > target) {
@@ -148,7 +157,7 @@ export function migrate(db: Db, opts: MigrateOptions = {}): MigrateResult {
     applied.push(path.basename(item.file));
   }
 
-  const vectorEnabled = ensureVectorTable(db, opts.vectorEnabled ?? false);
+  const vectorEnabled = ensureVectorTable(db, opts.vectorEnabled ?? hasVec0(db));
   return { from, to: target, applied, backupPath, vectorEnabled };
 }
 

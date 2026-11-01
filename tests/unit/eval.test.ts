@@ -118,4 +118,40 @@ describe('golden set 与运行器（P1-16）', () => {
     const code2 = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
     expect(code2).toBe(0);
   });
+
+  it('默认跑在临时副本：不往用户库写 query_log；--in-place 才写', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'moshi-home-'));
+    const goldenDir = path.join(home, '.moshi', 'golden');
+    mkdirSync(goldenDir, { recursive: true });
+    const dbFile = path.join(home, '.moshi', 'moshi.db');
+    const { db: cliDb } = openDb({ file: dbFile });
+    migrate(cliDb, { backupsDir: path.join(home, '.moshi', 'backups') });
+    addFact(cliDb, 'f_8080', '8080 端口被 dev-server 占用');
+    closeDb(cliDb);
+
+    writeFileSync(
+      path.join(goldenDir, 'golden.jsonl'),
+      '{"id":"g_ok","type":"single_hop","query":"8080","expect_facts":["f_8080"]}',
+      'utf8',
+    );
+
+    const out: string[] = [];
+    const code = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    expect(code).toBe(0);
+    expect(out.join('\n')).toContain('临时副本');
+
+    // 用户库未被评估污染
+    const { db: check1 } = openDb({ file: dbFile });
+    const n1 = (check1.prepare('SELECT COUNT(*) AS n FROM query_log').get() as { n: number }).n;
+    closeDb(check1);
+    expect(n1).toBe(0);
+
+    // --in-place 就在原库上跑，query_log 会增长
+    const code2 = await runCli(['eval', 'run', '--in-place'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    expect(code2).toBe(0);
+    const { db: check2 } = openDb({ file: dbFile });
+    const n2 = (check2.prepare('SELECT COUNT(*) AS n FROM query_log').get() as { n: number }).n;
+    closeDb(check2);
+    expect(n2).toBeGreaterThan(0);
+  });
 });
