@@ -1,0 +1,50 @@
+{
+  "name": "moshi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "默识（moshi）——本机环境状态的客户端记忆系统",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "bin": {
+    "moshi": "./dist/app/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx watch src/app/main.ts daemon",
+    "start": "node dist/app/main.js daemon",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src tools tests --ext .ts",
+    "lint:deps": "tsx tools/lint-deps.ts",
+    "lint:desc": "tsx tools/lint-descriptions.ts",
+    "verify": "pnpm typecheck && pnpm lint:deps && pnpm test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@modelcontextprotocol/sdk": "^1.20.2",
+    "better-sqlite3": "^11.10.0",
+    "fastify": "^5.6.1",
+    "pino": "^9.13.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.38.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.18.9",
+    "eslint": "^9.38.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.2",
+    "vitest": "^3.2.4"
+  }
+}
