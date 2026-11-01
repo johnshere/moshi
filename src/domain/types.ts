@@ -65,6 +65,8 @@ export interface Edge {
   dst: string;
   etype: Etype;
   weight: number;
+  /** 边置信度（edge 表有该列；P1-07 子图邻居排序按它降序） */
+  confidence?: number;
   validAt: string;
   validTo: string | null;
   createdAt: string;

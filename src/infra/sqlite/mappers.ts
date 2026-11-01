@@ -97,6 +97,7 @@ export function rowToEdge(row: Row): Edge {
     dst: str(row, 'dst'),
     etype: str(row, 'etype') as Etype,
     weight: num(row, 'weight'),
+    confidence: num(row, 'confidence'),
     validAt: str(row, 'valid_at'),
     validTo: strOrNull(row, 'valid_to'),
     createdAt: str(row, 'recorded_at'),
