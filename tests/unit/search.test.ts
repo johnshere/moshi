@@ -85,6 +85,20 @@ describe('searchWithPipeline · 局部路径', () => {
     expect(resolved).toHaveLength(2);
   });
 
+  it('FTS 不可用时降级为 bm25_error，而不是静默空结果（P1-26）', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'alpha one' });
+    syncFts(db);
+    db.exec('DROP TABLE fact_fts');
+
+    const out = await searchWithPipeline(runtime(db), { query: 'alpha', scope: 'global', topK: 5 });
+
+    // 旧实现 bm25Search 把异常吞成 []，证据包只剩"查无结果"；现在必须报降级
+    // （内部信号 bm25_error 对外映射为 no_bm25，见 core/read/errors.ts）
+    expect(out.pack.degraded).toContain('no_bm25');
+    expect(out.pack.evidence).toHaveLength(0);
+  });
+
   it('生命周期过滤：默认只看 active，include_history 才带出 archived', async () => {
     const db = freshDb();
     insertFact(db, { content: 'gamma now' });

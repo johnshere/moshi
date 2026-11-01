@@ -9,6 +9,7 @@
  * `core/read/recall/bm25.ts` 只负责拼 OR 查询串。
  */
 import type { Db } from './db.js';
+import { MoshiError } from '../../domain/errors.js';
 import { tokenizeForFts } from '../../core/parse/tokenize.js';
 
 export interface Bm25Hit {
@@ -28,7 +29,10 @@ export function syncFtsRow(db: Db, factId: string, content: string): void {
 
 /**
  * BM25 查询（详设 §6.4.2 SQL）。`matchQuery` 是 OR 连接的 token 串。
- * 失败（FTS 不可用/查询串非法）返回空数组，由上层标 `degraded:["no_bm25"]`。
+ *
+ * 查询失败**必须上抛**：旧实现 `catch { return [] }` 让"FTS 坏了 / MATCH 语法错"
+ * 长成"查无结果"，证据包照样 `status:'ok'`（违反 §6.13：查失败绝不报 ok+空）。
+ * 上层 `search.ts` 捕获后标 `degraded:["bm25_error"]`，其余两路照常出结果。
  */
 export function bm25Search(db: Db, matchQuery: string, k = 20): Bm25Hit[] {
   if (matchQuery.trim() === '') return [];
@@ -42,8 +46,8 @@ export function bm25Search(db: Db, matchQuery: string, k = 20): Bm25Hit[] {
           LIMIT ?`,
       )
       .all(matchQuery, k) as Bm25Hit[];
-  } catch {
-    return [];
+  } catch (err) {
+    throw new MoshiError('E_DB', `FTS 查询失败：${(err as Error).message}`, { matchQuery });
   }
 }
 

@@ -17,8 +17,12 @@ const STOP_WORDS = new Set([
 /** CJK 统一表意文字区（含扩展）与假名；二元组只对连续 CJK 串做 */
 const CJK_RE = /[\u3400-\u9fff\u3040-\u30ff]+/g;
 
-/** 标识符分隔符：点、斜杠、下划线、连字符、空白 */
-const SEGMENT_SPLIT = /[./_\- \t]+/;
+/**
+ * 标识符分隔符：点、斜杠、下划线、连字符、冒号、空白。
+ * 冒号必须切：`pkg:node` 原样进 FTS5 MATCH 会被当成列过滤语法整条报错
+ * （P1-26；旧实现把异常吞成"查无结果"）。
+ */
+const SEGMENT_SPLIT = /[./_\-: \t]+/;
 
 /** 驼峰切分：`eaddrInuse` → `eaddr inuse`；`NodeVersion22` → `node version22` */
 function splitCamel(s: string): string[] {
@@ -86,7 +90,17 @@ export function tokenizeForFts(text: string): string {
   return [...out].join(' ');
 }
 
-/** 把 token 串转成 BM25 的 OR 查询串（详设 §6.4.2：多 token 用 OR，避免长查询零命中） */
+/**
+ * 把 token 串转成 BM25 的 OR 查询串（详设 §6.4.2：多 token 用 OR，避免长查询零命中）。
+ *
+ * 每个 token 都加双引号（内部 `"` 双写转义）：FTS5 的括号、引号、`-`、`*`、`NEAR`、
+ * `AND`/`OR`/`NOT` 都是语法，裸拼一个 `(` 或 `"` 就让整条 MATCH 失败。引号里的
+ * 内容按字符串处理，token 本身不含空格，所以语义不变。
+ */
 export function orQuery(tokens: string): string {
-  return tokens.split(' ').filter((t) => t.length > 0).join(' OR ');
+  return tokens
+    .split(' ')
+    .filter((t) => t.length > 0)
+    .map((t) => `"${t.replace(/"/g, '""')}"`)
+    .join(' OR ');
 }
