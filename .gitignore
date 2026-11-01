@@ -9,3 +9,6 @@ coverage/
 # 测试用临时目录
 .tmp/
 .tmp-smoke/
+# Python 缓存（sidecar）
+__pycache__/
+*.pyc
