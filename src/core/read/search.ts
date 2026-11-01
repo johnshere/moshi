@@ -35,7 +35,7 @@ import { routeIntent } from './route.js';
 import { recognizeEntities, type RecognizedEntity } from './recognize.js';
 import { recallBm25, tokenizeForFts } from './recall/bm25.js';
 import { recallPpr } from './recall/ppr.js';
-import { fuseRank, type FusedItem, type RecallChannel } from './fuse.js';
+import { fuseRank, fusedScores, type FusedItem, type RecallChannel } from './fuse.js';
 import { buildSubgraph } from './subgraph.js';
 import { adjudicate, type AdjudicatedFact } from './adjudicate.js';
 import { packFacts, type PackItem } from './pack.js';
@@ -423,22 +423,30 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   mark('subgraph');
 
   // ── 8) 符号兜底五步（§6.7）──
+  // 融合分以 base 身份进 finalScore（0.55 权重）。不传的话 base 恒 0，
+  // 排序退化成 0.30×confidence + 0.15×strength，图邻居能压过融合分第一的直命中（B-3）。
   const adj = adjudicate(db, nodeFacts, sub.edges, {
     now,
     // include_history 是对第①步的显式豁免（§4.1.1）：调用方要看被取代的事实
     keepExpired: input.includeHistory === true,
+    base: fusedScores(fused),
   });
   mark('adjudicate');
 
-  // ── 9) 装箱（§6.8）+ top_k 截断 ──
+  // ── 9) top_k 截断 + 装箱（§6.8）──
+  // 先按 finalScore 全序切 top_k，再装箱。反过来的话：装箱先按预算挑，
+  // 挑完再切，等于"预算花在不会返回的事实上"，且排第 10 的直命中连机会都没有。
   const utilBudget = Math.round(params.tokenBudget * params.utilityRatio);
-  const items: PackItem[] = packFacts(adj.kept, {
+  const shortlist: AdjudicatedFact[] = [...adj.kept]
+    .sort((a, b) => b.finalScore - a.finalScore || (a.fact.id < b.fact.id ? -1 : 1))
+    .slice(0, topK);
+  const items: PackItem[] = packFacts(shortlist, {
     budget: params.tokenBudget,
     utilBudget,
     floorBudget: params.tokenBudget - utilBudget,
     floorMin: params.floorMin,
     perItemMax: params.maxFactTokens,
-  }).items.slice(0, topK);
+  }).items;
   mark('pack');
 
   // ── 10) 证据包（§6.9）──

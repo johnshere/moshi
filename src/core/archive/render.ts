@@ -64,10 +64,10 @@ export function renderTopic(db: Db, topicId: number, opts: RenderOptions = {}): 
     }
   }
 
-  // 关键事实：finalScore = 0.55×conf + 0.30×neural(0) + 0.15×strength
+  // 关键事实：归档不跑融合，base=0 → finalScore = 0.30×conf + 0.15×strength（§6.7）
   const keyFacts = [...list]
     .filter((f) => f.epistemicStatus !== 'invalidated' && f.epistemicStatus !== 'pruned')
-    .sort((a, b) => (0.55 * b.confidence + 0.15 * b.strength) - (0.55 * a.confidence + 0.15 * a.strength))
+    .sort((a, b) => (0.3 * b.confidence + 0.15 * b.strength) - (0.3 * a.confidence + 0.15 * a.strength))
     .slice(0, 15);
 
   const depEdges = listDependencyPairs(db, topicId, 10);

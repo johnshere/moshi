@@ -13,7 +13,8 @@
  *   ⑤ 身份未决   subject 实体 etype='unknown' → flag 'identity_unresolved'
  *
  * finalScore = 0.55 × base + 0.30 × neural + 0.15 × strength（§6.7）。
- * neural 来自 GAT（P3）；P1 期无 GAT → 0，接口留注入位。
+ * base   = §6.5 的融合分（调用方归一化后经 `base` 传入；归档等离线场景缺省 0）
+ * neural = confidence + GAT δ（P3 才有 δ；P1 期恒等于 confidence）
  * strength 只在这里生效、从不进子图特征（FEATURE_FIELDS 白名单约束）。
  */
 import type { Db } from '../../infra/sqlite/db.js';
@@ -43,7 +44,9 @@ export interface AdjudicationStats {
 
 export interface AdjudicateOptions {
   now?: string;
-  /** GAT delta（P3）：fact_id → neural 分；缺省 0 */
+  /** §6.5 的融合分（0~1.5）：fact_id → 归一化后的 fused 分；缺省 0 */
+  base?: ReadonlyMap<string, number>;
+  /** GAT delta（P3）：fact_id → δ；缺省 0，此时 neural 就取 confidence 本身 */
   neural?: ReadonlyMap<string, number>;
   /**
    * 跳过第①步的时态剔除（详设 §4.1.1 的 `include_history`）。
@@ -63,7 +66,8 @@ const FLAG_ORDER: readonly AdjudicationFlag[] = ['historical', 'disputed', 'stal
 
 export function adjudicate(db: Db, facts: readonly Fact[], edges: readonly SubgraphEdge[], opts: AdjudicateOptions = {}): AdjudicateResult {
   const now = opts.now ?? new Date().toISOString();
-  const neural = opts.neural ?? new Map();
+  const base = opts.base ?? new Map();
+  const gnnDelta = opts.neural ?? new Map();
   const stats: AdjudicationStats = {
     historical_excluded: 0,
     low_confidence_dropped: 0,
@@ -137,10 +141,11 @@ export function adjudicate(db: Db, facts: readonly Fact[], edges: readonly Subgr
 
   // ── finalScore ──
   const kept: AdjudicatedFact[] = working.map((f) => {
-    const neuralScore = neural.get(f.id) ?? 0;
+    const fused = base.get(f.id) ?? 0;
+    const neural = f.confidence + (gnnDelta.get(f.id) ?? 0);
     return {
       fact: f,
-      finalScore: 0.55 * f.confidence + 0.3 * neuralScore + 0.15 * f.strength,
+      finalScore: 0.55 * fused + 0.3 * neural + 0.15 * f.strength,
       flags: (flags.get(f.id) ?? []).sort((a, b) => FLAG_ORDER.indexOf(a) - FLAG_ORDER.indexOf(b)),
       disputedBy: disputedBy.get(f.id) ?? null,
     };

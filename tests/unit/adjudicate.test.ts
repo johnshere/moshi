@@ -136,10 +136,19 @@ describe('符号兜底五步（P1-08）', () => {
     expect(res.stats.identity_unresolved).toBe(1);
   });
 
-  it('finalScore = 0.55×base + 0.30×neural + 0.15×strength', () => {
+  it('finalScore = 0.55×base + 0.30×(conf+δ) + 0.15×strength', () => {
     const db = freshDb();
     const f = fact('f_s', { conf: 0.8, strength: 0.4 });
-    const res = adjudicate(db, [f], [], { now: '2026-11-01T00:00:00.000Z', neural: new Map([['f_s', 0.6]]) });
-    expect(res.kept[0]!.finalScore).toBeCloseTo(0.55 * 0.8 + 0.3 * 0.6 + 0.15 * 0.4);
+    const base = new Map([['f_s', 0.6]]);
+    const res = adjudicate(db, [f], [], { now: '2026-11-01T00:00:00.000Z', base });
+    expect(res.kept[0]!.finalScore).toBeCloseTo(0.55 * 0.6 + 0.3 * 0.8 + 0.15 * 0.4);
+
+    // GAT δ 只落在 neural 项里（P3 才用），base 缺省时退化为 0.30×conf + 0.15×strength
+    const withDelta = adjudicate(db, [f], [], {
+      now: '2026-11-01T00:00:00.000Z',
+      base,
+      neural: new Map([['f_s', 0.1]]),
+    });
+    expect(withDelta.kept[0]!.finalScore).toBeCloseTo(0.55 * 0.6 + 0.3 * 0.9 + 0.15 * 0.4);
   });
 });

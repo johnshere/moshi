@@ -26,8 +26,7 @@ export interface FusedItem {
   final: number;
 }
 
-/** 时序窗口词（详设 §6.5） */
-const NOW_WORDS = ['现在', '当前', '目前', '今天', 'now', 'current'];
+/** 时序窗口词（详设 §6.5） */const NOW_WORDS = ['现在', '当前', '目前', '今天', 'now', 'current'];
 const PAST_WORDS = ['以前', '之前', '上次', '曾经', '原来', 'past', 'before', 'previous'];
 const RANGE_RE = /\d{4}-\d{2}(?:-\d{2})?/g;
 
@@ -93,6 +92,22 @@ export function fuseRank(
   }
 
   out.sort((a, b) => b.final - a.final);
+  return out;
+}
+
+/**
+ * 融合分 → `adjudicate` 的 `base` 输入（P1-23）。
+ *
+ * `final` ∈ [0, 1.5]（RRF 1.0 + 实体/时序加成），而归一化之前 RRF 原始值只有
+ * 0.02~0.05 量级——直接塞进 `finalScore` 的 0.55 权重等于没有。这里按最大值
+ * 归一到 [0,1]，保持"越靠前越接近 1"的相对关系。
+ */
+export function fusedScores(fused: readonly FusedItem[]): Map<string, number> {
+  let max = 0;
+  for (const f of fused) max = Math.max(max, f.final);
+  const out = new Map<string, number>();
+  if (max <= 0) return out;
+  for (const f of fused) out.set(f.fact_id, f.final / max);
   return out;
 }
 

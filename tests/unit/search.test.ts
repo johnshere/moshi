@@ -214,3 +214,36 @@ describe('searchWithPipeline · 会话内缓存', () => {
     expect(cache.size).toBe(1);
   });
 });
+
+describe('searchWithPipeline · 排序（P1-23）', () => {
+  /**
+   * B-3 回归：直命中 conf 0.90，图邻居 conf 0.98 但只是邻居。
+   * 融合分不传 base 时 finalScore 只剩 0.30×conf + 0.15×strength，直命中在
+   * 11 个邻居里排到 12 位，被 top_k=8 直接切掉。
+   */
+  it('直命中不被高置信邻居挤出证据包', async () => {
+    const db = freshDb();
+    const hit = insertFact(db, { content: 'noproxy flag required for curl', confidence: 0.9 });
+    const neighbours = Array.from({ length: 11 }, (_, i) =>
+      insertFact(db, { content: `build note ${String.fromCharCode(97 + i)}`, confidence: 0.98 }),
+    );
+    for (const n of neighbours) insertEdge(db, hit, n, 'depends_on');
+    syncFts(db);
+
+    const out = await searchWithPipeline(runtime(db), { query: 'noproxy', scope: 'global' });
+    const ids = out.pack.evidence.map((e) => e.fact_id);
+    expect(ids).toContain(hit);
+    expect(ids.length).toBeLessThanOrEqual(8);
+  });
+
+  it('top_k 在装箱之前生效：返回条数不超过 top_k', async () => {
+    const db = freshDb();
+    const hit = insertFact(db, { content: 'noproxy flag required for curl', confidence: 0.9 });
+    const n1 = insertFact(db, { content: 'build note alpha', confidence: 0.98 });
+    insertEdge(db, hit, n1, 'depends_on');
+    syncFts(db);
+
+    const out = await searchWithPipeline(runtime(db), { query: 'noproxy', scope: 'global', topK: 1 });
+    expect(out.pack.evidence).toHaveLength(1);
+  });
+});
