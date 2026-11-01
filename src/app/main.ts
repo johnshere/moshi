@@ -10,6 +10,7 @@ import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
 import { syncFactVectors } from '../infra/vec/index.js';
+import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { VERSION } from './version.js';
 
 export { VERSION };
@@ -80,6 +81,14 @@ export async function main(argv: readonly string[]): Promise<number> {
     { event: 'daemon.start', port: instance.port, data_dir: cfg.storage.data_dir },
     'daemon started',
   );
+
+  // P1-03 全文检索：启动即补齐历史事实的 FTS 行（先于向量同步，纯本地无依赖）
+  try {
+    const n = syncMissingFts(instance.db);
+    if (n > 0) log.info({ event: 'fts.sync', synced: n }, 'fts rows synced');
+  } catch (err) {
+    log.error({ event: 'fts.sync.failed', err: (err as Error).message }, 'fts sync failed');
+  }
 
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮

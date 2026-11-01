@@ -12,6 +12,7 @@ import type { Fact } from '../../domain/types.js';
 import { nowIso } from '../../domain/time.js';
 import { appendAudit } from './auditRepo.js';
 import type { Db } from './db.js';
+import { syncFtsRow } from './ftsRepo.js';
 import { rowToFact } from './mappers.js';
 
 export interface ConfidenceChange {
@@ -96,6 +97,8 @@ export function insertFact(db: Db, fact: Fact): void {
     created_at: fact.createdAt,
     updated_at: fact.updatedAt,
   });
+  // FTS 同步（详设 §6.4.2）：同一事务内写 fact_fts。content 不可变，只有 insert 路径
+  syncFtsRow(db, fact.id, fact.content);
 }
 
 /**

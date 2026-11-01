@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import type { Db } from '../../infra/sqlite/db.js';
 import type { SidecarClient } from '../../infra/sidecar/client.js';
 import { countFact, countVec, vectorDisabled, VEC_DIM } from '../../infra/vec/index.js';
+import { countFts } from '../../infra/sqlite/ftsRepo.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
 import type { McpDeps } from '../mcp/deps.js';
@@ -70,6 +71,12 @@ export async function buildHttpApp(deps: HttpDeps) {
       state: disabled ? 'off' : 'on',
       dim: VEC_DIM,
       indexed,
+      total,
+    };
+    // 全文检索路（P1-03）：fact_fts 可用则显示索引行数
+    status.fts = {
+      state: countFts(deps.db) > 0 ? 'on' : 'off',
+      indexed: countFts(deps.db),
       total,
     };
     return reply.send(status);

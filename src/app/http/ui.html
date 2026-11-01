@@ -313,6 +313,15 @@ async function loadStatus() {
     } else {
       parts.push(`<span><span class="dot dot-warn"></span>sidecar 启动中…</span>`);
     }
+    // 全文检索（P1-03）：fact_fts 已索引
+    const ft = st.fts;
+    if (ft) {
+      parts.push(
+        ft.state === 'off'
+          ? `<span><span class="dot dot-off"></span>全文检索 未启用</span>`
+          : `<span><span class="dot dot-ok"></span>全文检索 FTS5 · 已索引 ${ft.indexed}/${ft.total}</span>`,
+      );
+    }
     el.innerHTML = parts.join('');
   } catch {
     el.textContent = '状态不可用';
