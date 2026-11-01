@@ -10,6 +10,8 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import http from 'node:http';
 import { MoshiError } from '../domain/errors.js';
+import { closeDb, openDb, type Db } from '../infra/sqlite/db.js';
+import { migrate, type MigrateResult } from '../infra/sqlite/migrate.js';
 import { dataPaths, type Config } from './config.js';
 import {
   createLockExclusive,
@@ -72,6 +74,9 @@ export interface Instance {
   token: string;
   paths: DataPaths;
   server: http.Server;
+  db: Db;
+  migration: MigrateResult;
+  vectorEnabled: boolean;
   close: () => Promise<void>;
 }
 
@@ -107,6 +112,18 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
   if (state.kind === 'live') throw new AlreadyRunningError(state.info);
   if (state.kind === 'stale') removeLock(lockFile);
 
+  // 第 4 步：打开 DB + PRAGMA + 迁移（详设 §3.4）
+  const opened = openDb({ file: paths.db });
+  const db = opened.db;
+  let migration: MigrateResult;
+  try {
+    migration = migrate(db, { backupsDir: paths.backups, vectorEnabled: opened.vectorEnabled });
+  } catch (err) {
+    closeDb(db);
+    removeLock(lockFile);
+    throw err;
+  }
+
   const token = randomBytes(24).toString('base64url');
   const pending: LockInfo = {
     pid: process.pid,
@@ -134,6 +151,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
     server = factory(port);
     await listen(server, cfg.server.host, port);
   } catch (err) {
+    closeDb(db);
     removeLock(lockFile);
     throw err instanceof MoshiError
       ? err
@@ -153,8 +171,18 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
       bound.close(() => resolve());
       bound.closeAllConnections?.();
     });
+    closeDb(db);
     removeLock(lockFile);
   };
 
-  return { port, token, paths, server: bound, close };
+  return {
+    port,
+    token,
+    paths,
+    server: bound,
+    db,
+    migration,
+    vectorEnabled: migration.vectorEnabled,
+    close,
+  };
 }

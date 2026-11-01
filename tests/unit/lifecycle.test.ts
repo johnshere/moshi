@@ -36,6 +36,18 @@ describe('数据目录（详设 §3.4 第 2 步）', () => {
   });
 });
 
+describe('启动即建库（详设 §3.4 第 4 步）', () => {
+  it('首次启动建库并迁移到 v1', async () => {
+    const { cfg } = makeCfg();
+    const inst = await boot(cfg);
+    opened.push(inst);
+    expect(existsSync(inst.paths.db)).toBe(true);
+    expect(inst.migration.applied).toEqual(['001_init.sql']);
+    expect(inst.db.pragma('user_version', { simple: true })).toBe(1);
+    expect(inst.vectorEnabled).toBe(false);
+  });
+});
+
 describe('端口探测（概设 §1.4）', () => {
   it('跳过被占用端口', async () => {
     const blocker = net.createServer();
