@@ -121,17 +121,18 @@ describe('memory_query', () => {
     const deps = makeDeps(db);
     const r = runMemoryQuery(deps, { ...baseQuery, query: 'node' });
     expect(r.evidence).toHaveLength(1);
-    expect(r.evidence[0].content).toContain('node');
+    expect(r.evidence[0]!.content).toContain('node');
   });
 
   it('m_id 从 1 连续，且写进 query_log', () => {
     const db = freshDb();
-    const f1 = insertFact(db, { content: 'aaa' });
-    const f2 = insertFact(db, { content: 'bbb' });
+    // 两条 content 都含确定子串 'alpha'，query 匹配不依赖 canonical_key 哈希里碰巧有哪个字母
+    const f1 = insertFact(db, { content: 'alpha one' });
+    const f2 = insertFact(db, { content: 'alpha two' });
     const deps = makeDeps(db);
-    const pack = runMemoryQuery(deps, { ...baseQuery, query: 'a' });
-    expect(pack.evidence[0].m_id).toBe(1);
-    expect(pack.evidence[1].m_id).toBe(2);
+    const pack = runMemoryQuery(deps, { ...baseQuery, query: 'alpha' });
+    expect(pack.evidence[0]!.m_id).toBe(1);
+    expect(pack.evidence[1]!.m_id).toBe(2);
     // query_log 与 evidence_log 已落盘
     expect(queryLogRepo.countQueryLogs(db)).toBe(1);
     const resolved = queryLogRepo.resolveMIds(db, pack.query_id, [1, 2]);
@@ -172,7 +173,7 @@ describe('memory_annotate', () => {
     const deps = makeDeps(db);
     const r = runMemoryAnnotate(deps, { facts: [baseFact] });
     expect(r.accepted).toHaveLength(1);
-    expect(r.accepted[0].startsWith('an_')).toBe(true);
+    expect(r.accepted[0]!.startsWith('an_')).toBe(true);
     expect(r.quarantined).toHaveLength(0);
     expect(annotationRepo.countPending(db)).toBe(1);
   });
@@ -227,9 +228,9 @@ describe('memory_feedback', () => {
       verdict: 'adopt',
     });
     expect(r.inserted).toBe(1);
-    const rows = feedbackRepo.listByFact(db, pack.evidence[0].fact_id);
+    const rows = feedbackRepo.listByFact(db, pack.evidence[0]!.fact_id);
     expect(rows).toHaveLength(1);
-    expect(rows[0].verdict).toBe('adopt');
+    expect(rows[0]!.verdict).toBe('adopt');
   });
 
   it('m_id 越界返回 unresolved_m_ids', () => {

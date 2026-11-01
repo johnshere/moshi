@@ -8,8 +8,9 @@
  * 陈旧锁判定：pid 不存在 **或** 端口连不上。两条都要，因为进程可能被强杀
  * （pid 复用）也可能卡死（进程在、端口没监听）。
  */
-import { closeSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import net from 'node:net';
+import { safeCreateExclusive, safeRemoveFile, safeWriteFile, type WriteRoots } from '../infra/fs/safeWrite.js';
 
 export interface LockInfo {
   pid: number;
@@ -73,43 +74,20 @@ export function readLock(file: string): LockInfo | null {
 }
 
 /** 原子写：先写 .tmp 再 rename，避免读到半个 JSON */
-export function writeLock(file: string, info: LockInfo): void {
-  const tmp = `${file}.tmp`;
-  const fd = openSync(tmp, 'w');
-  try {
-    writeSync(fd, `${JSON.stringify(info, null, 2)}\n`);
-  } finally {
-    closeSync(fd);
-  }
-  renameSync(tmp, file);
+export function writeLock(file: string, info: LockInfo, roots: WriteRoots): void {
+  safeWriteFile(file, `${JSON.stringify(info, null, 2)}\n`, roots);
 }
 
 /**
  * 独占创建锁文件。成功返回 true；已存在返回 false。
  * 用 `wx` 而不是「先检查再写」——后者在两个进程同时启动时会双双通过。
  */
-export function createLockExclusive(file: string, info: LockInfo): boolean {
-  let fd: number;
-  try {
-    fd = openSync(file, 'wx');
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'EEXIST') return false;
-    throw err;
-  }
-  try {
-    writeSync(fd, `${JSON.stringify(info, null, 2)}\n`);
-  } finally {
-    closeSync(fd);
-  }
-  return true;
+export function createLockExclusive(file: string, info: LockInfo, roots: WriteRoots): boolean {
+  return safeCreateExclusive(file, `${JSON.stringify(info, null, 2)}\n`, roots);
 }
 
-export function removeLock(file: string): void {
-  try {
-    unlinkSync(file);
-  } catch {
-    // 不存在即已达成目的
-  }
+export function removeLock(file: string, roots: WriteRoots): void {
+  safeRemoveFile(file, roots);
 }
 
 export async function inspectLock(file: string, host: string): Promise<LockState> {

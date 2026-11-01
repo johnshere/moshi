@@ -7,7 +7,7 @@ import { runCli } from './cli/index.js';
 import { loadConfig } from './config.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
-import { createMcpHttpHandler } from './mcp/server.js';
+import { buildHttpApp } from './http/server.js';
 import { VERSION } from './version.js';
 
 export { VERSION };
@@ -54,9 +54,9 @@ export async function main(argv: readonly string[]): Promise<number> {
   let instance;
   try {
     instance = await boot(cfg, {
-      // MCP 面挂在同一个端口上（详设 §4.1）：`/mcp` 之外一律 404，
-      // REST/UI 在 P0-18 接进来时再往这个 listener 里加路由。
-      handlerFactory: ({ db, cfg: booted }) => createMcpHttpHandler({ db, cfg: booted }),
+      // Fastify 接管全部 HTTP 面：/ui、/api/*、/mcp 挂在同一个端口。
+      handlerFactory: async ({ db, cfg: booted, token }) =>
+        (await buildHttpApp({ db, cfg: booted, token })).server,
     });
   } catch (err) {
     if (err instanceof AlreadyRunningError) {
@@ -87,9 +87,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   // Windows 上 SIGTERM 无法投递给其他进程（TerminateProcess 直接杀），
   // 所以正常退出路径再兜一次底；被强杀时靠锁的陈旧判定接管（见 lock.ts）。
   process.on('exit', () => {
-    removeLock(instance.paths.lock);
+    removeLock(instance.paths.lock, [instance.paths.root]);
   });
 
+  // daemon 模式必须挂着不退出——http.Server 在某些环境下（Windows 后台运行）
+  // 不会自动保持事件循环，需要显式保持。
+  setInterval(() => {}, 1 << 30);
   return 0;
 }
 

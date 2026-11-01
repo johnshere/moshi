@@ -26,6 +26,7 @@ describe('错误码映射（详设 §1.5）', () => {
     E_SCHEMA: [422, -32602, false],
     E_QUARANTINED: [202, null, false],
     E_CONFIG: [500, null, false],
+    E_ACCESS: [403, null, false],
   };
 
   it('错误码集合与详设表一致', () => {

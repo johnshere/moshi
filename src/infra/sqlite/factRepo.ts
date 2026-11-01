@@ -220,6 +220,17 @@ export interface SearchOptions {
   includeHistory?: boolean;
   from?: string;
   to?: string;
+  /**
+   * 游标分页（keyset）：只取"严格早于该游标"的行。
+   * 排序键必须与游标键一致——见 `sort` 的说明。若排序与游标不一致，翻页会错乱。
+   */
+  cursor?: { validAt: string; id: string };
+  /**
+   * 排序键。`strength`（默认）适合召回场景；`time` 用于游标分页——
+   * 游标是 `{valid_at, id}`，排序键必须与之一致，否则翻页会错乱
+   * （比如按 strength 排序但按时间过滤，会把上一页的行又捞回来）。
+   */
+  sort?: 'strength' | 'time';
   limit: number;
 }
 
@@ -259,6 +270,12 @@ function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: 
     where.push('valid_at <= ?');
     params.push(opts.to);
   }
+  // keyset 游标：严格早于游标（valid_at 相同则 id 更小），与 `sort: 'time'` 的排序一致。
+  // 必须下沉到 SQL——先 LIMIT 再内存过滤会把第二页的数据挡在查询结果之外。
+  if (opts.cursor !== undefined) {
+    where.push('(valid_at < ? OR (valid_at = ? AND id < ?))');
+    params.push(opts.cursor.validAt, opts.cursor.validAt, opts.cursor.id);
+  }
 
   return { sql: where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '', params };
 }
@@ -272,11 +289,12 @@ function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: 
  */
 export function searchFacts(db: Db, opts: SearchOptions): Fact[] {
   const { sql, params } = buildWhere(opts);
+  const orderBy =
+    opts.sort === 'time'
+      ? 'valid_at DESC, id DESC'
+      : 'strength DESC, confidence DESC, valid_at DESC';
   const rows = db
-    .prepare(
-      `SELECT * FROM fact${sql}` +
-        ' ORDER BY strength DESC, confidence DESC, valid_at DESC LIMIT ?',
-    )
+    .prepare(`SELECT * FROM fact${sql}` + ` ORDER BY ${orderBy} LIMIT ?`)
     .all(...params, opts.limit) as Record<string, unknown>[];
   return rows.map(rowToFact);
 }

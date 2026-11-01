@@ -18,6 +18,7 @@ export const ERROR_CODES = [
   'E_SCHEMA',
   'E_QUARANTINED',
   'E_CONFIG',
+  'E_ACCESS',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -66,6 +67,7 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   },
   E_QUARANTINED: { httpStatus: 202, mcpCode: null, retryable: false, hint: '已接收但未入图，在隔离区' },
   E_CONFIG: { httpStatus: 500, mcpCode: null, retryable: false, hint: '配置非法，进程不启动' },
+  E_ACCESS: { httpStatus: 403, mcpCode: null, retryable: false, hint: '写盘白名单外，拒绝写入' },
 };
 
 export class MoshiError extends Error {

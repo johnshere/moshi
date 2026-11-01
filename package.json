@@ -12,7 +12,7 @@
     "moshi": "./dist/app/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json && node tools/copy-assets.mjs",
     "dev": "tsx watch src/app/main.ts daemon",
     "start": "node dist/app/main.js daemon",
     "test": "vitest run",
@@ -21,8 +21,9 @@
     "lint": "eslint src tools tests --ext .ts",
     "lint:deps": "tsx tools/lint-deps.ts",
     "lint:desc": "tsx tools/lint-descriptions.ts",
-    "verify": "pnpm typecheck && pnpm lint:deps && pnpm lint:lifecycle && pnpm test",
-    "lint:lifecycle": "tsx tools/check-lifecycle.ts"
+    "verify": "pnpm typecheck && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm test",
+    "lint:lifecycle": "tsx tools/check-lifecycle.ts",
+    "lint:writes": "tsx tools/check-writes.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

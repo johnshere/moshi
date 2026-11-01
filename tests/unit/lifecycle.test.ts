@@ -106,7 +106,7 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
       token: 'stale',
       started_at: new Date().toISOString(),
       version: '0.1.0',
-    });
+    }, [paths.root]);
     expect((await inspectLock(paths.lock, '127.0.0.1')).kind).toBe('stale');
 
     const inst = await boot(cfg);
@@ -128,7 +128,7 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
       token: 'stale',
       started_at: new Date().toISOString(),
       version: '0.1.0',
-    });
+    }, [paths.root]);
     expect((await inspectLock(paths.lock, '127.0.0.1')).kind).toBe('stale');
 
     const inst = await boot(cfg);

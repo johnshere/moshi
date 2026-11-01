@@ -1,0 +1,84 @@
+/**
+ * Fastify REST 骨架（P0-18）。
+ *
+ * 两条硬性约束：
+ * 1. **所有 `/api/*` 都校验 `X-Moshi-Token`**——GET 也校验，否则任意网页能读全库。
+ * 2. **`/ui` 首屏下发 token**——一次性 base64url，写进内联 script，前端后续请求带在 header 里。
+ *
+ * `/mcp` 也挂在同一个 Fastify 实例上：用 `app.post('/mcp', ...)` 把原生 req/res
+ * 交给 `createMcpHttpHandler`——这样 REST 与 MCP 共享端口，boot() 只需要一个 server。
+ *
+ * 为什么返回 `http.createServer(app)` 而不是 `app.server`：
+ * Fastify 的 `app.server` 在 `app.ready()` 后虽然存在，但直接对它调用 `.listen()`
+ * 会绕过 Fastify 内部的请求泵（request pump），导致请求进来后没有任何路由匹配。
+ * 裸 `http.createServer(app)` 让 Node.js 标准事件循环驱动 Fastify，这是官方推荐做法。
+ */
+import http from 'node:http';
+import Fastify from 'fastify';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { Db } from '../../infra/sqlite/db.js';
+import type { Config } from '../config.js';
+import { createMcpHttpHandler } from '../mcp/server.js';
+import type { McpDeps } from '../mcp/deps.js';
+import { factRoutes } from './routes/facts.js';
+
+export interface HttpDeps {
+  db: Db;
+  cfg: Config;
+  token: string;
+}
+
+export async function buildHttpApp(deps: HttpDeps) {
+  const app = Fastify({ logger: false });
+
+  // ── 鉴权：/api/* 全部要 token ──
+  app.addHook('onRequest', async (req, reply) => {
+    if (!req.url.startsWith('/api/')) return;
+    const given = req.headers['x-moshi-token'];
+    if (given !== deps.token) {
+      return reply.code(401).send({ error: 'E_UNAUTHORIZED', message: 'Missing or invalid token' });
+    }
+  });
+
+  // ── /ui 首屏：下发 token，返回完整前端 ──
+  app.get('/ui', async (_req, reply) => {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const template = readFileSync(path.join(__dirname, 'ui.html'), 'utf8');
+    const html = template.replace('window.__MOSHI_TOKEN__ || \'\'', `'${deps.token}'`);
+    return reply.type('text/html; charset=utf-8').send(html);
+  });
+
+  // ── API 路由 ──
+  await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+
+  // ── MCP 路由：把原生 req/res 交给 MCP handler ──
+  const mcpDeps: McpDeps = { db: deps.db, cfg: deps.cfg };
+  const mcpHandler = createMcpHttpHandler(mcpDeps);
+  app.post('/mcp', async (req, reply) => {
+    await new Promise<void>((resolve) => {
+      mcpHandler(req.raw, reply.raw);
+      reply.raw.on('finish', resolve);
+      reply.raw.on('close', resolve);
+    });
+    return reply;
+  });
+  app.get('/mcp', async (_req, reply) => {
+    return reply.code(405).send({
+      jsonrpc: '2.0',
+      error: { code: -32000, message: 'method not allowed: stateless MCP accepts POST only' },
+      id: null,
+    });
+  });
+
+  await app.ready();
+  // Fastify 5 实例不能直接当 Node RequestListener 用：`http.createServer(app)` 会让请求
+  // 挂起不响应（实测 53000/53003 均如此）。必须显式转发到 `app.routing(req, res)`。
+  return {
+    app,
+    server: http.createServer((req, res) => {
+      void app.routing(req, res);
+    }),
+  };
+}

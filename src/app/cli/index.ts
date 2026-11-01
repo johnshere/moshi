@@ -4,12 +4,13 @@
 import os from 'node:os';
 import { loadConfig } from '../config.js';
 import { importCommand } from './commands/import.js';
+import { initCommand } from './commands/init.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
 
 /** 已注册命令（随 Phase 增加） */
-export const COMMANDS: readonly Command[] = [importCommand];
+export const COMMANDS: readonly Command[] = [importCommand, initCommand];
 
 export function usage(): string {
   const lines = [
@@ -29,6 +30,10 @@ export function usage(): string {
 export interface RunCliOptions {
   /** 覆盖家目录（测试用）；不传即 `os.homedir()`。配置与会话扫描共用这一个值 */
   home?: string;
+  /** 注入输出（测试用）；不传即 process.stdout */
+  stdout?: (s: string) => void;
+  /** 注入错误输出（测试用）；不传即 process.stderr */
+  stderr?: (s: string) => void;
 }
 
 export async function runCli(
@@ -49,11 +54,13 @@ export async function runCli(
 
   const home = options.home ?? os.homedir();
   const cfg = loadConfig({ home });
+  const stdout = options.stdout ?? ((s: string) => process.stdout.write(s));
+  const stderr = options.stderr ?? ((s: string) => process.stderr.write(s));
   return cmd.run({
     cfg,
     home,
     args: argv.slice(1),
-    stdout: (s) => process.stdout.write(s),
-    stderr: (s) => process.stderr.write(s),
+    stdout,
+    stderr,
   });
 }

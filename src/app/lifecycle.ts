@@ -7,9 +7,9 @@
  * 只靠端口无法互斥。
  */
 import { randomBytes } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
 import http from 'node:http';
 import { MoshiError } from '../domain/errors.js';
+import { safeEnsureDir } from '../infra/fs/safeWrite.js';
 import { closeDb, openDb, type Db } from '../infra/sqlite/db.js';
 import { migrate, type MigrateResult } from '../infra/sqlite/migrate.js';
 import { dataPaths, type Config } from './config.js';
@@ -40,7 +40,7 @@ export interface DataPaths {
 export function ensureDataDirs(cfg: Config): DataPaths {
   const paths = dataPaths(cfg);
   for (const dir of [paths.root, paths.logs, paths.tmp, paths.backups]) {
-    mkdirSync(dir, { recursive: true });
+    safeEnsureDir(dir, [paths.root]);
   }
   return paths;
 }
@@ -67,11 +67,17 @@ export interface BootOptions {
   /** 绑定端口的服务；测试用。默认见 `defaultServerFactory` / `handlerFactory` */
   serverFactory?: (port: number) => http.Server;
   /**
-   * 路由处理器工厂：拿到已经打开的 db 与 token 后返回一个 listener。
+   * 路由处理器工厂：拿到已经打开的 db 与 token 后返回一个 listener 或已创建的 server。
    * `boot` 内部才知道端口与 db，所以 MCP/REST 的接线只能从这里进去——
    * 否则 `main.ts` 要自己再开一次库。
+   * 返回 `http.Server` 时（如 Fastify），boot 会直接用它 listen；
+   * 返回 `RequestListener` 时，boot 会包成 `http.createServer(listener)`。
+   * 支持 async：Fastify 需要 `await app.ready()` 后才能交出 server。
    */
-  handlerFactory?: (deps: { db: Db; cfg: Config; token: string }) => http.RequestListener;
+  handlerFactory?: (deps: { db: Db; cfg: Config; token: string }) =>
+    | Promise<http.RequestListener | http.Server>
+    | http.RequestListener
+    | http.Server;
   /** 注入锁文件路径（测试用） */
   lockFile?: string;
   version?: string;
@@ -96,13 +102,16 @@ const defaultServerFactory = (_port: number): http.Server =>
   });
 
 /** 有 `handlerFactory` 就用它，否则退回"只回 404"的裸 server（P0-04 的默认行为） */
-function makeFactory(
+async function makeFactory(
   handlerFactory: BootOptions['handlerFactory'],
   deps: { db: Db; cfg: Config; token: string },
-): (port: number) => http.Server {
+): Promise<(port: number) => http.Server> {
   if (handlerFactory === undefined) return defaultServerFactory;
-  const listener = handlerFactory(deps);
-  return (_port: number) => http.createServer(listener);
+  const result = await handlerFactory(deps);
+  if (result instanceof http.Server) {
+    return (_port: number) => result;
+  }
+  return (_port: number) => http.createServer(result);
 }
 
 function listen(server: http.Server, host: string, port: number): Promise<void> {
@@ -128,7 +137,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
 
   const state = await inspectLock(lockFile, cfg.server.host);
   if (state.kind === 'live') throw new AlreadyRunningError(state.info);
-  if (state.kind === 'stale') removeLock(lockFile);
+  if (state.kind === 'stale') removeLock(lockFile, [paths.root]);
 
   // 第 4 步：打开 DB + PRAGMA + 迁移（详设 §3.4）
   const opened = openDb({ file: paths.db });
@@ -138,7 +147,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
     migration = migrate(db, { backupsDir: paths.backups, vectorEnabled: opened.vectorEnabled });
   } catch (err) {
     closeDb(db);
-    removeLock(lockFile);
+    removeLock(lockFile, [paths.root]);
     throw err;
   }
 
@@ -151,17 +160,17 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
     version,
   };
 
-  if (!createLockExclusive(lockFile, pending)) {
+  if (!createLockExclusive(lockFile, pending, [paths.root])) {
     // 抢锁失败：要么别人刚起来（活），要么刚退出留下坏锁（死）
     const again = await inspectLock(lockFile, cfg.server.host);
     if (again.kind === 'live') throw new AlreadyRunningError(again.info);
-    removeLock(lockFile);
-    if (!createLockExclusive(lockFile, pending)) {
+    removeLock(lockFile, [paths.root]);
+    if (!createLockExclusive(lockFile, pending, [paths.root])) {
       throw new MoshiError('E_BUSY', `抢不到实例锁：${lockFile}`, { lockFile });
     }
   }
 
-  const factory = opts.serverFactory ?? makeFactory(opts.handlerFactory, { db, cfg, token });
+  const factory = opts.serverFactory ?? (await makeFactory(opts.handlerFactory, { db, cfg, token }));
   let port = 0;
   let server: http.Server | null = null;
   try {
@@ -170,7 +179,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
     await listen(server, cfg.server.host, port);
   } catch (err) {
     closeDb(db);
-    removeLock(lockFile);
+    removeLock(lockFile, [paths.root]);
     throw err instanceof MoshiError
       ? err
       : new MoshiError('E_CONFIG', `启动失败：${(err as Error).message}`, {
@@ -178,7 +187,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
         });
   }
 
-  writeLock(lockFile, { ...pending, port });
+  writeLock(lockFile, { ...pending, port }, [paths.root]);
 
   const bound = server;
   let closed = false;
@@ -190,7 +199,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
       bound.closeAllConnections?.();
     });
     closeDb(db);
-    removeLock(lockFile);
+    removeLock(lockFile, [paths.root]);
   };
 
   return {

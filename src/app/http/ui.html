@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>默识 · 记忆库</title>
+<style>
+:root{--bg:#f7f7f8;--card:#fff;--border:#e5e5e5;--text:#1a1a1a;--muted:#666;--accent:#2563eb;--accent2:#16a34a;--danger:#dc2626;--radius:8px}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:var(--bg);color:var(--text);line-height:1.5}
+header{background:var(--card);border-bottom:1px solid var(--border);padding:1rem 2rem;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+header h1{font-size:1.25rem;margin:0}
+.search{display:flex;gap:.5rem;align-items:center}
+.search input{padding:.5rem .75rem;border:1px solid var(--border);border-radius:var(--radius);font-size:.9rem;min-width:240px}
+.search button{padding:.5rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-size:.9rem}
+.search button:hover{opacity:.9}
+main{max-width:1200px;margin:1.5rem auto;padding:0 1rem}
+.stats{display:flex;gap:1.5rem;margin-bottom:1rem;font-size:.85rem;color:var(--muted)}
+table{width:100%;background:var(--card);border-radius:var(--radius);border:1px solid var(--border);border-collapse:collapse;overflow:hidden;font-size:.9rem}
+th,td{padding:.6rem .75rem;text-align:left;border-bottom:1px solid var(--border)}
+th{background:#fafafa;font-weight:600;color:var(--muted);font-size:.8rem;text-transform:uppercase;letter-spacing:.02em}
+tr:hover{background:#f5f5f5;cursor:pointer}
+tr.active{background:#e8f0fe}
+.status-badge{display:inline-block;padding:.15rem .5rem;border-radius:999px;font-size:.75rem;font-weight:600}
+.status-active{background:#dcfce7;color:#166534}
+.status-invalidated{background:#fee2e2;color:#991b1b}
+.status-archived{background:#f3f4f6;color:#4b5563}
+.confidence{color:var(--accent);font-weight:600}
+.pagination{display:flex;justify-content:center;gap:.5rem;margin:1.5rem 0}
+.pagination button{padding:.5rem 1rem;border:1px solid var(--border);background:var(--card);border-radius:var(--radius);cursor:pointer;font-size:.85rem}
+.pagination button:disabled{opacity:.5;cursor:not-allowed}
+.pagination button:not(:disabled):hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.empty{text-align:center;padding:4rem;color:var(--muted)}
+.empty h2{font-size:1.1rem;margin-bottom:.5rem;color:var(--text)}
+/* 首次引导 */
+.guide{max-width:720px;margin:2rem auto;display:grid;gap:1rem}
+.guide-step{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:1.25rem 1.5rem;display:flex;gap:1rem}
+.guide-num{flex:0 0 2rem;height:2rem;border-radius:999px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700}
+.guide-step h3{margin:0 0 .35rem;font-size:1rem}
+.guide-step p{margin:.25rem 0;color:var(--muted);font-size:.9rem}
+.guide code{display:block;background:#f5f5f5;border:1px solid var(--border);border-radius:6px;padding:.75rem;font-size:.8rem;white-space:pre-wrap;word-break:break-all;margin:.5rem 0}
+.guide .copy{padding:.35rem .75rem;border:1px solid var(--border);background:#fff;border-radius:6px;cursor:pointer;font-size:.8rem}
+.guide .copy:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* 弹窗 */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:20}
+.overlay.show{display:flex}
+.modal{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);width:90%;max-width:600px;max-height:85vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.modal-header{padding:1rem 1.25rem;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.modal-header h2{margin:0;font-size:1.1rem}
+.modal-body{padding:1.25rem}
+.modal-footer{padding:1rem 1.25rem;border-top:1px solid var(--border);display:flex;gap:.5rem;justify-content:flex-end}
+.close-btn{background:none;border:none;font-size:1.25rem;cursor:pointer;color:var(--muted)}
+.field{margin-bottom:.75rem}
+.field label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.2rem}
+.field .value{font-family:monospace;background:#f5f5f5;padding:.4rem .6rem;border-radius:4px;font-size:.85rem;word-break:break-all}
+.field input[type="number"]{width:100px;padding:.4rem .6rem;border:1px solid var(--border);border-radius:4px}
+.audit-list{max-height:200px;overflow:auto;border:1px solid var(--border);border-radius:var(--radius);padding:.5rem;font-size:.8rem}
+.audit-item{padding:.4rem 0;border-bottom:1px solid #f0f0f0}
+.audit-item:last-child{border-bottom:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>默识 · 记忆库</h1>
+  <div class="search">
+    <input id="q" type="text" placeholder="搜索关键词…" value="">
+    <button onclick="loadFacts()">搜索</button>
+    <button onclick="clearSearch()">重置</button>
+  </div>
+</header>
+<main>
+  <div class="stats" id="stats">加载中…</div>
+  <div id="tableWrap"></div>
+  <div class="pagination" id="pagination"></div>
+</main>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>事实详情</h2>
+      <button class="close-btn" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+    <div class="modal-footer">
+      <button onclick="saveConfidence()">保存置信度</button>
+      <button onclick="closeModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOKEN = window.__MOSHI_TOKEN__ || '';
+// 显示数值：保留 2 位小数并去掉浮点尾巴（0.7000000000000001 -> 0.7）
+const fmt = (x) => Number(Number(x).toFixed(2));
+let currentCursor = null;
+let nextCursor = null;
+let currentFact = null;
+
+async function api(path, opts={}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { 'X-Moshi-Token': TOKEN, ...(opts.headers||{}) }
+  });
+  if (res.status === 401) {
+    alert('Token 已过期，请刷新页面');
+    throw new Error('401');
+  }
+  return res;
+}
+
+async function loadFacts(cursor=null) {
+  const q = document.getElementById('q').value.trim();
+  let url = '/api/facts?limit=50';
+  if (q) url += '&q=' + encodeURIComponent(q);
+  if (cursor) url += '&cursor=' + encodeURIComponent(cursor);
+
+  const res = await api(url);
+  const data = await res.json();
+  renderTable(data);
+  currentCursor = cursor;
+  nextCursor = data.next_cursor;
+  renderPagination(data);
+}
+
+function clearSearch() {
+  document.getElementById('q').value = '';
+  loadFacts();
+}
+
+function renderTable(data) {
+  const items = data.items || [];
+  document.getElementById('stats').textContent =
+    `共 ${data.total ?? 0} 条 · 当前 ${items.length} 条`;
+
+  if (items.length === 0) {
+    const q = document.getElementById('q').value.trim();
+    if (!q && (data.total ?? 0) === 0) {
+      // 首次打开（0 事实）：三步引导（概设 §8.4）
+      document.getElementById('tableWrap').innerHTML = firstRunGuide();
+    } else {
+      document.getElementById('tableWrap').innerHTML =
+        '<div class="empty"><h2>该实体尚未观测到</h2><p>可尝试换用更具体的关键词，或等待下一次会话扫描后重试。</p></div>';
+    }
+    return;
+  }
+
+  const rows = items.map(f => {
+    const statusClass = 'status-' + (f.epistemic_status || 'active');
+    return `<tr onclick="openDetail('${f.id}')">
+      <td style="font-family:monospace;font-size:.8rem">${f.id.slice(0,12)}…</td>
+      <td>${escapeHtml(f.content)}</td>
+      <td><span class="status-badge ${statusClass}">${f.epistemic_status}</span></td>
+      <td class="confidence">${fmt(f.confidence)}</td>
+      <td>${fmt(f.strength)}</td>
+      <td style="font-size:.8rem;color:var(--muted)">${f.valid_at?.slice(0,10) || '-'}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tableWrap').innerHTML = `
+    <table>
+      <thead><tr>
+        <th>ID</th><th>内容</th><th>状态</th><th>置信度</th><th>强度</th><th>时间</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+function renderPagination(data) {
+  const hasPrev = currentCursor !== null;
+  const hasNext = nextCursor !== null;
+  document.getElementById('pagination').innerHTML = `
+    <button ${!hasPrev ? 'disabled' : ''} onclick="loadFacts()">首页</button>
+    <button ${!hasNext ? 'disabled' : ''} onclick="loadFacts('${nextCursor || ''}')">下一页</button>
+  `;
+}
+
+async function openDetail(id) {
+  const res = await api('/api/facts/' + id);
+  const f = await res.json();
+  currentFact = f;
+
+  const auditHtml = (f.audits || []).map(a =>
+    `<div class="audit-item"><strong>${a.field}</strong> ${a.ts?.slice(0,19) || ''}<br>
+    before: ${JSON.stringify(a.before).slice(0,80)}<br>
+    after: ${JSON.stringify(a.after).slice(0,80)}</div>`
+  ).join('') || '<div style="color:var(--muted)">无审计记录</div>';
+
+  document.getElementById('modalBody').innerHTML = `
+    <div class="field"><label>ID</label><div class="value">${f.id}</div></div>
+    <div class="field"><label>内容</label><div class="value">${escapeHtml(f.content)}</div></div>
+    <div class="field"><label>类型</label><div class="value">${f.ftype}</div></div>
+    <div class="field"><label>置信度</label><input type="number" id="editConfidence" min="0" max="1" step="0.01" value="${fmt(f.confidence)}"></div>
+    <div class="field"><label>强度</label><div class="value">${fmt(f.strength)}</div></div>
+    <div class="field"><label>状态</label><div class="value">${f.epistemic_status}</div></div>
+    <div class="field"><label>有效时间</label><div class="value">${f.valid_at || '-'} → ${f.valid_to || '至今'}</div></div>
+    <div class="field"><label>审计历史</label><div class="audit-list">${auditHtml}</div></div>
+  `;
+  document.getElementById('overlay').classList.add('show');
+}
+
+function closeModal() {
+  document.getElementById('overlay').classList.remove('show');
+  currentFact = null;
+}
+
+async function saveConfidence() {
+  if (!currentFact) return;
+  const val = parseFloat(document.getElementById('editConfidence').value);
+  if (isNaN(val) || val < 0 || val > 1) { alert('置信度须为 0–1 之间'); return; }
+  const res = await api('/api/facts/' + currentFact.id, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ confidence: val })
+  });
+  if (res.ok) {
+    closeModal();
+    loadFacts(currentCursor);
+  } else {
+    const err = await res.json().catch(() => ({}));
+    alert('保存失败：' + (err.message || res.status));
+  }
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+// 首次运行三步引导（概设 §8.4）。文案纪律：只说「尚未观测到」，不说「没有」。
+function firstRunGuide() {
+  const port = window.location.port;
+  const mcpUrl = `http://127.0.0.1:${port || 53000}/mcp`;
+  const snippet = JSON.stringify({ mcpServers: { moshi: { type: 'http', url: mcpUrl } } }, null, 2);
+  return `
+  <div class="guide">
+    <div class="guide-step">
+      <div class="guide-num">1</div>
+      <div>
+        <h3>接入你的 Agent</h3>
+        <p>把下面的 MCP 配置复制进宿主（如 <code style="display:inline">~/.claude.json</code> 的 <code style="display:inline">mcpServers</code>，或项目里的 <code style="display:inline">.mcp.json</code>）。</p>
+        <code id="mcpSnippet">${escapeHtml(snippet)}</code>
+        <button class="copy" onclick="copySnippet()">复制配置</button>
+      </div>
+    </div>
+    <div class="guide-step">
+      <div class="guide-num">2</div>
+      <div>
+        <h3>等第一批事实进入</h3>
+        <p>每日 <strong>03:00</strong> 会自动扫描会话记录；想立即看到效果，可在终端运行 <code style="display:inline">moshi import</code> 回填历史会话。</p>
+      </div>
+    </div>
+    <div class="guide-step">
+      <div class="guide-num">3</div>
+      <div>
+        <h3>观察记忆成形</h3>
+        <p>事实列表、关系图谱与强度会随观测逐步成形。查了但未记录的实体，这里会显示「尚未观测到」——它只是记录边界，不是断言。</p>
+      </div>
+    </div>
+  </div>`;
+}
+
+function copySnippet() {
+  const el = document.getElementById('mcpSnippet');
+  const text = el.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = el.nextElementSibling;
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => (btn.textContent = old), 1500);
+  });
+}
+
+// 初始化
+loadFacts();
+</script>
+</body>
+</html>
