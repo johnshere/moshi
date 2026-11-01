@@ -11,6 +11,8 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
+import { EMBED_DIM, EMBED_MODEL } from '../domain/embedding.js';
+import { SIDECAR_PIPE_NAME } from '../infra/sidecar/spawn.js';
 import path from 'node:path';
 import TOML from '@iarna/toml';
 import { z } from 'zod';
@@ -99,6 +101,9 @@ const LifecycleSchema = z
 const RetrievalSchema = z
   .object({
     vector_topk: positiveInt.default(20),
+    // 向量召回地板：低于该 cos 的邻居不进候选（P1-29；实测拒答句对库内事实最高 0.445，
+    // 相关问句 0.73~0.89，0.5 是两者之间的自然分界）
+    vector_min_sim: prob.default(0.5),
     bm25_topk: positiveInt.default(20),
     ppr_topk: positiveInt.default(20),
     ppr_damping: prob.default(0.85),
@@ -139,6 +144,9 @@ const ReadSchema = z
 const SidecarSchema = z
   .object({
     python_path: z.string().default('~/.moshi/python/bin/python'),
+    // 命名管道名。同一台机跑多个实例（daemon + 测试 / 双仓库）时各用各的，
+    // 否则会连到别人的 sidecar 上（P1-28 期间实测到）。
+    pipe_name: z.string().default(SIDECAR_PIPE_NAME),
     socket_path: z.string().default('~/.moshi/sidecar.sock'),
     idle_unload_min: z.number().min(0).default(5),
     idle_exit_min: z.number().min(0).default(30),
@@ -151,8 +159,8 @@ const SidecarSchema = z
 
 const ModelSchema = z
   .object({
-    embed_model: z.string().default('bge-small-zh-v1.5'),
-    embed_dim: positiveInt.default(384),
+    embed_model: z.string().default(EMBED_MODEL),
+    embed_dim: positiveInt.default(EMBED_DIM),
     gat_mode: z.enum(['off', 'shadow', 'on']).default('off'),
     gat_weights: z.string().default('~/.moshi/models/gat-v1.pt'),
     delta_cap: prob.default(0.15),

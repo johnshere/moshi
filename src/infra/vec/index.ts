@@ -19,8 +19,9 @@
  * I9（fact_vec 行数 == fact 行数）校验收敛。
  */
 import type { Db } from '../sqlite/db.js';
+import { EMBED_DIM } from '../../domain/embedding.js';
 
-export const VEC_DIM = 384;
+export const VEC_DIM = EMBED_DIM;
 
 export interface KnnHit {
   fact_id: string;

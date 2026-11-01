@@ -7,10 +7,10 @@
  * C. 降级：meta.vector_disabled → knn 返回空、sync 跳过（doctor I9 口径）
  */
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/app/config.js';
 import { closeDb, openDb } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
@@ -26,18 +26,18 @@ import {
   VEC_DIM,
 } from '../../src/infra/vec/index.js';
 
+// P1-28 起编码走真 ONNX 模型：优先工程内 venv；缺栈/缺权重则跳过真进程用例。
+const REPO_ROOT = path.resolve(import.meta.dirname ?? process.cwd(), '../..');
+const VENV_PYTHON = path.join(REPO_ROOT, 'sidecar', '.venv', 'Scripts', 'python.exe');
+const MODEL_DIR = path.join(REPO_ROOT, 'sidecar', 'models', 'bge-small-zh-v1.5');
 const USER_PYTHON = 'C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
-const CANDIDATES = [
-  USER_PYTHON,
-  process.env.PYTHON ?? '',
-  'python',
-].filter((s) => s !== '');
+const CANDIDATES = [VENV_PYTHON, process.env.PYTHON ?? '', USER_PYTHON, 'python'].filter((s) => s !== '');
 
 let pythonOk = false;
-let pythonPath: string = USER_PYTHON;
+let pythonPath: string = VENV_PYTHON;
 for (const cand of CANDIDATES) {
   try {
-    execSync(`"${cand}" -c "import win32pipe, win32file"`, { stdio: 'ignore' });
+    execSync(`"${cand}" -c "import win32pipe, win32file, onnxruntime, tokenizers"`, { stdio: 'ignore' });
     pythonPath = cand;
     pythonOk = true;
     break;
@@ -45,6 +45,7 @@ for (const cand of CANDIDATES) {
     // 下一个候选
   }
 }
+const modelOk = existsSync(path.join(MODEL_DIR, 'onnx', 'model.onnx'));
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -81,28 +82,6 @@ function insertFact(db: ReturnType<typeof openDb>['db'], id: string, content: st
 }
 
 describe('向量索引集成（P1-02）', () => {
-  beforeAll(() => {
-    // 清孤儿 sidecar（管道名固定，避免旧进程抢先 Accept）
-    try {
-      const lines = execSync('tasklist /V /FO CSV /FI "IMAGENAME eq python.exe"', {
-        encoding: 'utf8',
-      }).split(/\r?\n/);
-      for (const line of lines) {
-        if (!line.includes('moshi_sidecar')) continue;
-        const pid = line.match(/"(\d+)"\s*$/)?.[1];
-        if (pid) {
-          try {
-            execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-          } catch {
-            // 已退出
-          }
-        }
-      }
-    } catch {
-      // 干净环境无需清理
-    }
-  });
-
   it('1000 条向量 → KNN 返回 top-20 且顺序合理', () => {
     const dir = tempDir();
     const { db, vectorEnabled } = openDb({ file: path.join(dir, 'moshi.db') });
@@ -134,11 +113,13 @@ describe('向量索引集成（P1-02）', () => {
     }
   });
 
-  it.skipIf(!pythonOk)('sidecar encode 全链路：30 条事实 → 同步 → fact_vec == fact → KNN 命中', async () => {
+  it.skipIf(!pythonOk || !modelOk)('sidecar encode 全链路：30 条事实 → 同步 → fact_vec == fact → KNN 命中', async () => {
     const dir = tempDir();
     const { db, vectorEnabled } = openDb({ file: path.join(dir, 'moshi.db') });
     const cfg = loadConfig({ home: dir });
     cfg.sidecar.python_path = pythonPath;
+    // 独占管道名：否则会连上用户 daemon 已在跑的 sidecar（同机多实例）
+    cfg.sidecar.pipe_name = `\\\\.\\pipe\\moshi-vec-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
     const sidecar = new SidecarClient({ cfg, logger: { info: () => {}, warn: () => {}, error: () => {} } });
     try {
       migrate(db, { backupsDir: path.join(dir, 'backups'), vectorEnabled });

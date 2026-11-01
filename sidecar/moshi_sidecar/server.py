@@ -58,14 +58,25 @@ class State:
         self.started_at = now_iso()
         self.encoder = Encoder(embed_model, embed_dim)
         self.unloaded = False
+        self.model_error: str | None = None
         self.lock = threading.Lock()
 
+    def warmup(self) -> None:
+        """启动时把权重读进来：就绪文件写出去之后，第一个查询不该还在付冷启。
+
+        模型缺失不是致命错——记进 model_error，/encode 会返回 E_MODEL_NOT_LOADED，
+        Node 侧按 no_sidecar/no_model 降级（详设 §6.13：查失败绝不报 ok+空）。
+        """
+        try:
+            self.encoder.load()
+        except Exception as e:  # noqa: BLE001
+            self.model_error = str(e)
+
     def health(self) -> dict:
-        # loaded = 未处于卸载态（伪向量模式无真模型，进程 ready 即可服务；
-        # P1-02 起 Encoder.loaded() 才有意义）
+        # loaded = 权重真的在内存里（P1-28 起以 Encoder 为准，不再是"进程活着就算就绪"）
         return {
             "status": "ready",
-            "loaded": not self.unloaded,
+            "loaded": (not self.unloaded) and self.encoder.loaded(),
             "embed_model": self.embed_model,
             "model_version": self.embed_model,
             "rss_mb": rss_mb(),
@@ -110,14 +121,19 @@ def dispatch(state: State, path: str, body: dict) -> dict:
     raise ValueError(f"未知端点: {path}")
 
 
-def write_ready(ready_path: str, pipe_name: str) -> None:
+def write_ready(ready_path: str, pipe_name: str, embed_model: str = "-", token: str | None = None) -> None:
     payload = {
         "pid": os.getpid(),
         "socket": pipe_name,
-        "embed_model": "-",
-        "model_version": "-",
+        "embed_model": embed_model,
+        "model_version": embed_model,
         "started_at": now_iso(),
     }
+    if token:
+        # Node 侧用随机令牌认领「这次拉起」，不依赖 pid（venv 启动器会换 pid）
+        payload["token"] = token
+    parent = os.path.dirname(os.path.abspath(ready_path))
+    os.makedirs(parent, exist_ok=True)
     tmp = ready_path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f)
@@ -197,6 +213,8 @@ def _handle_connection(state: State, pipe) -> None:
 
 def _error_code(e: Exception) -> str:
     name = type(e).__name__
+    if name == "ModelUnavailable":
+        return "E_MODEL_NOT_LOADED"
     if name == "ValueError":
         return "E_INPUT_SHAPE"
     return "E_INTERNAL"
@@ -241,11 +259,14 @@ def main() -> int:
     ap.add_argument("--socket", help="unix 域套接字路径（非 Windows）")
     ap.add_argument("--ready", required=True, help="就绪文件路径")
     ap.add_argument("--model", default="bge-small-zh-v1.5", help="embedding 模型名")
-    ap.add_argument("--dim", type=int, default=384)
+    ap.add_argument("--dim", type=int, default=512)
+    ap.add_argument("--token", default=None, help="启动令牌（写进就绪文件，供 Node 认领）")
     args = ap.parse_args()
 
     state = State(args.model, args.dim)
-    write_ready(args.ready, args.pipe)
+    # 先把权重读进来再宣布就绪：否则首个查询要付 1~2s 冷启，P95 直接失控
+    state.warmup()
+    write_ready(args.ready, args.pipe, args.model, args.token)
 
     if win32pipe is not None and sys.platform == "win32":
         serve_pipe(state, args.pipe)

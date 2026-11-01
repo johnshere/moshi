@@ -8,27 +8,29 @@
  * loaded=false → shutdown → 崩溃重启（kill 后 client 计数并重拉）。
  */
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/app/config.js';
+import { EMBED_DIM } from '../../src/domain/embedding.js';
 import { SidecarClient } from '../../src/infra/sidecar/client.js';
 
-// 用用户真实解释器（Node 可见）：沙箱 shim（Get-Command python 的 Source）对
-// Node spawn 不可见（ENOENT），必须落到真实 python.exe。
+// P1-28 起 sidecar 要真跑 ONNX（onnxruntime + tokenizers + 模型权重），
+// 优先用工程内 venv（sidecar/.venv，见 sidecar/requirements.txt）；缺栈/缺权重整组跳过。
+// 注意：沙箱 shim（Get-Command python 的 Source）对 Node spawn 不可见（ENOENT），
+// 候选必须是真实 python.exe。
+const REPO_ROOT = path.resolve(import.meta.dirname ?? process.cwd(), '../..');
+const VENV_PYTHON = path.join(REPO_ROOT, 'sidecar', '.venv', 'Scripts', 'python.exe');
+const MODEL_DIR = path.join(REPO_ROOT, 'sidecar', 'models', 'bge-small-zh-v1.5');
 const USER_PYTHON = 'C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
-const CANDIDATES = [
-  USER_PYTHON,
-  process.env.PYTHON ?? '',
-  'python',
-].filter((s) => s !== '');
+const CANDIDATES = [VENV_PYTHON, process.env.PYTHON ?? '', USER_PYTHON, 'python'].filter((s) => s !== '');
 
 let pythonOk = false;
-let pythonPath: string = USER_PYTHON;
+let pythonPath: string = VENV_PYTHON;
 for (const cand of CANDIDATES) {
   try {
-    execSync(`"${cand}" -c "import win32pipe, win32file"`, { stdio: 'ignore' });
+    execSync(`"${cand}" -c "import win32pipe, win32file, onnxruntime, tokenizers"`, { stdio: 'ignore' });
     pythonPath = cand;
     pythonOk = true;
     break;
@@ -36,6 +38,7 @@ for (const cand of CANDIDATES) {
     // 下一个候选
   }
 }
+const modelOk = existsSync(path.join(MODEL_DIR, 'onnx', 'model.onnx'));
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -51,27 +54,26 @@ function tempHome(): string {
 function makeClient(home: string): SidecarClient {
   const cfg = loadConfig({ home });
   cfg.sidecar.python_path = pythonPath;
+  // 每个用例独占管道名：否则会连上用户 daemon 已在跑的 sidecar（同机多实例）
+  cfg.sidecar.pipe_name = `\\\\.\\pipe\\moshi-sci-${process.pid}-${pipeSeq++}`;
   return new SidecarClient({
     cfg,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
   });
 }
+let pipeSeq = 0;
 
-describe.skipIf(!pythonOk)('sidecar 集成（真进程 + 命名管道）', () => {
+describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管道）', () => {
   beforeAll(() => {
-    // 管道名固定 `\\.\pipe\moshi-infer`：清掉上次失败残留的孤儿 sidecar 进程，
-    // 避免旧进程抢先 Accept 导致连错进程（只杀 moshi_sidecar 的，不动 daemon）。
-    // 注意：tasklist /V 的列是窗口标题、不含命令行，匹配不到 python -m moshi_sidecar；
-    // 必须用 Get-CimInstance 按 CommandLine 过滤。
+    // 只清本测试前缀的孤儿进程（moshi-sci-*）；**不要**按 'moshi_sidecar' 全局清，
+    // 那会连带杀掉用户 daemon 的 sidecar。
     try {
-      const lines = execSync(
-        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'moshi_sidecar' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }"`,
+      execSync(
+        `powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'moshi-sci-' } | ForEach-Object { taskkill /PID $_.ProcessId /T /F }"`,
         { stdio: 'pipe', encoding: 'utf8' },
       );
-      // 幂等：没孤儿时 powershell 无输出，有则逐条输出 taskkill 结果
-      void lines;
     } catch {
-      // 清理失败不致命——干净环境不需要清
+      // 干净环境无孤儿 → powershell 非零退出，忽略
     }
   });
 
@@ -91,7 +93,7 @@ describe.skipIf(!pythonOk)('sidecar 集成（真进程 + 命名管道）', () =>
       expect(vecs).not.toBeNull();
       expect(vecs).toHaveLength(2);
       for (const v of vecs!) {
-        expect(v).toHaveLength(384);
+        expect(v).toHaveLength(EMBED_DIM);
         const norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
         expect(norm).toBeCloseTo(1.0, 5); // §7.2：L2 归一必须在 Python 侧重做
       }

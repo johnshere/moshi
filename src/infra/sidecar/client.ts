@@ -21,7 +21,6 @@ import {
 } from './transport.js';
 import {
   defaultSidecarModuleDir,
-  SIDECAR_PIPE_NAME,
   spawnSidecar,
   type ReadyInfo,
   type SpawnedSidecar,
@@ -124,8 +123,8 @@ export class SidecarClient {
       const ready = await s.waitReady();
       this.ready = ready;
       this.transport = await this.createTransport({
-        pipeName: process.platform === 'win32' ? SIDECAR_PIPE_NAME : null,
-        socketPath: process.platform === 'win32' ? null : SIDECAR_PIPE_NAME,
+        pipeName: process.platform === 'win32' ? this.deps.cfg.sidecar.pipe_name : null,
+        socketPath: process.platform === 'win32' ? null : this.deps.cfg.sidecar.pipe_name,
       });
       this.state = 'ready';
       this.deps.logger.info(
@@ -231,7 +230,7 @@ export class SidecarClient {
       pythonPath: this.deps.cfg.sidecar.python_path,
       moduleDir: defaultSidecarModuleDir(),
       readyPath: path.join(this.deps.cfg.storage.data_dir, 'sidecar.ready'),
-      pipeName: SIDECAR_PIPE_NAME,
+      pipeName: this.deps.cfg.sidecar.pipe_name,
       model: this.deps.cfg.model.embed_model,
       dim: this.deps.cfg.model.embed_dim,
       logFile: path.join(this.deps.cfg.storage.data_dir, 'logs', 'sidecar.log'),

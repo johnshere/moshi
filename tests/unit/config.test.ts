@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { dataPaths, expandHome, loadConfig } from '../../src/app/config.js';
+import { EMBED_DIM, EMBED_MODEL } from '../../src/domain/embedding.js';
 import { isMoshiError } from '../../src/domain/errors.js';
 
 const HOME = path.join(tmpdir(), 'moshi-home-test');
@@ -59,7 +60,8 @@ describe('配置加载（详设 §3.6）', () => {
     const file = withToml('[storage]\ndata_dir = "~/data-moshi"\n');
     const cfg = loadConfig({ file, home: HOME });
     expect(cfg.storage.data_dir).toBe(path.resolve(HOME, 'data-moshi'));
-    expect(cfg.model.embed_model).toBe('bge-small-zh-v1.5');
+    expect(cfg.model.embed_model).toBe(EMBED_MODEL);
+    expect(cfg.model.embed_dim).toBe(EMBED_DIM);
   });
 
   it('expandHome 处理裸 ~ 与绝对路径', () => {

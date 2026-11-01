@@ -10,6 +10,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { MoshiError } from '../../domain/errors.js';
+import { EMBED_DIM } from '../../domain/embedding.js';
 import type { Db } from './db.js';
 
 const FILE_RE = /^(\d{3})_.*\.sql$/;
@@ -84,18 +85,38 @@ function hasVec0(db: Db): boolean {
   }
 }
 
-function ensureVectorTable(db: Db, enabled: boolean): boolean {
+/** 记录 fact_vec 的维度：vec0 的维度写死在 CREATE 里，换模型必须重建表。 */
+const VEC_DIM_KEY = 'vec_dim';
+
+function ensureVectorTable(db: Db, enabled: boolean, dim: number = EMBED_DIM): boolean {
   if (!enabled) {
     db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES ('vector_disabled','1')").run();
     return false;
   }
   try {
+    const exists =
+      db
+        .prepare("SELECT 1 AS v FROM sqlite_master WHERE type = 'table' AND name = 'fact_vec'")
+        .get() !== undefined;
+    const recorded = (
+      db.prepare('SELECT value FROM meta WHERE key = ?').get(VEC_DIM_KEY) as
+        | { value: string }
+        | undefined
+    )?.value;
+    if (exists && recorded !== undefined && Number(recorded) === dim) {
+      db.prepare("DELETE FROM meta WHERE key = 'vector_disabled'").run();
+      return true;
+    }
+    // 维度变了（或旧库没记维度）：旧向量与新模型不可比，直接重建表，
+    // 行由 syncFactVectors 按新模型重编码，不存在"半新半旧"的混合空间。
+    if (exists) db.exec('DROP TABLE fact_vec');
     db.exec(
-      `CREATE VIRTUAL TABLE IF NOT EXISTS fact_vec USING vec0(
+      `CREATE VIRTUAL TABLE fact_vec USING vec0(
          fact_id  TEXT PRIMARY KEY,
-         embedding float[384]
+         embedding float[${dim}]
        )`,
     );
+    db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)').run(VEC_DIM_KEY, String(dim));
     db.prepare("DELETE FROM meta WHERE key = 'vector_disabled'").run();
     return true;
   } catch {

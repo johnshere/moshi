@@ -40,7 +40,7 @@ function openMem() {
     CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT);
     CREATE VIRTUAL TABLE fact_vec USING vec0(
       fact_id TEXT PRIMARY KEY,
-      embedding float[384]
+      embedding float[${VEC_DIM}]
     );
   `);
   db.prepare(
