@@ -111,4 +111,19 @@ describe('意图分流（P1-05）', () => {
     const db = freshDb();
     expect(routeIntent(db, '帮我看看 node 版本').route).toBe('local');
   });
+
+  it('全局词按词边界匹配：install / small 不再被当成 all（P1-27）', () => {
+    const db = freshDb();
+    const install = routeIntent(db, 'install pnpm 到哪个目录');
+    expect(install.globalWord).toBe(false);
+    expect(install.route).toBe('local');
+
+    const small = routeIntent(db, 'small.png 这张图放哪');
+    expect(small.globalWord).toBe(false);
+    expect(small.route).toBe('local');
+
+    // 真正的 all 仍然算全局词
+    expect(routeIntent(db, 'all risks').route).toBe('global');
+    expect(routeIntent(db, '有哪些风险').route).toBe('global');
+  });
 });

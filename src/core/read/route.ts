@@ -25,8 +25,24 @@ const GLOBAL_WORDS = [
 
 const LOCAL_HINTS = /(:\d{2,5}\b|\/[\w.-]+\/|\b[A-Z]{2,}_[A-Z_]+\b|\bE[A-Z]{3,}\b)/;
 
+/**
+ * 全局词命中判定（P1-27）。
+ *
+ * 旧实现是 `query.includes(word)`：`all` 会被 install / small / recall 命中，
+ * 于是"install pnpm"这种纯局部问题被判成 global，而全局路径的 evidence 恒为空
+ * ——用户拿到的是"库里没有"，不是"你问的是全局"。
+ *
+ * ASCII 词用词边界（前后不能是字母数字）；CJK 词没有单词边界，仍按子串匹配
+ * （`\b` 对中文无效，这是 P1-27 的坑）。
+ */
+function matchesGlobalWord(query: string, word: string): boolean {
+  if (!/^[a-z0-9]+$/i.test(word)) return query.includes(word);
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i').test(query);
+}
+
 export function routeIntent(db: Db, query: string): { route: Route; globalWord: boolean; hasEntity: boolean } {
-  const hasGlobalWord = GLOBAL_WORDS.some((w) => query.toLowerCase().includes(w.toLowerCase()));
+  const hasGlobalWord = GLOBAL_WORDS.some((w) => matchesGlobalWord(query, w));
   const ents = recognizeEntities(db, query, { limit: 8 });
   const hasHint = LOCAL_HINTS.test(query);
 
