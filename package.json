@@ -21,7 +21,8 @@
     "lint": "eslint src tools tests --ext .ts",
     "lint:deps": "tsx tools/lint-deps.ts",
     "lint:desc": "tsx tools/lint-descriptions.ts",
-    "verify": "pnpm typecheck && pnpm lint:deps && pnpm test"
+    "verify": "pnpm typecheck && pnpm lint:deps && pnpm lint:lifecycle && pnpm test",
+    "lint:lifecycle": "tsx tools/check-lifecycle.ts"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
