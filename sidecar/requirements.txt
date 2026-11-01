@@ -1,0 +1,4 @@
+# moshi sidecar 依赖（详设 §7.1：不引 FastAPI，只有标准库 + pywin32）
+# Windows 命名管道需要 pywin32；unix 平台可去掉。
+# 推理栈（sentence-transformers / torch）在 P1-02 / P3 才引入，各自独立加。
+pywin32>=312

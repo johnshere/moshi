@@ -14,6 +14,13 @@ header h1{font-size:1.25rem;margin:0}
 .search input{padding:.5rem .75rem;border:1px solid var(--border);border-radius:var(--radius);font-size:.9rem;min-width:240px}
 .search button{padding:.5rem 1rem;background:var(--accent);color:#fff;border:none;border-radius:var(--radius);cursor:pointer;font-size:.9rem}
 .search button:hover{opacity:.9}
+/* 状态条（概设 §10.1 三灯的最小版） */
+.statusbar{display:flex;gap:1.25rem;align-items:center;padding:.4rem 2rem;background:#fbfbfb;border-bottom:1px solid var(--border);font-size:.78rem;color:var(--muted)}
+.statusbar .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:.35rem}
+.dot-ok{background:#16a34a}
+.dot-warn{background:#f59e0b}
+.dot-off{background:#9ca3af}
+.dot-bad{background:#dc2626}
 main{max-width:1200px;margin:1.5rem auto;padding:0 1rem}
 .stats{display:flex;gap:1.5rem;margin-bottom:1rem;font-size:.85rem;color:var(--muted)}
 table{width:100%;background:var(--card);border-radius:var(--radius);border:1px solid var(--border);border-collapse:collapse;overflow:hidden;font-size:.9rem}
@@ -68,6 +75,7 @@ tr.active{background:#e8f0fe}
     <button onclick="clearSearch()">重置</button>
   </div>
 </header>
+<div class="statusbar" id="statusbar">加载状态…</div>
 <main>
   <div class="stats" id="stats">加载中…</div>
   <div id="tableWrap"></div>
@@ -273,6 +281,33 @@ function copySnippet() {
 
 // 初始化
 loadFacts();
+loadStatus();
+
+async function loadStatus() {
+  const el = document.getElementById('statusbar');
+  try {
+    const res = await api('/api/status');
+    const st = await res.json();
+    const parts = [`<span><span class="dot dot-ok"></span>daemon 运行中</span>`];
+    const s = st.sidecar;
+    if (!s) {
+      parts.push(`<span><span class="dot dot-off"></span>推理未启用（纯符号模式）</span>`);
+    } else if (s.state === 'ready') {
+      parts.push(`<span><span class="dot dot-ok"></span>sidecar 就绪（${s.embedModel}）</span>`);
+    } else if (s.state === 'unloaded') {
+      parts.push(`<span><span class="dot dot-warn"></span>sidecar 空闲（权重已卸载）</span>`);
+    } else if (s.state === 'failed' || s.mode === 'off') {
+      parts.push(`<span><span class="dot dot-bad"></span>sidecar 已停用（纯符号模式）</span>`);
+    } else if (s.state === 'stopped') {
+      parts.push(`<span><span class="dot dot-off"></span>sidecar 未启用（纯符号模式）</span>`);
+    } else {
+      parts.push(`<span><span class="dot dot-warn"></span>sidecar 启动中…</span>`);
+    }
+    el.innerHTML = parts.join('');
+  } catch {
+    el.textContent = '状态不可用';
+  }
+}
 </script>
 </body>
 </html>

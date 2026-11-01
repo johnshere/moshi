@@ -3,6 +3,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { MoshiError } from '../domain/errors.js';
 import { buildLogger, pruneLogs } from '../infra/log/logger.js';
+import { SidecarClient } from '../infra/sidecar/client.js';
 import { runCli } from './cli/index.js';
 import { loadConfig } from './config.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
@@ -52,11 +53,14 @@ export async function main(argv: readonly string[]): Promise<number> {
   pruneLogs(logsDir, cfg.log.keep_days);
 
   let instance;
+  let sidecar: SidecarClient | undefined;
   try {
+    // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
+    sidecar = new SidecarClient({ cfg, logger: log });
     instance = await boot(cfg, {
       // Fastify 接管全部 HTTP 面：/ui、/api/*、/mcp 挂在同一个端口。
       handlerFactory: async ({ db, cfg: booted, token }) =>
-        (await buildHttpApp({ db, cfg: booted, token })).server,
+        (await buildHttpApp({ db, cfg: booted, token, sidecar })).server,
     });
   } catch (err) {
     if (err instanceof AlreadyRunningError) {
@@ -78,6 +82,7 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   const shutdown = async (signal: string): Promise<void> => {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');
+    await sidecar?.shutdown();
     await instance.close();
     await built.close();
     process.exit(0);

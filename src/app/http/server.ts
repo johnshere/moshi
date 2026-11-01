@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Db } from '../../infra/sqlite/db.js';
+import type { SidecarClient } from '../../infra/sidecar/client.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
 import type { McpDeps } from '../mcp/deps.js';
@@ -28,6 +29,7 @@ export interface HttpDeps {
   db: Db;
   cfg: Config;
   token: string;
+  sidecar?: SidecarClient;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -52,6 +54,15 @@ export async function buildHttpApp(deps: HttpDeps) {
 
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+
+  // ── 状态条：daemon + sidecar（概设 §10.1 三灯的最小版）──
+  app.get('/api/status', async (_req, reply) => {
+    const status = { daemon: 'ok', sidecar: null as unknown };
+    if (deps.sidecar !== undefined) {
+      status.sidecar = deps.sidecar.status();
+    }
+    return reply.send(status);
+  });
 
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──
   const mcpDeps: McpDeps = { db: deps.db, cfg: deps.cfg };
