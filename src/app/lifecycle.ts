@@ -43,7 +43,7 @@ export function ensureDataDirs(cfg: Config): DataPaths {
 
 export async function findFreePort(host: string, start: number, max: number): Promise<number> {
   for (let port = start; port <= max; port += 1) {
-    // eslint-disable-next-line no-await-in-loop -- 必须顺序探测，先到先得
+    // 必须顺序探测：先到先得，不能并发抢同一个端口
     if (!(await isPortOpen(host, port))) return port;
   }
   throw new MoshiError(
