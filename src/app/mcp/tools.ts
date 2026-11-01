@@ -27,7 +27,8 @@ export interface ToolSpec {
   annotations: ToolAnnotations;
   /** zod 原始形状；SDK 负责转成 `tools/list` 里的 JSON Schema 并做入参校验 */
   shape: Record<string, z.ZodTypeAny>;
-  run: (deps: McpDeps, args: Record<string, unknown>) => CallToolResult;
+  /** `memory_query` 走读取通路（有 sidecar IPC），所以允许返回 Promise */
+  run: (deps: McpDeps, args: Record<string, unknown>) => CallToolResult | Promise<CallToolResult>;
 }
 
 function jsonResult(payload: unknown): CallToolResult {
@@ -54,9 +55,9 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     description: DESCRIPTIONS.memory_query,
     annotations: ANNOTATIONS.memory_query,
     shape: queryShape,
-    run: (deps, args) => {
+    run: async (deps, args) => {
       const input = z.object(queryShape).parse(args);
-      const pack = runMemoryQuery(deps, input);
+      const pack = await runMemoryQuery(deps, input);
       if (input.format === 'text') {
         // 给不支持结构化内容的宿主：只给编号列表，不带 fact_id（详设 §4.4 字段纪律）
         return { content: [{ type: 'text', text: pack.numbered_list }] };
@@ -101,13 +102,17 @@ export function findTool(name: string): ToolSpec | null {
  * 抽出来是为了让测试可以**直接调用工具**而不经过 HTTP / MCP 传输层——
  * 传输层要测的是"协议接线对不对"，工具要测的是"业务对不对"，两件事分开测才不会互相掩护。
  */
-export function callTool(deps: McpDeps, name: string, args: Record<string, unknown>): CallToolResult {
+export async function callTool(
+  deps: McpDeps,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<CallToolResult> {
   const tool = findTool(name);
   if (tool === null) {
     return errorResult(new MoshiError('E_INPUT', `未知工具：${name}`, { name }));
   }
   try {
-    return tool.run(deps, args);
+    return await tool.run(deps, args);
   } catch (err) {
     return errorResult(err);
   }

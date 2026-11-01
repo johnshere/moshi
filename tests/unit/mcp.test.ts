@@ -17,6 +17,7 @@ import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
 import { runMemoryFeedback } from '../../src/app/mcp/feedback.js';
 import { runMemoryCorrect } from '../../src/app/mcp/correct.js';
 import { insertFact } from '../fixtures/factories.js';
+import { syncMissingFts } from '../../src/infra/sqlite/ftsRepo.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import * as auditRepo from '../../src/infra/sqlite/auditRepo.js';
 import * as annotationRepo from '../../src/infra/sqlite/annotationRepo.js';
@@ -56,6 +57,14 @@ function makeDeps(db: Db): McpDeps {
   return { db, cfg: loadConfig({ home }) };
 }
 
+/**
+ * 工厂 insertFact 是裸 SQL（故意绕过仓储层），不会同步 fact_fts；
+ * 凡是要走 BM25 召回的用例，插入后必须补一次同步，否则查不到。
+ */
+function syncFts(db: Db): void {
+  syncMissingFts(db);
+}
+
 /** 从 CallToolResult 里安全地取出 text */
 function textOf(r: { content: Array<{ type?: string; text?: string }> }): string | undefined {
   return r.content.find((c) => c.type === 'text')?.text;
@@ -79,16 +88,16 @@ describe('TOOL_SPECS', () => {
 });
 
 describe('callTool', () => {
-  it('未知工具返回 E_INPUT', () => {
+  it('未知工具返回 E_INPUT', async () => {
     const deps = makeDeps(freshDb());
-    const r = callTool(deps, 'memory_unknown', {});
+    const r = await callTool(deps, 'memory_unknown', {});
     expect(r.isError).toBe(true);
     expect(JSON.parse(textOf(r) ?? '{}').error).toBe('E_INPUT');
   });
 
-  it('参数校验失败返回 E_INTERNAL（ZodError 被 errorResult 包装）', () => {
+  it('参数校验失败返回 E_INTERNAL（ZodError 被 errorResult 包装）', async () => {
     const deps = makeDeps(freshDb());
-    const r = callTool(deps, 'memory_query', { query: 123 });
+    const r = await callTool(deps, 'memory_query', { query: 123 });
     expect(r.isError).toBe(true);
     expect(JSON.parse(textOf(r) ?? '{}').error).toBe('E_INTERNAL');
   });
@@ -103,34 +112,36 @@ describe('memory_query', () => {
     format: 'json',
   };
 
-  it('空库返回空证据包', () => {
+  it('空库：冷启动 + 无 sidecar 都如实降级，绝不报 ok+空', async () => {
     const deps = makeDeps(freshDb());
-    const r = runMemoryQuery(deps, baseQuery);
+    const r = await runMemoryQuery(deps, baseQuery);
     expect(r.status).toBe('degraded');
-    expect(r.degraded).toContain('no_vector');
-    expect(r.degraded).toContain('no_bm25');
-    expect(r.degraded).toContain('no_ppr');
+    // 详设 §6.13：查失败绝不报 ok+空。冷启动与向量路缺失都是降级，不是"查到了、没有"
+    expect(r.degraded).toContain('cold_start');
+    expect(r.degraded).toContain('no_sidecar');
     expect(r.evidence).toHaveLength(0);
     expect(r.confidence_summary).toBe('none');
   });
 
-  it('能按关键词查到事实', () => {
+  it('能按关键词查到事实（BM25 路，无模型也可用）', async () => {
     const db = freshDb();
-    insertFact(db, { content: 'node version = 22', scope: 'global' });
-    insertFact(db, { content: 'python version = 3.13', scope: 'global' });
+    insertFact(db, { content: 'node version = 22' });
+    insertFact(db, { content: 'python version = 3.13' });
+    syncFts(db);
     const deps = makeDeps(db);
-    const r = runMemoryQuery(deps, { ...baseQuery, query: 'node' });
+    const r = await runMemoryQuery(deps, { ...baseQuery, query: 'node' });
     expect(r.evidence).toHaveLength(1);
     expect(r.evidence[0]!.content).toContain('node');
   });
 
-  it('m_id 从 1 连续，且写进 query_log', () => {
+  it('m_id 从 1 连续，且写进 query_log', async () => {
     const db = freshDb();
     // 两条 content 都含确定子串 'alpha'，query 匹配不依赖 canonical_key 哈希里碰巧有哪个字母
     const f1 = insertFact(db, { content: 'alpha one' });
     const f2 = insertFact(db, { content: 'alpha two' });
+    syncFts(db);
     const deps = makeDeps(db);
-    const pack = runMemoryQuery(deps, { ...baseQuery, query: 'alpha' });
+    const pack = await runMemoryQuery(deps, { ...baseQuery, query: 'alpha' });
     expect(pack.evidence[0]!.m_id).toBe(1);
     expect(pack.evidence[1]!.m_id).toBe(2);
     // query_log 与 evidence_log 已落盘
@@ -139,11 +150,12 @@ describe('memory_query', () => {
     expect(resolved.map((x) => x.factId).sort()).toEqual([f1, f2].sort());
   });
 
-  it('text 格式只给编号列表', () => {
+  it('text 格式只给编号列表', async () => {
     const db = freshDb();
     insertFact(db, { content: 'aaa' });
+    syncFts(db);
     const deps = makeDeps(db);
-    const r = callTool(deps, 'memory_query', {
+    const r = await callTool(deps, 'memory_query', {
       query: 'aaa',
       top_k: 5,
       scope: 'global',
@@ -210,13 +222,14 @@ describe('memory_annotate', () => {
 });
 
 describe('memory_feedback', () => {
-  it('正常写 feedback', () => {
+  it('正常写 feedback', async () => {
     const db = freshDb();
     insertFact(db, { content: 'aaa' });
     insertFact(db, { content: 'bbb' });
+    syncFts(db);
     const deps = makeDeps(db);
-    const pack = runMemoryQuery(deps, {
-      query: 'a',
+    const pack = await runMemoryQuery(deps, {
+      query: 'aaa',
       top_k: 10,
       scope: 'global',
       include_history: false,
@@ -233,11 +246,11 @@ describe('memory_feedback', () => {
     expect(rows[0]!.verdict).toBe('adopt');
   });
 
-  it('m_id 越界返回 unresolved_m_ids', () => {
+  it('m_id 越界返回 unresolved_m_ids', async () => {
     const db = freshDb();
     const deps = makeDeps(db);
-    const pack = runMemoryQuery(deps, {
-      query: 'x',
+    const pack = await runMemoryQuery(deps, {
+      query: 'xyz',
       top_k: 10,
       scope: 'global',
       include_history: false,

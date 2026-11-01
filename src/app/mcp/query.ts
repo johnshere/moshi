@@ -1,50 +1,33 @@
 /**
  * `memory_query` 的实现（详设 §4.1.1 / §4.4）。
  *
- * **Phase 0 的诚实说明**：三路召回（向量 / BM25 / PPR）在 Phase 1 才建，
- * 这里只做"关键词直查 + 强度排序"。因此证据包一律 `status: "degraded"`，
- * `degraded` 里如实列出 `no_vector` / `no_bm25` / `no_ppr`。
+ * Phase 1 起这一层**只做协议适配**：MCP 入参翻译成 `core/read/search.ts` 的编排输入，
+ * 证据包的 `numbered_list` 数组拼成宿主读的字符串，其余一律由 core 决定。
  *
- * 为什么不在 Phase 0 假装 `status: "ok"`：证据包的 `status` 是给宿主看的**质量信号**，
- * 撒谎的代价是 Agent 在召回很差时仍然自信作答——这比"暂时没有记忆"糟糕得多。
- * 概设 §1.5 的"降级必须静默"说的是不报错、不打扰，不是不告诉宿主"这一包不完整"。
+ * 为什么这么薄：`m_id` 连续性、降级语义、埋点写入都是**读取通路**的性质，不是 MCP
+ * 的性质——留在这一层，REST / UI / CLI 每个入口会各自漂移一份。
  *
- * 另外两件事这一层必须做对，否则 Phase 1 换掉召回时会被带着一起改：
- * - `m_id` 从 1 连续，并**写进 `evidence_log`**——`memory_feedback` 靠它把 `[M#]` 翻回 `fact_id`；
- * - `numbered_list` 不含 `fact_id`（详设 §4.4 字段纪律），避免 Agent 把 id 抄进回复。
+ * Phase 0 定下的诚实纪律继续适用：`status` 是给宿主看的**质量信号**，三路里任何一路
+ * 没跑成都要如实进 `degraded`；谎报 `ok` 的代价是 Agent 在召回很差时仍自信作答。
+ *
+ * `encode` / `cache` 由调用方注入（daemon 有 sidecar，CLI 与 bench 未必有）：
+ * 没有 encode 时向量路标 `no_sidecar`，BM25 + PPR 照常出证据。
  */
-import { canonicalJson, sha256Hex } from '../../domain/hash.js';
-import { newId } from '../../domain/ids.js';
-import { estimateTokens } from '../../domain/text.js';
-import { nowIso } from '../../domain/time.js';
-import type { ConfSource, Degraded, Epistemic, Ftype, Pool, Status } from '../../domain/enums.js';
-import type { Fact } from '../../domain/types.js';
-import * as factRepo from '../../infra/sqlite/factRepo.js';
-import * as queryLogRepo from '../../infra/sqlite/queryLogRepo.js';
-import { withTransaction } from '../../infra/sqlite/tx.js';
+import type {
+  ConflictEntry,
+  DependencySummaryEntry,
+  EvidenceEntry,
+  EvidencePackage,
+  TopicHint,
+} from '../../core/read/evidence.js';
+import type { Degraded, Ftype, Status } from '../../domain/enums.js';
+import { searchWithPipeline, type SearchParams } from '../../core/read/search.js';
 import type { McpDeps } from './deps.js';
 import type { QueryInput } from './schemas.js';
 
-export interface EvidenceItemJson {
-  m_id: number;
-  fact_id: string;
-  content: string;
-  ftype: Ftype;
-  confidence: number;
-  confidence_source: ConfSource;
-  strength: number;
-  pool: Pool;
-  epistemic_status: Epistemic;
-  valid_at: string;
-  valid_to: string | null;
-  recorded_at: string;
-  subject: { entity_id: string; name: string };
-  predicate: string;
-  value: unknown;
-  source_ref: { episode_id: string | null; span: [number, number] | null };
-  flags: string[];
-}
+export type { EvidenceEntry, ConflictEntry, DependencySummaryEntry, TopicHint };
 
+/** 详设 §4.4 的对外形态：与 core 的 `EvidencePackage` 同字段，只收窄两处类型 */
 export interface EvidencePackJson {
   schema: 'moshi-evidence/1';
   query_id: string;
@@ -55,152 +38,76 @@ export interface EvidencePackJson {
   coverage: 'full' | 'partial';
   identity: 'resolved' | 'unresolved';
   confidence_summary: 'high' | 'medium' | 'low' | 'none';
-  advice: string | null;
-  evidence: EvidenceItemJson[];
-  conflicts: never[];
-  dependency_summary: never[];
-  topic_hint: null;
+  advice: string;
+  evidence: EvidenceEntry[];
+  conflicts: ConflictEntry[];
+  dependency_summary: DependencySummaryEntry[];
+  topic_hint: TopicHint;
+  /** 宿主视图：编号列表拼成一个字符串（§4.4 字段纪律：不含 fact_id） */
   numbered_list: string;
+  /** 会话内缓存命中（详设 §6.11） */
+  cached: boolean;
   stats: { candidates: number; packed: number; tokens: number; latency_ms: number };
 }
 
-/** Phase 0 缺的三路召回。**不写 `no_sidecar`**：这条路本来就不需要 sidecar */
-const PHASE0_DEGRADED: readonly Degraded[] = ['no_vector', 'no_bm25', 'no_ppr'];
-
-function confidenceSummary(items: readonly EvidenceItemJson[]): 'high' | 'medium' | 'low' | 'none' {
-  if (items.length === 0) return 'none';
-  const top = items.reduce((m, e) => Math.max(m, e.confidence), 0);
-  if (top >= 0.9) return 'high';
-  if (top >= 0.6) return 'medium';
-  return 'low';
-}
-
-function numberedLine(item: EvidenceItemJson, index: number): string {
-  const since = item.valid_at.slice(0, 10);
-  return `[M${String(index)}] (${item.confidence.toFixed(2)}, ${since} 起) ${item.content}`;
-}
-
-/**
- * 排序分。**只用符号量**（强度、置信、时间新鲜度），不引入任何模型输出——
- * 这一路的价值恰恰在于"没有模型也能排"。
- */
-function scoreOf(fact: Fact, nowMs: number): number {
-  const ageDays = Math.max(0, (nowMs - Date.parse(fact.validAt)) / 86_400_000);
-  const freshness = 1 / (1 + ageDays / 30);
-  return 0.55 * fact.strength + 0.35 * fact.confidence + 0.1 * freshness;
-}
-
-function toItem(fact: Fact, mId: number): EvidenceItemJson {
+/** cfg → 编排参数（core 不认识 Config 类型，映射留在 app 层） */
+export function searchParamsOf(cfg: McpDeps['cfg']): Partial<SearchParams> {
   return {
-    m_id: mId,
-    fact_id: fact.id,
-    content: fact.content,
-    ftype: fact.ftype,
-    confidence: fact.confidence,
-    confidence_source: fact.confidenceSource,
-    strength: fact.strength,
-    pool: fact.pool,
-    epistemic_status: fact.epistemicStatus,
-    valid_at: fact.validAt,
-    valid_to: fact.validTo,
-    recorded_at: fact.recordedAt,
-    subject: fact.attrs.frozen.subject,
-    predicate: fact.attrs.frozen.predicate,
-    value: fact.attrs.frozen.value,
-    source_ref: {
-      episode_id: fact.sourceEpisode,
-      span: fact.span,
-    },
-    flags: [],
+    vectorTopK: cfg.retrieval.vector_topk,
+    bm25TopK: cfg.retrieval.bm25_topk,
+    pprTopK: cfg.retrieval.ppr_topk,
+    pprDamping: cfg.retrieval.ppr_damping,
+    pprIters: cfg.retrieval.ppr_iters,
+    pprMaxNodes: cfg.retrieval.ppr_max_nodes,
+    subgraphMaxNodes: cfg.subgraph.max_nodes,
+    subgraphMaxEdges: cfg.subgraph.max_edges,
+    tokenBudget: cfg.packing.token_budget,
+    utilityRatio: cfg.packing.utility_ratio,
+    floorMin: cfg.packing.floor_min,
+    maxFactTokens: cfg.packing.max_fact_tokens,
   };
 }
 
-export function runMemoryQuery(deps: McpDeps, input: QueryInput): EvidencePackJson {
-  const started = Date.now();
-  const queryId = newId('query');
-  const ts = nowIso();
-
-  const filter = {
-    q: input.query,
-    scope: input.scope,
-    ...(input.ftype === undefined ? {} : { ftype: input.ftype }),
-    includeHistory: input.include_history,
-    ...(input.time_range?.from === undefined ? {} : { from: input.time_range.from }),
-    ...(input.time_range?.to === undefined ? {} : { to: input.time_range.to }),
+function toJson(pack: EvidencePackage, cached: boolean): EvidencePackJson {
+  return {
+    schema: pack.schema,
+    query_id: pack.query_id,
+    status: pack.status,
+    route: pack.route,
+    degraded: pack.degraded as Degraded[],
+    truncated: pack.truncated,
+    coverage: pack.coverage,
+    identity: pack.identity,
+    confidence_summary: pack.confidence_summary,
+    advice: pack.advice,
+    evidence: pack.evidence,
+    conflicts: pack.conflicts,
+    dependency_summary: pack.dependency_summary,
+    topic_hint: pack.topic_hint,
+    numbered_list: pack.numbered_list.join('\n'),
+    cached,
+    stats: pack.stats,
   };
+}
 
-  // 先多取一些再截断：排序要基于"候选集"，不是"前 top_k 条再排序"
-  const candidates = factRepo.searchFacts(deps.db, { ...filter, limit: Math.max(input.top_k * 4, 40) });
-  const total = factRepo.countMatching(deps.db, filter);
-
-  const nowMs = Date.parse(ts);
-  const ranked = candidates
-    .map((f) => ({ fact: f, score: scoreOf(f, nowMs) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, input.top_k);
-
-  const evidence = ranked.map((r, i) => toItem(r.fact, i + 1));
-  const numbered = evidence.map((e, i) => numberedLine(e, i + 1)).join('\n');
-  const summary = confidenceSummary(evidence);
-
-  const pack: EvidencePackJson = {
-    schema: 'moshi-evidence/1',
-    query_id: queryId,
-    status: 'degraded',
-    route: 'local',
-    degraded: [...PHASE0_DEGRADED],
-    truncated: total > evidence.length,
-    coverage: total > evidence.length ? 'partial' : 'full',
-    identity: evidence.length > 0 ? 'resolved' : 'unresolved',
-    confidence_summary: summary,
-    advice:
-      summary === 'none'
-        ? '尚未观测到与该查询相关的事实。可换用更具体的名词（包名、端口号、路径）再查，' +
-          '或等待下一次会话扫描后重试。'
-        : null,
-    evidence,
-    conflicts: [],
-    dependency_summary: [],
-    topic_hint: null,
-    numbered_list: numbered,
-    stats: {
-      candidates: total,
-      packed: evidence.length,
-      tokens: estimateTokens(numbered),
-      latency_ms: Date.now() - started,
+export async function runMemoryQuery(deps: McpDeps, input: QueryInput): Promise<EvidencePackJson> {
+  const { pack, cached } = await searchWithPipeline(
+    {
+      db: deps.db,
+      params: searchParamsOf(deps.cfg),
+      gatMode: deps.cfg.model.gat_mode,
+      ...(deps.encode === undefined ? {} : { encode: deps.encode }),
+      ...(deps.cache === undefined ? {} : { cache: deps.cache }),
     },
-  };
-
-  withTransaction(deps.db, () => {
-    queryLogRepo.insertQueryLog(deps.db, {
-      id: queryId,
-      ts,
-      queryText: input.query,
-      // 查询原文可能含路径与用户名：埋点只留哈希，原文留给 UI 侧按需记录（概设 §9.6）
-      queryHash: sha256Hex(canonicalJson({ q: input.query, scope: input.scope })),
-      route: 'local',
-      flags: { gat: 'off', self_attn: 'off', cross_attn: 'off', vector: 'off', bm25: 'off', ppr: 'off' },
-      candidates: { keyword: evidence.map((e) => e.fact_id) },
-      fused: evidence.map((e, i) => ({ fact_id: e.fact_id, rrf: ranked[i]?.score ?? 0 })),
-      packed: evidence.map((e) => e.fact_id),
-      degraded: [...PHASE0_DEGRADED],
-      truncated: pack.truncated,
-      coverage: pack.coverage,
-      latencyMs: pack.stats.latency_ms,
-      cached: false,
-    });
-    queryLogRepo.insertEvidence(
-      deps.db,
-      ranked.map((r, i) => ({
-        queryId,
-        mId: i + 1,
-        factId: r.fact.id,
-        rank: i + 1,
-        score: r.score,
-        pool: r.fact.pool,
-      })),
-    );
-  });
-
-  return pack;
+    {
+      query: input.query,
+      scope: input.scope,
+      topK: input.top_k,
+      includeHistory: input.include_history,
+      ...(input.ftype === undefined ? {} : { ftype: input.ftype as readonly Ftype[] }),
+      ...(input.time_range?.from === undefined ? {} : { timeFrom: input.time_range.from }),
+      ...(input.time_range?.to === undefined ? {} : { timeTo: input.time_range.to }),
+    },
+  );
+  return toJson(pack, cached);
 }

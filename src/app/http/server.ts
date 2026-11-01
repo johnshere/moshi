@@ -24,7 +24,7 @@ import { countFact, countVec, vectorDisabled, VEC_DIM } from '../../infra/vec/in
 import { countFts } from '../../infra/sqlite/ftsRepo.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
-import type { McpDeps } from '../mcp/deps.js';
+import { buildEvidenceCache, encodeViaSidecar, type McpDeps } from '../mcp/deps.js';
 import { factRoutes } from './routes/facts.js';
 
 export interface HttpDeps {
@@ -83,7 +83,14 @@ export async function buildHttpApp(deps: HttpDeps) {
   });
 
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──
-  const mcpDeps: McpDeps = { db: deps.db, cfg: deps.cfg };
+  // 读取通路的两个注入位（P1-20）：向量编码走 sidecar（懒启动，不应答即降级），
+  // 证据缓存整个进程一份（写库 → schema_rev 变 → 全清）。
+  const mcpDeps: McpDeps = {
+    db: deps.db,
+    cfg: deps.cfg,
+    ...(deps.sidecar === undefined ? {} : { encode: encodeViaSidecar(deps.sidecar) }),
+    cache: buildEvidenceCache(deps.db, deps.cfg),
+  };
   const mcpHandler = createMcpHttpHandler(mcpDeps);
   app.post('/mcp', async (req, reply) => {
     await new Promise<void>((resolve) => {
