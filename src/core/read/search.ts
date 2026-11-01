@@ -46,6 +46,9 @@ import { cacheKeyOf, type EvidenceCache } from './cache.js';
 /** 编排参数（app 层从 cfg 映射过来——core 不认识 Config 类型） */
 export interface SearchParams {
   vectorTopK: number;
+  /** 向量召回的相关性地板（cos ∈ [0,1]）：低于它的邻居不进候选。
+   *  没有地板时 knn 必返 top_k 条，噪声会被 max 归一化成 1.0（P1-29 / B-6）。 */
+  vectorMinSim: number;
   bm25TopK: number;
   pprTopK: number;
   pprDamping: number;
@@ -63,6 +66,7 @@ export interface SearchParams {
 
 export const DEFAULT_PARAMS: SearchParams = {
   vectorTopK: 20,
+  vectorMinSim: 0.5,
   bm25TopK: 20,
   pprTopK: 20,
   pprDamping: 0.85,
@@ -366,7 +370,13 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
       const vec = await queryVector();
       if (vec === null) signals.push('sidecar_unavailable');
       else if (vec.length !== VEC_DIM) signals.push('vector_error');
-      else vectorIds = knn(db, vec, params.vectorTopK).map((h) => h.fact_id);
+      else {
+        const hits = knn(db, vec, params.vectorTopK);
+        const kept = hits.filter((h) => h.similarity >= params.vectorMinSim);
+        // 有命中但全低于地板 = 问题不在库里，是问句与所有事实都不相关（拒答要的就是这个）
+        if (hits.length > 0 && kept.length === 0) signals.push('vector_low_similarity');
+        vectorIds = kept.map((h) => h.fact_id);
+      }
     } catch {
       signals.push('vector_error');
     }

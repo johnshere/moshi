@@ -26,6 +26,9 @@ export type InternalSignal =
   | 'ppr_timeout'
   | 'ppr_error'
   | 'vector_error'
+  /** 向量召回有命中但全部低于相关性地板（P1-29）：向量路没贡献任何候选，
+   *  对外仍归到 no_vector（DEGRADED 是 8 个公开码，不为此扩枚举）。 */
+  | 'vector_low_similarity'
   | 'gat_unavailable'
   | 'query_timeout'
   | 'cold_start'
@@ -37,6 +40,7 @@ export const SIGNAL_TO_DEGRADED: Readonly<Record<InternalSignal, Degraded>> = {
   ppr_timeout: 'no_ppr',
   ppr_error: 'no_ppr',
   vector_error: 'no_vector',
+  vector_low_similarity: 'no_vector',
   gat_unavailable: 'no_model',
   query_timeout: 'timeout',
   cold_start: 'cold_start',

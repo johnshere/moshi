@@ -24,6 +24,7 @@ import { newId } from '../../src/domain/ids.js';
 import { searchWithPipeline, type SearchRuntime } from '../../src/core/read/search.js';
 import { EvidenceCache } from '../../src/core/read/cache.js';
 import { insertEdge, insertFact } from '../fixtures/factories.js';
+import { upsertVec, VEC_DIM } from '../../src/infra/vec/index.js';
 
 const opened: Db[] = [];
 const dirs: string[] = [];
@@ -259,5 +260,41 @@ describe('searchWithPipeline · 排序（P1-23）', () => {
 
     const out = await searchWithPipeline(runtime(db), { query: 'noproxy', scope: 'global', topK: 1 });
     expect(out.pack.evidence).toHaveLength(1);
+  });
+});
+
+describe('searchWithPipeline · 向量相关性地板（P1-29）', () => {
+  /** 第 i 维为 1 的单位向量：i 不同则两两正交（cos=0） */
+  function basis(i: number): Float32Array {
+    const v = new Float32Array(VEC_DIM);
+    v[i] = 1;
+    return v;
+  }
+
+  function withVector(db: Db, params: { query: Float32Array }): SearchRuntime {
+    return runtime(db, {
+      params: { vectorMinSim: 0.5 },
+      encode: async () => params.query,
+    });
+  }
+
+  it('相关邻居（cos=1）进证据包', async () => {
+    const db = freshDb();
+    const id = insertFact(db, { content: 'alpha one' });
+    upsertVec(db, id, basis(0));
+
+    const out = await searchWithPipeline(withVector(db, { query: basis(0) }), { query: 'zeta', scope: 'global' });
+    expect(out.pack.evidence.map((e) => e.fact_id)).toEqual([id]);
+  });
+
+  it('不相关邻居（cos=0）被地板挡掉，并如实报 vector_low_similarity', async () => {
+    const db = freshDb();
+    const id = insertFact(db, { content: 'alpha one' });
+    upsertVec(db, id, basis(0));
+
+    // 查询向量与事实正交：knn 会返回它（k=20），但不该进证据包
+    const out = await searchWithPipeline(withVector(db, { query: basis(1) }), { query: 'zeta', scope: 'global' });
+    expect(out.pack.evidence).toEqual([]);
+    expect(out.pack.degraded).toContain('no_vector');
   });
 });

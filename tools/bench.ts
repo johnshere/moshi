@@ -22,7 +22,7 @@ import { runMemoryQuery } from '../src/app/mcp/query.js';
 import { encodeViaSidecar, type EncodeFn, type McpDeps } from '../src/app/mcp/deps.js';
 import { SidecarClient } from '../src/infra/sidecar/client.js';
 import { syncFactVectors } from '../src/infra/vec/index.js';
-import { loadConfig } from '../src/app/config.js';
+import { defaultConfigPath, loadConfig } from '../src/app/config.js';
 import { nowIso } from '../src/domain/time.js';
 import { checkBlock, percentile } from '../src/core/ops/bench.js';
 
@@ -99,12 +99,15 @@ async function main(): Promise<number> {
   // 不注入 cache：测的是读取通路本身，不是会话内缓存（§6.11 的命中会把延迟抹平）
   // B-4：--vector 才拉起 sidecar 建向量索引；默认纯符号路（CI 不依赖 python）。
   const useVector = argv.includes('--vector');
+  // 数据目录跟着临时 home 走，但 sidecar 的解释器/模型名要用真实配置（临时 home 下没有
+  // config.toml，默认 `~/.moshi/python/bin/python` 在本机并不存在 → encode 全返回 null）。
+  const cfg = loadConfig({ file: defaultConfigPath(), home: dir });
   let sidecar: SidecarClient | undefined;
   let encode: EncodeFn | undefined;
   let vectorBuildMs = 0;
   if (useVector) {
     const silent = { info: () => {}, warn: () => {}, error: () => {} };
-    sidecar = new SidecarClient({ cfg: loadConfig({ home: dir }), logger: silent });
+    sidecar = new SidecarClient({ cfg, logger: silent });
     await sidecar.ensureStarted();
     encode = encodeViaSidecar(sidecar);
     const buildStarted = Date.now();
@@ -114,7 +117,7 @@ async function main(): Promise<number> {
     console.error(`[bench] 向量索引：编码 ${synced.synced} 条，缺 ${synced.missing}，失败 ${synced.failed}，耗时 ${vectorBuildMs}ms`);
   }
 
-  const deps: McpDeps = { db, cfg: loadConfig({ home: dir }), encode };
+  const deps: McpDeps = { db, cfg, encode };
   const samples: number[] = [];
   for (let q = 0; q < queriesN; q += 1) {
     const query = `端口 ${3000 + (q % 100)}`;

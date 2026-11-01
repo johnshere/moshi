@@ -54,6 +54,7 @@ export interface EvidencePackJson {
 export function searchParamsOf(cfg: McpDeps['cfg']): Partial<SearchParams> {
   return {
     vectorTopK: cfg.retrieval.vector_topk,
+    vectorMinSim: cfg.retrieval.vector_min_sim,
     bm25TopK: cfg.retrieval.bm25_topk,
     pprTopK: cfg.retrieval.ppr_topk,
     pprDamping: cfg.retrieval.ppr_damping,
