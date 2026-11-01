@@ -20,6 +20,7 @@ export function archiveTopic(db: Db, topicId: number, opts: { now?: string; titl
   const taken = new Set(listSlugs(db));
   const rendered = renderTopic(db, topicId, {
     now,
+    title: opts.title,
     revision: (prev?.revision ?? 0) + 1,
     lastExportedAt: prev?.lastExportedAt ?? null,
   });
@@ -44,6 +45,8 @@ export function archiveTopic(db: Db, topicId: number, opts: { now?: string; titl
 
 export interface ArchiveAllResult {
   docs: ArchiveDoc[];
+  /** content_hash 变化的文档（需要写盘的那部分）；`docs` 里其余是未变主题 */
+  changedDocs: ArchiveDoc[];
   written: number;
   elapsedMs: number;
 }
@@ -53,6 +56,7 @@ export function archiveAll(db: Db, opts: { now?: string } = {}): ArchiveAllResul
   const started = Date.now();
   const topics = selectTopics(db);
   const docs: ArchiveDoc[] = [];
+  const changedDocs: ArchiveDoc[] = [];
   let written = 0;
   for (const t of topics) {
     const { doc, written: w } = archiveTopic(db, t.communityId, {
@@ -60,7 +64,10 @@ export function archiveAll(db: Db, opts: { now?: string } = {}): ArchiveAllResul
       title: t.label ?? undefined,
     });
     docs.push(doc);
-    if (w) written += 1;
+    if (w) {
+      written += 1;
+      changedDocs.push(doc);
+    }
   }
-  return { docs, written, elapsedMs: Date.now() - started };
+  return { docs, changedDocs, written, elapsedMs: Date.now() - started };
 }

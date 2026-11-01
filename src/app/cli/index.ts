@@ -6,12 +6,13 @@ import { loadConfig } from '../config.js';
 import { importCommand } from './commands/import.js';
 import { initCommand } from './commands/init.js';
 import { evalCommand } from './commands/eval.js';
+import { exportCommand } from './commands/export.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
 
 /** 已注册命令（随 Phase 增加） */
-export const COMMANDS: readonly Command[] = [importCommand, initCommand, evalCommand];
+export const COMMANDS: readonly Command[] = [importCommand, initCommand, evalCommand, exportCommand];
 
 export function usage(): string {
   const lines = [
