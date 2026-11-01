@@ -62,7 +62,10 @@ export function addAlias(
     )
     .run(input.alias, input.entityId, input.source, input.confidence ?? 1.0, input.ts ?? nowIso());
   if (info.changes > 0) {
-    db.prepare('UPDATE entity SET alias_count = alias_count + 1 WHERE id = ?').run(input.entityId);
+    // 重算而不是 +1：+1 在回滚/重复插入后会漂移（详设 §5.5）
+    db.prepare(
+      'UPDATE entity SET alias_count = (SELECT COUNT(*) FROM alias WHERE entity_id = ?) WHERE id = ?',
+    ).run(input.entityId, input.entityId);
   }
   return info.changes > 0;
 }
