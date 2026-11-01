@@ -45,12 +45,31 @@ export interface CacheKeyInput {
   normalizedQuery: string;
   scope: string;
   flags: Record<string, unknown>;
+  /**
+   * 改变证据包内容的检索参数（top_k / include_history / ftype / 时间窗 / session）。
+   * 命中是**直接返回整包**，所以这些参数只要有一个不同就不能算同一次查询——
+   * 漏掉的后果是静默错误：top_k=3 的包会喂给 top_k=20 的调用方。
+   */
+  shape?: Record<string, unknown>;
   tokenize: (s: string) => string;
+}
+
+/** 稳定序列化：键排序、丢 undefined，避免 {a,b} 与 {b,a} 落在两个 key 上 */
+export function canonicalJson(value: unknown): string {
+  if (value === undefined) return 'null';
+  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  const entries = Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`;
 }
 
 export function cacheKeyOf(input: CacheKeyInput): string {
   const tokens = input.tokenize(input.normalizedQuery);
-  return sha256Hex(`${tokens}|${input.scope}|${JSON.stringify(input.flags)}`);
+  return sha256Hex(
+    `${tokens}|${input.scope}|${canonicalJson(input.shape ?? {})}|${canonicalJson(input.flags)}`,
+  );
 }
 
 export interface EvidenceCacheOptions {

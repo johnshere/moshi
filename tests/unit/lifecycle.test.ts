@@ -37,13 +37,13 @@ describe('数据目录（详设 §3.4 第 2 步）', () => {
 });
 
 describe('启动即建库（详设 §3.4 第 4 步）', () => {
-  it('首次启动建库并迁移到 v1', async () => {
+  it('首次启动建库并迁移到 v2', async () => {
     const { cfg } = makeCfg();
     const inst = await boot(cfg);
     opened.push(inst);
     expect(existsSync(inst.paths.db)).toBe(true);
-    expect(inst.migration.applied).toEqual(['001_init.sql']);
-    expect(inst.db.pragma('user_version', { simple: true })).toBe(1);
+    expect(inst.migration.applied).toEqual(['001_init.sql', '002_schema_rev.sql']);
+    expect(inst.db.pragma('user_version', { simple: true })).toBe(2);
     // vectorEnabled 由本机 sqlite-vec 探测决定；与迁移结果一致：
     // 装了 → fact_vec 已建；没装 → 打降级标记
     const vecRow = inst.db.prepare(

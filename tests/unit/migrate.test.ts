@@ -44,13 +44,13 @@ const CORE_TABLES = [
 ];
 
 describe('迁移（详设 §2.7）', () => {
-  it('空库一次建成，user_version=1', () => {
+  it('空库一次建成，user_version=2', () => {
     const { db, dir } = tempDb();
     const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
     expect(res.from).toBe(0);
     expect(res.to).toBe(TARGET_VERSION);
-    expect(res.applied).toEqual(['001_init.sql']);
-    expect(db.pragma('user_version', { simple: true })).toBe(1);
+    expect(res.applied).toEqual(['001_init.sql', '002_schema_rev.sql']);
+    expect(db.pragma('user_version', { simple: true })).toBe(2);
 
     const tables = listTables(db);
     for (const t of CORE_TABLES) expect(tables).toContain(t);
@@ -61,7 +61,7 @@ describe('迁移（详设 §2.7）', () => {
     const { db, dir } = tempDb();
     migrate(db, { backupsDir: path.join(dir, 'backups') });
     const second = migrate(db, { backupsDir: path.join(dir, 'backups') });
-    expect(second.from).toBe(1);
+    expect(second.from).toBe(2);
     expect(second.applied).toEqual([]);
     expect(second.backupPath).toBeNull();
   });
@@ -94,7 +94,35 @@ describe('迁移（详设 §2.7）', () => {
 
   it('迁移文件按版本号排序，且命名不合规的被忽略', () => {
     const files = listMigrations(path.resolve(import.meta.dirname, '../../migrations'));
-    expect(files.map((f) => f.version)).toEqual([1]);
+    expect(files.map((f) => f.version)).toEqual([1, 2]);
+  });
+
+  it('schema_rev 在事实 UPDATE、边写入时也递增（P1-25）', () => {
+    const { db, dir } = tempDb();
+    migrate(db, { backupsDir: path.join(dir, 'backups') });
+    const revOf = (): number => Number(db.prepare("SELECT value FROM meta WHERE key='schema_rev'").pluck().get());
+
+    db.exec(
+      "INSERT INTO fact (id, content, ftype, confidence, confidence_source, strength, importance, pool, epistemic_status, attrs, canonical_key, value_hash, scope, valid_at, recorded_at, last_decay_at, created_at, updated_at) " +
+        `VALUES ('f_a','alpha','semantic',0.9,'tool_obs',0.5,0.5,'utility','active','{"frozen":{"subject":{"entity_id":"en_a","name":"a"},"predicate":"state","value":"alpha"},"ext":{}}','ck_a','vh_a','global','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      "INSERT INTO fact (id, content, ftype, confidence, confidence_source, strength, importance, pool, epistemic_status, attrs, canonical_key, value_hash, scope, valid_at, recorded_at, last_decay_at, created_at, updated_at) " +
+        `VALUES ('f_b','beta','semantic',0.9,'tool_obs',0.5,0.5,'utility','active','{"frozen":{"subject":{"entity_id":"en_b","name":"b"},"predicate":"state","value":"beta"},"ext":{}}','ck_b','vh_b','global','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z')`,
+    );
+    const afterInsert = revOf();
+
+    // 只改 degree（边触发的回写路径）不该算"内容变了"
+    db.exec("UPDATE fact SET degree = 5 WHERE id = 'f_a'");
+    expect(revOf()).toBe(afterInsert);
+
+    db.exec("UPDATE fact SET epistemic_status = 'invalidated' WHERE id = 'f_a'");
+    expect(revOf()).toBe(afterInsert + 1);
+
+    db.exec(
+      "INSERT INTO edge (id, src, dst, etype, weight, confidence, valid_at, recorded_at) VALUES ('e1','f_a','f_b','logic',1.0,0.9,'2026-10-01T00:00:00.000Z','2026-10-01T00:00:00.000Z')",
+    );
+    expect(revOf()).toBe(afterInsert + 2);
   });
 });
 

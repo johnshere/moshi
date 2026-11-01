@@ -53,6 +53,25 @@ describe('会话内证据缓存（P1-18）', () => {
     expect(h1!.queryId).not.toBe(h2!.queryId); // 每次命中 query_id 都新生成
   });
 
+  it('缓存键含检索参数：top_k / include_history / ftype / 时间窗 / session 任一不同即不同 key（P1-25）', () => {
+    const base = { normalizedQuery: '8080', scope: 'global', flags: {}, tokenize: (s: string) => s };
+    const shape = {
+      top_k: 8,
+      include_history: false,
+      ftype: null,
+      time_from: null,
+      time_to: null,
+      session: null,
+    };
+    const k0 = cacheKeyOf({ ...base, shape });
+    expect(cacheKeyOf({ ...base, shape: { ...shape } })).toBe(k0); // 键序无关
+    expect(cacheKeyOf({ ...base, shape: { ...shape, top_k: 3 } })).not.toBe(k0);
+    expect(cacheKeyOf({ ...base, shape: { ...shape, include_history: true } })).not.toBe(k0);
+    expect(cacheKeyOf({ ...base, shape: { ...shape, ftype: 'episodic' } })).not.toBe(k0);
+    expect(cacheKeyOf({ ...base, shape: { ...shape, time_from: '2026-10-01T00:00:00.000Z' } })).not.toBe(k0);
+    expect(cacheKeyOf({ ...base, shape: { ...shape, session: 's1' } })).not.toBe(k0);
+  });
+
   it('向量相似 ≥0.95 命中、低于阈值不命中', () => {
     const cache = makeCache();
     const k1 = 'k1';

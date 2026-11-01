@@ -300,6 +300,15 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   const cacheKey = cacheKeyOf({
     normalizedQuery: input.query.trim().toLowerCase(),
     scope,
+    // 命中直接返回整包：凡改变包内容的检索参数都必须进 key（P1-25）。
+    shape: {
+      top_k: topK,
+      include_history: input.includeHistory === true,
+      ftype: input.ftype ?? null,
+      time_from: input.timeFrom ?? null,
+      time_to: input.timeTo ?? null,
+      session: input.session ?? null,
+    },
     flags,
     tokenize: (s) => tokenizeForFts(s),
   });

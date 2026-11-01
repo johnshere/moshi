@@ -14,7 +14,7 @@ import type { Db } from './db.js';
 
 const FILE_RE = /^(\d{3})_.*\.sql$/;
 
-export const TARGET_VERSION = 1;
+export const TARGET_VERSION = 2;
 
 export interface MigrateOptions {
   migrationsDir?: string;
