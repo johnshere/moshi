@@ -212,6 +212,36 @@ export function countFacts(db: Db): number {
   return row.n;
 }
 
+/** 会话摘要窗口（详设 §8.2）：`created_at ∈ [from,to]` 的新观测数 */
+export function countCreatedBetween(db: Db, from: string, to: string): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS n FROM fact WHERE created_at >= ? AND created_at <= ?')
+    .get(from, to) as { n: number };
+  return row.n;
+}
+
+/** 窗口内被标记失效/清理的事实数（"失效"口径按 updated_at 落窗） */
+export function countInvalidatedBetween(db: Db, from: string, to: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM fact
+        WHERE epistemic_status IN ('invalidated','pruned') AND updated_at >= ? AND updated_at <= ?`,
+    )
+    .get(from, to) as { n: number };
+  return row.n;
+}
+
+/** 窗口内涉及的主体实体数（会话摘要第 1 行的"涉及 K 个实体"） */
+export function countDistinctSubjectsBetween(db: Db, from: string, to: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(DISTINCT json_extract(attrs, '$.frozen.subject.entity_id')) AS n
+         FROM fact WHERE created_at >= ? AND created_at <= ?`,
+    )
+    .get(from, to) as { n: number };
+  return row.n;
+}
+
 export interface SearchOptions {
   /** 关键词；对 content / canonical_key 做 LIKE。空则只按时间与生命周期排序 */
   q?: string;
@@ -300,6 +330,17 @@ export function searchFacts(db: Db, opts: SearchOptions): Fact[] {
     .prepare(`SELECT * FROM fact${sql}` + ` ORDER BY ${orderBy} LIMIT ?`)
     .all(...params, opts.limit) as Record<string, unknown>[];
   return rows.map(rowToFact);
+}
+
+/**
+ * 按 id 批量取（详设 §6.5：融合要拿三路召回的**并集**候选）。
+ * 返回顺序不保证——调用方自己按通道序排（融合只用集合，排序在 fuse 层）。
+ */
+export function listByIds(db: Db, ids: readonly string[]): Fact[] {
+  if (ids.length === 0) return [];
+  const ph = ids.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT * FROM fact WHERE id IN (${ph})`).all(...ids) as Record<string, unknown>[];
+  return rows.map((r) => rowToFact(r));
 }
 
 /** 命中总数：用来判断"是否还有更多"，不必把行拉回来 */
