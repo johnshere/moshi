@@ -7,7 +7,7 @@
  * - 改 `confidence` 必须同时写 `audit`（I10），两者在同一事务里。
  */
 import { MoshiError } from '../../domain/errors.js';
-import type { Epistemic, Pool } from '../../domain/enums.js';
+import type { Epistemic, Ftype, Pool } from '../../domain/enums.js';
 import type { Fact } from '../../domain/types.js';
 import { nowIso } from '../../domain/time.js';
 import { appendAudit } from './auditRepo.js';
@@ -206,5 +206,84 @@ export function refreshRecordedAt(db: Db, id: string, ts: string = nowIso()): vo
 
 export function countFacts(db: Db): number {
   const row = db.prepare('SELECT COUNT(*) AS n FROM fact').get() as { n: number };
+  return row.n;
+}
+
+export interface SearchOptions {
+  /** 关键词；对 content / canonical_key 做 LIKE。空则只按时间与生命周期排序 */
+  q?: string;
+  ftype?: readonly Ftype[];
+  scope?: string;
+  /** 默认只看 active */
+  status?: readonly Epistemic[];
+  /** true 则连已失效的历史行一起返回（详设 §4.1.1 的 `include_history`） */
+  includeHistory?: boolean;
+  from?: string;
+  to?: string;
+  limit: number;
+}
+
+/** LIKE 里的元字符要转义，否则用户搜 `100%` 会变成通配 */
+function likeEscape(s: string): string {
+  return s.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
+/** 把筛选条件拼成 WHERE 子句；`searchFacts` 与 `countMatching` 共用，避免口径分叉 */
+function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: unknown[] } {
+  const where: string[] = [];
+  const params: unknown[] = [];
+
+  if (opts.q !== undefined && opts.q.trim() !== '') {
+    where.push("(content LIKE ? ESCAPE '\\' OR canonical_key LIKE ? ESCAPE '\\')");
+    const pat = `%${likeEscape(opts.q.trim())}%`;
+    params.push(pat, pat);
+  }
+  if (opts.scope !== undefined) {
+    where.push('scope = ?');
+    params.push(opts.scope);
+  }
+  if (opts.ftype !== undefined && opts.ftype.length > 0) {
+    where.push(`ftype IN (${opts.ftype.map(() => '?').join(',')})`);
+    params.push(...opts.ftype);
+  }
+  const status = opts.status ?? (opts.includeHistory === true ? null : (['active'] as const));
+  if (status !== null) {
+    where.push(`epistemic_status IN (${status.map(() => '?').join(',')})`);
+    params.push(...status);
+  }
+  if (opts.from !== undefined) {
+    where.push('valid_at >= ?');
+    params.push(opts.from);
+  }
+  if (opts.to !== undefined) {
+    where.push('valid_at <= ?');
+    params.push(opts.to);
+  }
+
+  return { sql: where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '', params };
+}
+
+/**
+ * 符号检索（Phase 0 的兜底召回，详设 §6.7 第 1 步的最小版本）。
+ *
+ * 为什么放在 infra：`core`/`app` 里不许出现裸 SQL（`tools/check-lifecycle.ts` 会拦）。
+ * Phase 1 会在这里之上加向量 / BM25 / PPR 三路，但"关键词直查"这一路始终保留——
+ * 它是**唯一不依赖模型**的通路，冷启动与 sidecar 崩溃时全靠它。
+ */
+export function searchFacts(db: Db, opts: SearchOptions): Fact[] {
+  const { sql, params } = buildWhere(opts);
+  const rows = db
+    .prepare(
+      `SELECT * FROM fact${sql}` +
+        ' ORDER BY strength DESC, confidence DESC, valid_at DESC LIMIT ?',
+    )
+    .all(...params, opts.limit) as Record<string, unknown>[];
+  return rows.map(rowToFact);
+}
+
+/** 命中总数：用来判断"是否还有更多"，不必把行拉回来 */
+export function countMatching(db: Db, opts: Omit<SearchOptions, 'limit'>): number {
+  const { sql, params } = buildWhere(opts);
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM fact${sql}`).get(...params) as { n: number };
   return row.n;
 }

@@ -19,6 +19,7 @@ export const ID_PREFIX = {
   query: 'q',
   annotation: 'an',
   audit: 'au',
+  feedback: 'fb',
   adjudication: 'aj',
   topic: 't',
   quarantine: 'qa',

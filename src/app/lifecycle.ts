@@ -21,8 +21,9 @@ import {
   writeLock,
   type LockInfo,
 } from './lock.js';
+import { VERSION } from './version.js';
 
-export const VERSION = '0.1.0';
+export { VERSION };
 
 export interface DataPaths {
   root: string;
@@ -31,6 +32,7 @@ export interface DataPaths {
   tmp: string;
   lock: string;
   cursors: string;
+  importCursors: string;
   backups: string;
 }
 
@@ -62,8 +64,14 @@ export class AlreadyRunningError extends Error {
 }
 
 export interface BootOptions {
-  /** 绑定端口的服务；P0-18 换成 Fastify。默认给一个只回 404 的裸 server */
+  /** 绑定端口的服务；测试用。默认见 `defaultServerFactory` / `handlerFactory` */
   serverFactory?: (port: number) => http.Server;
+  /**
+   * 路由处理器工厂：拿到已经打开的 db 与 token 后返回一个 listener。
+   * `boot` 内部才知道端口与 db，所以 MCP/REST 的接线只能从这里进去——
+   * 否则 `main.ts` 要自己再开一次库。
+   */
+  handlerFactory?: (deps: { db: Db; cfg: Config; token: string }) => http.RequestListener;
   /** 注入锁文件路径（测试用） */
   lockFile?: string;
   version?: string;
@@ -86,6 +94,16 @@ const defaultServerFactory = (_port: number): http.Server =>
     res.setHeader('content-type', 'application/json; charset=utf-8');
     res.end('{"error":"E_NOT_FOUND"}');
   });
+
+/** 有 `handlerFactory` 就用它，否则退回"只回 404"的裸 server（P0-04 的默认行为） */
+function makeFactory(
+  handlerFactory: BootOptions['handlerFactory'],
+  deps: { db: Db; cfg: Config; token: string },
+): (port: number) => http.Server {
+  if (handlerFactory === undefined) return defaultServerFactory;
+  const listener = handlerFactory(deps);
+  return (_port: number) => http.createServer(listener);
+}
 
 function listen(server: http.Server, host: string, port: number): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -143,7 +161,7 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
     }
   }
 
-  const factory = opts.serverFactory ?? defaultServerFactory;
+  const factory = opts.serverFactory ?? makeFactory(opts.handlerFactory, { db, cfg, token });
   let port = 0;
   let server: http.Server | null = null;
   try {

@@ -7,8 +7,10 @@ import { runCli } from './cli/index.js';
 import { loadConfig } from './config.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
+import { createMcpHttpHandler } from './mcp/server.js';
+import { VERSION } from './version.js';
 
-export const VERSION = '0.1.0';
+export { VERSION };
 
 export type Mode = 'daemon' | 'cli' | 'version';
 
@@ -51,7 +53,11 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let instance;
   try {
-    instance = await boot(cfg);
+    instance = await boot(cfg, {
+      // MCP 面挂在同一个端口上（详设 §4.1）：`/mcp` 之外一律 404，
+      // REST/UI 在 P0-18 接进来时再往这个 listener 里加路由。
+      handlerFactory: ({ db, cfg: booted }) => createMcpHttpHandler({ db, cfg: booted }),
+    });
   } catch (err) {
     if (err instanceof AlreadyRunningError) {
       // 第二个实例不是错误：打印去向并退出 0（概设 §1.1 第 3 条）

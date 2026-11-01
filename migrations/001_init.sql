@@ -195,6 +195,9 @@ CREATE TABLE feedback (
 );
 CREATE INDEX idx_feedback_fact  ON feedback(fact_id);
 CREATE INDEX idx_feedback_query ON feedback(query_id);
+-- 幂等键（详设 §4.1.3）：同一条反馈重复提交必须不产生第二行。
+-- 注意 SQLite 的唯一索引把 NULL 视为互不相等，所以 query_id 为空的人工反馈可以有多条。
+CREATE UNIQUE INDEX uq_feedback_triple ON feedback(query_id, fact_id, verdict);
 
 CREATE TABLE query_log (
   id              TEXT PRIMARY KEY,
