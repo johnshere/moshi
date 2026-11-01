@@ -117,7 +117,10 @@ CREATE TABLE fact (
   CHECK (valid_to IS NULL OR valid_to > valid_at),
   CHECK (length(content) > 0)
 );
-CREATE UNIQUE INDEX idx_fact_identity  ON fact(canonical_key, scope, value_hash);
+-- I3 的正确口径是「同一身份键只有一条**活跃**事实」：情形 C（复活）要求旧行失效后
+-- 能再插一条同 value_hash 的新行，全局唯一索引会让这条路径直接违反约束。
+CREATE UNIQUE INDEX idx_fact_identity  ON fact(canonical_key, scope, value_hash)
+  WHERE valid_to IS NULL;
 CREATE INDEX idx_fact_status_strength  ON fact(epistemic_status, strength);
 CREATE INDEX idx_fact_scope_community  ON fact(scope, community_id);
 CREATE INDEX idx_fact_valid_range      ON fact(valid_at, valid_to);

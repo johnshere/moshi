@@ -34,8 +34,15 @@ export function findByIdentity(
   scope: string,
   valueHash: string,
 ): Fact | null {
+  // 唯一索引只约束「活跃行」，同一身份键可能有多条历史行；
+  // 优先返回活跃的，其次最近的——否则情形 B/C 的判定会读到错误的那一行。
   const row = db
-    .prepare('SELECT * FROM fact WHERE canonical_key = ? AND scope = ? AND value_hash = ?')
+    .prepare(
+      `SELECT * FROM fact
+        WHERE canonical_key = ? AND scope = ? AND value_hash = ?
+        ORDER BY (valid_to IS NULL) DESC, valid_at DESC
+        LIMIT 1`,
+    )
     .get(canonicalKey, scope, valueHash) as Record<string, unknown> | undefined;
   return row === undefined ? null : rowToFact(row);
 }
