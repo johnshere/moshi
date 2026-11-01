@@ -271,10 +271,17 @@ describe('entityRepo', () => {
 });
 
 describe('buildRepos', () => {
-  it('聚合对象暴露五组仓储，且不暴露 Db', () => {
+  it('聚合对象暴露六组仓储，且不暴露 Db', () => {
     const db = freshDb();
     const repos = buildRepos(db);
-    expect(Object.keys(repos).sort()).toEqual(['audit', 'edge', 'entity', 'fact', 'view']);
+    expect(Object.keys(repos).sort()).toEqual([
+      'audit',
+      'edge',
+      'entity',
+      'fact',
+      'quarantine',
+      'view',
+    ]);
     expect((repos as unknown as Record<string, unknown>)['db']).toBeUndefined();
   });
 });

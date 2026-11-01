@@ -9,6 +9,7 @@ import * as audit from './auditRepo.js';
 import * as edges from './edgeRepo.js';
 import * as entities from './entityRepo.js';
 import * as facts from './factRepo.js';
+import * as quarantine from './quarantineRepo.js';
 import * as views from './views.js';
 
 export interface Repos {
@@ -16,9 +17,17 @@ export interface Repos {
   edge: typeof edges;
   entity: typeof entities;
   audit: typeof audit;
+  quarantine: typeof quarantine;
   view: typeof views;
 }
 
 export function buildRepos(_db: Db): Repos {
-  return { fact: facts, edge: edges, entity: entities, audit, view: views };
+  return {
+    fact: facts,
+    edge: edges,
+    entity: entities,
+    audit,
+    quarantine,
+    view: views,
+  };
 }

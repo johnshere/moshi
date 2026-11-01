@@ -21,6 +21,7 @@ export const ID_PREFIX = {
   audit: 'au',
   adjudication: 'aj',
   topic: 't',
+  quarantine: 'qa',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIX;

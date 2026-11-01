@@ -81,6 +81,30 @@ export type Cardinality = (typeof CARDINALITY)[number];
 export const STATUS = ['ok', 'degraded'] as const;
 export type Status = (typeof STATUS)[number];
 
+/** 隔离原因（详设 §5.9 表）：每一条都必须能说清"为什么这条不能入图" */
+export const QUARANTINE_REASON = [
+  'low_confidence',
+  'too_long',
+  'binary_like',
+  'unserializable',
+  'mutex_storm',
+] as const;
+export type QuarantineReason = (typeof QUARANTINE_REASON)[number];
+
+/** 脱敏规则名（详设 §1.6 表）；写进 harvest 日志，用来回答"到底哪条规则在起作用" */
+export const REDACT_RULE = [
+  'private_key',
+  'private_key_truncated',
+  'openai_key',
+  'github_token',
+  'aws_key',
+  'bearer',
+  'user_path',
+  'generic_assign',
+  'private_ip',
+] as const;
+export type RedactRuleId = (typeof REDACT_RULE)[number];
+
 /** 运行期判定的窄化助手：用于校验外部输入（MCP / REST / 适配器） */
 export function isOneOf<T extends readonly string[]>(values: T, v: unknown): v is T[number] {
   return typeof v === 'string' && (values as readonly string[]).includes(v);

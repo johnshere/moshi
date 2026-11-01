@@ -31,6 +31,10 @@ prior_derived = 0.70
 validate_bump = 0.05
 validate_max = 0.99
 
+[redact]
+enabled = true              # 写入前脱敏（详设 §1.6），关掉等于把密钥存进本地库
+private_ip = false          # 内网 IP 可选脱敏，默认关
+
 [resolve]
 vector_threshold = 0.92     # 超此值建 alias（仍不合并）
 vector_queue_low = 0.60     # 进人工队列的下界

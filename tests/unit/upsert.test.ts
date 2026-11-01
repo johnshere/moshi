@@ -74,6 +74,17 @@ describe('置信（详设 §5.8）', () => {
     expect(priorFor('derived', { sourceMean: 0.99 })).toBe(0.9);
   });
 
+  it('先验表七行全覆盖：human 等同 user_confirm，gat_delta 等同 llm_claim', () => {
+    expect(priorFor('human')).toBe(priorFor('user_confirm'));
+    expect(priorFor('gat_delta')).toBe(priorFor('llm_claim'));
+    expect(priorFor('derived')).toBe(0.9);
+    // 所有先验都在 [0,1]，否则 clamp 之后"谁更强"的序会乱
+    for (const s of ['llm_claim', 'tool_obs', 'user_confirm', 'gat_delta', 'human', 'derived', 'procedure'] as const) {
+      expect(priorFor(s)).toBeGreaterThanOrEqual(0);
+      expect(priorFor(s)).toBeLessThanOrEqual(1);
+    }
+  });
+
   it('来源强度序', () => {
     expect(rankOf('user_confirm')).toBeGreaterThan(rankOf('tool_obs'));
     expect(rankOf('tool_obs')).toBeGreaterThan(rankOf('derived'));

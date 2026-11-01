@@ -70,6 +70,17 @@ const ResolveSchema = z
   })
   .strict();
 
+/**
+ * 脱敏开关（详设 §1.6「默认开启，规则可配」）。
+ * 只有两个键：规则表本身写在 `core/write/redact.ts` 里，做成配置项反而更容易被改错。
+ */
+const RedactSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    private_ip: z.boolean().default(false),
+  })
+  .strict();
+
 const LifecycleSchema = z
   .object({
     alpha: prob.default(0.15),
@@ -182,6 +193,7 @@ export const ConfigSchema = z
     storage: StorageSchema.default({}),
     ingest: IngestSchema.default({}),
     confidence: ConfidenceSchema.default({}),
+    redact: RedactSchema.default({}),
     resolve: ResolveSchema.default({}),
     lifecycle: LifecycleSchema.default({}),
     retrieval: RetrievalSchema.default({}),
