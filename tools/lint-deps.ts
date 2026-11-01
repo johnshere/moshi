@@ -145,7 +145,10 @@ function main(): number {
     violations.push(`循环依赖：${cycle.join(' -> ')}`);
   }
 
-  const internal = new Set(edges.map((e) => e.from));
+  const scanned = files.filter((f) => {
+    const rel = toRel(f);
+    return rel.startsWith('src/') && !rel.startsWith('src/ui/');
+  }).length;
   if (violations.length > 0) {
     process.stderr.write(`\n✖ ${violations.length} 处依赖违规\n\n`);
     for (const v of violations) process.stderr.write(`  ${v}\n`);
@@ -154,7 +157,7 @@ function main(): number {
   }
 
   process.stdout.write(
-    `✔ 依赖方向检查通过（${internal.size} 个模块，${edges.length} 条内部依赖，${RULES.length} 条规则）\n`,
+    `✔ 依赖方向检查通过（${scanned} 个模块，${edges.length} 条内部依赖，${RULES.length} 条规则）\n`,
   );
   return 0;
 }
