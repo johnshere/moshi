@@ -1,0 +1,145 @@
+/**
+ * 写入闭环（P1-22）：`memory_annotate` 入队 → harvest runner 消费 → 事实可查。
+ *
+ * 这条链路此前只在 `moshi import` 里存在——通过 MCP 说"记住"的事实会永远躺在
+ * `annotation` 表里。本文件锁三件事：入队后有人消费、没有唤醒时有兜底轮询、
+ * `stop()` 之后不再消费。
+ */
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
+import { migrate } from '../../src/infra/sqlite/migrate.js';
+import { loadConfig } from '../../src/app/config.js';
+import { startHarvestRunner, type HarvestRunner } from '../../src/app/harvestRunner.js';
+import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
+import { runMemoryQuery } from '../../src/app/mcp/query.js';
+import * as annotationRepo from '../../src/infra/sqlite/annotationRepo.js';
+import * as factRepo from '../../src/infra/sqlite/factRepo.js';
+import { bm25Search } from '../../src/infra/sqlite/ftsRepo.js';
+import type { McpDeps } from '../../src/app/mcp/deps.js';
+
+const opened: Db[] = [];
+const dirs: string[] = [];
+const runners: HarvestRunner[] = [];
+
+afterEach(() => {
+  // 先停消费者再关库：正在跑的一轮 harvest 会拿到已关闭的句柄
+  for (const r of runners.splice(0)) r.stop();
+  for (const db of opened.splice(0)) closeDb(db);
+  for (const d of dirs.splice(0)) {
+    try {
+      rmSync(d, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+});
+
+function tempDir(): string {
+  const d = mkdtempSync(path.join(tmpdir(), 'moshi-harvest-'));
+  dirs.push(d);
+  return d;
+}
+
+function freshDb(): Db {
+  const dir = tempDir();
+  const { db } = openDb({ file: path.join(dir, 'moshi.db') });
+  migrate(db, { backupsDir: path.join(dir, 'backups') });
+  opened.push(db);
+  return db;
+}
+
+function runnerFor(db: Db, intervalMs: number): HarvestRunner {
+  const runner = startHarvestRunner({ db, intervalMs });
+  runners.push(runner);
+  return runner;
+}
+
+function makeDeps(db: Db, onEnqueued?: () => void): McpDeps {
+  const home = tempDir();
+  return { db, cfg: loadConfig({ home }), ...(onEnqueued === undefined ? {} : { onEnqueued }) };
+}
+
+const FACT = {
+  content: '写入闭环验证：sidecar port 7001 监听',
+  subject: 'service:write-loop',
+  subject_type: 'service' as const,
+  predicate: 'listens_on',
+  value: { port: 7001 },
+  ftype: 'semantic' as const,
+};
+
+async function waitUntil(cond: () => boolean, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!cond()) {
+    if (Date.now() > deadline) throw new Error('等待条件超时');
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+describe('写入闭环（P1-22）', () => {
+  it('annotate 入队后立刻被消费，事实可查', async () => {
+    const db = freshDb();
+    let woke = 0;
+    const runner = runnerFor(db, 0);
+    const deps = makeDeps(db, () => {
+      woke += 1;
+      runner.wake();
+    });
+
+    const res = runMemoryAnnotate(deps, { facts: [FACT] });
+    expect(res.accepted).toHaveLength(1);
+    // 入队是同步的，消费是异步的：先确认"排在队里"
+    expect(annotationRepo.countPending(db)).toBe(1);
+
+    await waitUntil(() => annotationRepo.countPending(db) === 0);
+
+    expect(woke).toBe(1);
+    expect(factRepo.countFacts(db)).toBe(1);
+    // FTS 由仓储层同步：事实落库即可被 BM25 检索到
+    expect(bm25Search(db, '7001', 5)).toHaveLength(1);
+
+    const pack = await runMemoryQuery(deps, {
+      query: '7001',
+      top_k: 5,
+      scope: 'global',
+      include_history: false,
+      format: 'json',
+    });
+    expect(pack.evidence.length).toBeGreaterThan(0);
+    expect(pack.evidence[0]!.content).toContain('7001');
+  });
+
+  it('空队列跑一轮是空转，不报错也不推进批次', async () => {
+    const db = freshDb();
+    const runner = runnerFor(db, 0);
+    const res = await runner.runOnce();
+    expect(res.scanned).toBe(0);
+    expect(res.batches).toBe(0);
+    expect(runner.state()).toMatchObject({ pending: 0, errors: 0, runs: 1 });
+  });
+
+  it('没人唤醒时按周期兜底消费', async () => {
+    const db = freshDb();
+    const runner = runnerFor(db, 20);
+    const deps = makeDeps(db); // 不注入 onEnqueued = 模拟"老调用方/无唤醒来源"
+    runMemoryAnnotate(deps, { facts: [FACT] });
+    await waitUntil(() => annotationRepo.countPending(db) === 0, 3000);
+    expect(factRepo.countFacts(db)).toBe(1);
+    runner.stop();
+  });
+
+  it('stop() 之后不再消费', async () => {
+    const db = freshDb();
+    const runner = runnerFor(db, 0);
+    const deps = makeDeps(db);
+    runMemoryAnnotate(deps, { facts: [FACT] });
+    runner.stop();
+    runner.wake();
+    await new Promise((r) => setTimeout(r, 80));
+    expect(annotationRepo.countPending(db)).toBe(1);
+    expect(factRepo.countFacts(db)).toBe(0);
+  });
+});

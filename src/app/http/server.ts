@@ -32,6 +32,8 @@ export interface HttpDeps {
   cfg: Config;
   token: string;
   sidecar?: SidecarClient;
+  /** `memory_annotate` 入队后唤醒 harvest（P1-22）；CLI 测试不传即无消费者 */
+  onEnqueued?: () => void;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -89,6 +91,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     db: deps.db,
     cfg: deps.cfg,
     ...(deps.sidecar === undefined ? {} : { encode: encodeViaSidecar(deps.sidecar) }),
+    ...(deps.onEnqueued === undefined ? {} : { onEnqueued: deps.onEnqueued }),
     cache: buildEvidenceCache(deps.db, deps.cfg),
   };
   const mcpHandler = createMcpHttpHandler(mcpDeps);

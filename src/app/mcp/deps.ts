@@ -21,6 +21,11 @@ export interface McpDeps {
   cfg: Config;
   encode?: EncodeFn;
   cache?: EvidenceCache;
+  /**
+   * `memory_annotate` 入队成功后的通知点（P1-22）。由 daemon 注入 harvest runner 的
+   * `wake`；CLI / 测试不注入时只是"入队了但没人消费"，与注入前的行为一致。
+   */
+  onEnqueued?: () => void;
 }
 
 export function buildEvidenceCache(db: Db, cfg: Config): EvidenceCache {

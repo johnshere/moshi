@@ -115,5 +115,9 @@ export function runMemoryAnnotate(deps: McpDeps, input: AnnotateInput): Annotate
     });
   });
 
+  // 事务提交之后再唤醒消费者：harvest 在它自己的事务里要能读到刚入队的行。
+  // 回调由调用方注入（daemon = harvest runner 的 wake），这里不 import app 层。
+  if (result.accepted.length > 0) deps.onEnqueued?.();
+
   return result;
 }

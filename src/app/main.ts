@@ -9,6 +9,7 @@ import { loadConfig } from './config.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
+import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { VERSION } from './version.js';
@@ -56,13 +57,26 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let instance;
   let sidecar: SidecarClient | undefined;
+  let runner: HarvestRunner | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
     instance = await boot(cfg, {
       // Fastify 接管全部 HTTP 面：/ui、/api/*、/mcp 挂在同一个端口。
-      handlerFactory: async ({ db, cfg: booted, token }) =>
-        (await buildHttpApp({ db, cfg: booted, token, sidecar })).server,
+      handlerFactory: async ({ db, cfg: booted, token }) => {
+        // P1-22 写入闭环：annotation 入队后由这个 runner 消费成事实。
+        // 先起 runner 再建 app——/mcp 上线时 wake 必须已经可用，否则第一批
+        // "记住"要等 15s 兜底扫描才生效。
+        runner = startHarvestRunner({ db, log });
+        const { server } = await buildHttpApp({
+          db,
+          cfg: booted,
+          token,
+          sidecar,
+          onEnqueued: () => runner?.wake(),
+        });
+        return server;
+      },
     });
   } catch (err) {
     if (err instanceof AlreadyRunningError) {
@@ -114,6 +128,8 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   const shutdown = async (signal: string): Promise<void> => {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');
+    // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
+    runner?.stop();
     await sidecar?.shutdown();
     await instance.close();
     await built.close();
