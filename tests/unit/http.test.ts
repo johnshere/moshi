@@ -258,6 +258,30 @@ describe('GET /api/facts', () => {
     }
   });
 
+  it('重复 query 键（数组入参）一律 400，不再 500（台账 I-18 / P2-05 收口补）', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 3; i++) insertFact(db, { content: `f${i}` });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+    // limit / sort / cursor 之外，筛选参数（q/scope/ftype/status/from/to）同形状风险
+    for (const url of [
+      '/api/facts?limit=1&limit=2',
+      '/api/facts?sort=time&sort=importance',
+      '/api/facts?q=a&q=b',
+      '/api/facts?scope=global&scope=local',
+      '/api/facts?ftype=semantic&ftype=episodic',
+      '/api/facts?status=active&status=disputed',
+      '/api/facts?from=2026-01-01&from=2026-02-01',
+      '/api/facts?to=2026-01-01&to=2026-02-01',
+      '/api/facts?cursor=abc&cursor=def',
+    ]) {
+      const res = await app.inject({ method: 'GET', url, headers: h });
+      expect(res.statusCode, url).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error, url).toBe('E_INPUT');
+    }
+  });
+
   it('跨 sort 复用游标 → 400 cursor_sort_mismatch（两个方向都不许静默回第 1 页）', async () => {
     const db = freshDb();
     for (let i = 0; i < 5; i++) insertFact(db, { content: `f${i}` });

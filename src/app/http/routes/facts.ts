@@ -25,7 +25,11 @@ interface FactRoutesOpts {
 /** 列表排序键：只认两个值，拼错/缺省一律回落 `time`（深链不该因为一个参数白屏） */
 type SortKey = 'time' | 'importance';
 
-function parseSort(raw: string | undefined): SortKey {
+function parseSort(raw: string | string[] | undefined): SortKey {
+  // Fastify 把重复 query 键（?sort=a&sort=b）解成数组，数组一律 400（台账 I-18）
+  if (Array.isArray(raw)) {
+    throw new MoshiError('E_INPUT', `sort 必须是单个值，收到数组`, { reason: 'sort_invalid' });
+  }
   return raw === 'importance' ? 'importance' : 'time';
 }
 
@@ -41,7 +45,10 @@ const MAX_LIMIT = 200;
  * 所以非十进制正整数（`abc` / `1.9` / 空串 / `0` / 负数）一律 400，只有超上限仍夹住
  * （手搓 `limit=99999` 不该报错，前端固定 200）。
  */
-function parseLimit(raw: string | undefined): number {
+function parseLimit(raw: string | string[] | undefined): number {
+  if (Array.isArray(raw)) {
+    throw new MoshiError('E_INPUT', `limit 必须是单个值，收到数组`, { reason: 'limit_invalid' });
+  }
   if (raw === undefined) return DEFAULT_LIMIT;
   const text = raw.trim();
   if (!/^\d+$/.test(text)) {
@@ -71,7 +78,9 @@ function cursorInvalid(why: string): never {
  * - 坏 base64 / 坏 JSON / 缺字段 / 没有 `sort` 的旧格式 → `cursor_invalid`：
  *   不接受"猜一个默认值继续"，翻页静默串页比报错难查得多（台账 D-98）。
  */
-function decodeCursor(c: string | undefined, sort: SortKey): factRepo.SearchCursor | null {
+function decodeCursor(c: string | string[] | undefined, sort: SortKey): factRepo.SearchCursor | null {
+  // Fastify 把重复 query 键（?cursor=a&cursor=b）解成数组，数组一律 400（台账 I-18）
+  if (Array.isArray(c)) cursorInvalid('参数重复（数组入参）');
   // 只有"根本没传游标"才是第 1 页
   if (c === undefined || c === '') return null;
   // Buffer 的 base64 解码对非法字符是宽容的（直接跳过），先卡字符集，否则
@@ -123,30 +132,53 @@ function encodeCursor(sort: SortKey, last: { id: string; importance: number; val
 export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Promise<void> {
   const db = opts.db;
 
+  /**
+   * Fastify 默认把重复 query 键（?ftype=a&ftype=b）解成数组，筛选参数若放任数组
+   * 会一路崩成 500（`.split` 不存在 / SQL 收到数组）。数组一律 400（台账 I-18）。
+   */
+  function single(raw: string | string[] | undefined, name: string): string | undefined {
+    if (Array.isArray(raw)) {
+      throw new MoshiError('E_INPUT', `${name} 必须是单个值，收到数组`, { reason: `${name}_invalid` });
+    }
+    return raw;
+  }
+
   // GET /api/facts  列表
   app.get('/', async (req, reply) => {
-    const query = req.query as Record<string, string>;
+    const query = req.query as Record<string, string | string[] | undefined>;
     // 参数类错误在路由层就地转 400：本服务没有全局 errorHandler，抛出去会落到
     // Fastify 默认处理变成 500（`limit=abc` 以前就是这么变成 SQLITE_MISMATCH 的）
     let limit: number;
     let sort: SortKey;
     let cursor: factRepo.SearchCursor | null;
+    let q: string | undefined;
+    let scope: string | undefined;
+    let ftype: string | undefined;
+    let status: string | undefined;
+    let from: string | undefined;
+    let to: string | undefined;
     try {
       limit = parseLimit(query.limit);
       sort = parseSort(query.sort);
       cursor = decodeCursor(query.cursor, sort);
+      q = single(query.q, 'q');
+      scope = single(query.scope, 'scope');
+      ftype = single(query.ftype, 'ftype');
+      status = single(query.status, 'status');
+      from = single(query.from, 'from');
+      to = single(query.to, 'to');
     } catch (err) {
       if (!(err instanceof MoshiError)) throw err;
       return reply.code(400).send({ error: err.code, message: err.message, detail: err.detail });
     }
 
     const filter: factRepo.SearchOptions = {
-      q: query.q,
-      scope: query.scope,
-      ...(query.ftype ? { ftype: query.ftype.split(',') as factRepo.SearchOptions['ftype'] } : {}),
-      ...(query.status ? { status: query.status.split(',') as factRepo.SearchOptions['status'] } : {}),
-      ...(query.from ? { from: query.from } : {}),
-      ...(query.to ? { to: query.to } : {}),
+      q,
+      scope,
+      ...(ftype ? { ftype: ftype.split(',') as factRepo.SearchOptions['ftype'] } : {}),
+      ...(status ? { status: status.split(',') as factRepo.SearchOptions['status'] } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
       // keyset 分页：游标条件在 SQL 层生效（游标键与 sort 成对，见 SearchCursor）
       ...(cursor !== null ? { cursor } : {}),
       sort,

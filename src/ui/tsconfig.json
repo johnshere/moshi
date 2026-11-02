@@ -23,6 +23,8 @@
     "state/**/*.ts",
     "table/**/*.ts",
     "table/**/*.tsx",
+    "filter/**/*.ts",
+    "filter/**/*.tsx",
     "vite.config.ts"
   ]
 }

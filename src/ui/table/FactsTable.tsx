@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSelection } from '../state/selection.js';
+import { useFilter } from '../state/filter.js';
 import { fetchFacts, type TableRequestLog } from './api.js';
 import { debounce } from './pure/debounce.js';
 import {
@@ -72,6 +73,8 @@ export function FactsTable(): JSX.Element {
   const [requests, setRequests] = useState<TableRequestLog[]>([]);
 
   const focusId = useSelection((s) => s.focusId);
+  // 筛选态（P2-05）：URL 是唯一真相源，这里只订阅不另存；filter 变化会触发整体重取
+  const filter = useFilter((s) => s.filter);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** 行数组的镜像：请求回调里要读"当前已有哪些行"，state 闭包会读到旧值 */
   const rowsRef = useRef<FactRow[]>([]);
@@ -113,8 +116,19 @@ export function FactsTable(): JSX.Element {
       setLoading(true);
       const startedAt = performance.now();
       try {
-        const page = await fetchFacts({ q, sort, cursor: cursorArg, limit: PAGE_LIMIT, signal });
-        if (gen !== genRef.current) return; // 过期响应：q/sort 已经变了
+        const page = await fetchFacts({
+          q,
+          sort,
+          cursor: cursorArg,
+          limit: PAGE_LIMIT,
+          signal,
+          scope: filter.scope,
+          ftype: filter.ftype,
+          status: filter.status,
+          from: filter.timeRange.from,
+          to: filter.timeRange.to,
+        });
+        if (gen !== genRef.current) return; // 过期响应：q/sort/筛选已经变了
         const merged = mergePage(rowsRef.current, page.items);
         commitRows(merged.rows);
         totalRef.current = page.total;
@@ -151,7 +165,7 @@ export function FactsTable(): JSX.Element {
         }
       }
     },
-    [q, sort, commitRows, publish],
+    [q, sort, filter, commitRows, publish],
   );
 
   // 首屏 / 换搜索词 / 换排序：整体重来（切走再切回也走这条：动作是卸载 + 重挂载）
@@ -274,8 +288,8 @@ export function FactsTable(): JSX.Element {
         background: '#05070d',
         color: '#cbd5e1',
         fontSize: 12,
-        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮）
-        paddingTop: 56,
+        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + P2-05 筛选条）
+        paddingTop: 92,
         boxSizing: 'border-box',
       }}
     >

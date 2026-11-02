@@ -16,6 +16,8 @@ import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
 import { ACTIVITY_TTL_MS } from './graph/pure/encoding.js';
 import { useActivity } from './state/activity.js';
+import { useFilter } from './state/filter.js';
+import { FilterBar } from './filter/FilterBar.js';
 import { FactsTable } from './table/FactsTable.js';
 
 /**
@@ -202,10 +204,11 @@ function App(): JSX.Element {
     [],
   );
 
-  // 浏览器后退/前进回到上一个视图：URL 是唯一真相源，状态跟着它走
+  // 浏览器后退/前进：视图与筛选都跟 URL 走（URL 是唯一真相源，P2-05 验收项）
   useEffect(() => {
     const onPopState = (): void => {
       setView(initialView());
+      useFilter.getState().syncFromURL();
     };
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
@@ -274,6 +277,10 @@ function App(): JSX.Element {
               </button>
             ))}
           </span>
+        </div>
+        {/* 筛选条：三视图共享同一份状态（详设 §10.2），URL 是唯一真相源，写 URL 可分享可回退 */}
+        <div style={{ pointerEvents: 'auto', marginTop: 6 }}>
+          <FilterBar />
         </div>
         {/* 表格态的状态栏在表格自己的底栏里（行数 / 请求数 / fps 钩子），HUD 不再重复 */}
         {!isTable && (

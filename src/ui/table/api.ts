@@ -16,16 +16,35 @@ export interface FetchFactsArgs {
   cursor: string | null;
   limit?: number;
   signal?: AbortSignal;
+  /** 筛选：scope 精确匹配（`global` / `project:*`），null = 不限 */
+  scope?: string | null;
+  /** 筛选：ftype 多值，空 = 不限 */
+  ftype?: readonly string[];
+  /** 筛选：status 多值；空 = 表格默认可见集（TABLE_STATUS，与 3D/2D 一致） */
+  status?: readonly string[];
+  /** 筛选：valid_at >= from（ISO），null = 不限 */
+  from?: string | null;
+  /** 筛选：valid_at <= to（ISO），null = 不限 */
+  to?: string | null;
 }
 
 export async function fetchFacts(args: FetchFactsArgs): Promise<FactPage> {
   const params = new URLSearchParams();
   params.set('limit', String(args.limit ?? PAGE_LIMIT));
   params.set('sort', args.sort);
-  params.set('status', TABLE_STATUS);
+  const status = args.status ?? [];
+  params.set('status', status.length > 0 ? status.join(',') : TABLE_STATUS);
   if (args.cursor !== null) params.set('cursor', args.cursor);
   const q = args.q.trim();
   if (q !== '') params.set('q', q);
+  const scope = args.scope?.trim();
+  if (scope !== undefined && scope !== '') params.set('scope', scope);
+  const ftype = args.ftype ?? [];
+  if (ftype.length > 0) params.set('ftype', ftype.join(','));
+  const from = args.from?.trim();
+  if (from !== undefined && from !== '') params.set('from', from);
+  const to = args.to?.trim();
+  if (to !== undefined && to !== '') params.set('to', to);
   const res = await fetch(`/api/facts?${params.toString()}`, {
     headers: { 'X-Moshi-Token': resolveToken() },
     ...(args.signal === undefined ? {} : { signal: args.signal }),
