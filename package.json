@@ -5,7 +5,7 @@
   "description": "默识（moshi）——本机环境状态的客户端记忆系统",
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.18.0"
   },
   "packageManager": "pnpm@10.15.1",
   "bin": {
@@ -26,16 +26,10 @@
     "lint:writes": "tsx tools/check-writes.ts",
     "bench": "tsx tools/bench.ts"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
-  },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
     "@modelcontextprotocol/sdk": "^1.20.2",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.2.0",
     "fastify": "^5.6.1",
     "pino": "^9.13.1",
     "ulid": "^3.0.2",
