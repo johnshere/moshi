@@ -108,6 +108,17 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.mcp.allow_direct_write).toBe(false);
     expect(cfg.mcp.direct_write_batch_max).toBe(50);
     expect(cfg.mcp.direct_write_per_minute_max).toBe(120);
+    // P2-01 布局：默认值就是详设 §10.4 的数字，示例文件不许单独漂移
+    expect(cfg.layout.enabled).toBe(true);
+    expect(cfg.layout.tick_full).toBe(300);
+    expect(cfg.layout.tick_incremental).toBe(60);
+    expect(cfg.layout.link_strength).toBe(0.3);
+    expect(cfg.layout.charge_strength).toBe(-30);
+    expect(cfg.layout.center_strength).toBe(0.02);
+    expect(cfg.layout.community_strength).toBe(0.15);
+    expect(cfg.layout.jitter_radius).toBe(5);
+    expect(cfg.layout.extent).toBe(100);
+    expect(cfg.layout.displacement_threshold).toBe(15);
   });
 
   it('dataPaths 落在 data_dir 之下', () => {

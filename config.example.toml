@@ -131,3 +131,20 @@ keep_days = 7
 allow_direct_write = false
 direct_write_batch_max = 50     # 单批最多几条事实，超了整批拒绝（E_QUOTA）
 direct_write_per_minute_max = 120  # 每分钟最多几条直写事实，超了拒绝（E_QUOTA）
+
+# 3D 布局（P2-01 / 详设 §10.4 / 决议 D16）。
+# 坐标一律在后台 worker 线程算完落库，前端只渲染；力参数决定图的形状，
+# 改完记得跑一次 `moshi layout --full` 让整张图重新收敛。
+[layout]
+enabled = true              # daemon 里按节流自动给新事实补坐标；false = 只能手动 `moshi layout`
+interval_ms = 60000         # 节流周期；没有新事实时一次 COUNT 就跳过
+tick_full = 300             # 全量重算的迭代次数
+tick_incremental = 60       # 增量（只给新事实落位）的迭代次数
+link_strength = 0.3
+link_distance = 30          # 边自然长度
+charge_strength = -30       # 负值 = 互斥
+center_strength = 0.02
+community_strength = 0.15   # 向社区质心的锚定力（community_id 为空时锚到全局质心）
+jitter_radius = 5           # 新事实相对质心的初始偏移半径（种子 = hash(fact_id)）
+extent = 100                # 归一化范围，100 即 [-100,100]³
+displacement_threshold = 15 # 增量平均位移超过它 → 转全量重算

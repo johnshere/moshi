@@ -13,6 +13,7 @@ import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
 import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
 import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRunner.js';
+import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { VERSION } from './version.js';
@@ -63,6 +64,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let runner: HarvestRunner | undefined;
   let schemaRunner: SchemaInferRunner | undefined;
   let collectRunner: CollectRunner | undefined;
+  let layoutRunner: LayoutRunner | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
@@ -144,6 +146,19 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.error({ event: 'collect.start.failed', err: (err as Error).message }, 'collect runner failed');
   }
 
+  // P2-01 布局：harvest 落库的新事实按节流（默认 60s）补坐标。没有新事实时
+  // 一次 `countUnlaidFacts` 就跳过，不会每分钟白起一个 worker。
+  // 坐标只在这个 worker 线程里算，主线程继续扛 HTTP / MCP（概设 §8.9 纪律 1）。
+  try {
+    if (cfg.layout.enabled) {
+      layoutRunner = startLayoutRunner({ db: instance.db, cfg, log });
+    } else {
+      log.info({ event: 'layout.disabled' }, 'layout runner disabled by config');
+    }
+  } catch (err) {
+    log.error({ event: 'layout.start.failed', err: (err as Error).message }, 'layout runner failed');
+  }
+
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
   // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
@@ -172,6 +187,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     runner?.stop();
     schemaRunner?.stop();
     collectRunner?.stop();
+    layoutRunner?.stop();
     await sidecar?.shutdown();
     await instance.close();
     await built.close();

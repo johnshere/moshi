@@ -8,6 +8,7 @@ import { initCommand } from './commands/init.js';
 import { evalCommand } from './commands/eval.js';
 import { exportCommand } from './commands/export.js';
 import { revokeCommand } from './commands/revoke.js';
+import { layoutCommand } from './commands/layout.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
@@ -19,6 +20,7 @@ export const COMMANDS: readonly Command[] = [
   evalCommand,
   exportCommand,
   revokeCommand,
+  layoutCommand,
 ];
 
 export function usage(): string {

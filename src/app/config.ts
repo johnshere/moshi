@@ -231,6 +231,43 @@ const McpSchema = z
   })
   .strict();
 
+/**
+ * 3D 布局（P2-01 / 详设 §10.4 / 决议 D16）。
+ *
+ * 力参数不是"口味"而是**形状**：改 `charge_strength` 或 `community_strength`
+ * 会改掉整张图的拓扑观感，用户的空间记忆跟着崩掉。所以默认值与详设一模一样，
+ * 只有确实要重排整张图（换了参数、库被重建）时才动，动完必须跑一次
+ * `moshi layout --full`。
+ *
+ * 前端不做任何力导向（概设 §8.9 纪律 1）：坐标一律由后台 worker 算完落库，
+ * `layout` 段是这台算力机器的旋钮。
+ */
+const LayoutSchema = z
+  .object({
+    /** daemon 里按节流自动补坐标；false = 只能手动 `moshi layout` */
+    enabled: z.boolean().default(true),
+    /** 节流周期；0 = 不自动跑（测试用） */
+    interval_ms: z.number().int().min(0).default(60_000),
+    /** 全量重算的迭代次数（详设 §10.4：300） */
+    tick_full: positiveInt.default(300),
+    /** 增量（只给新事实落位）的迭代次数（详设 §10.4：60） */
+    tick_incremental: positiveInt.default(60),
+    link_strength: prob.default(0.3),
+    /** 边自然长度；详设没给，取 d3 默认 30（见台账 §5.2 D-73） */
+    link_distance: z.number().positive().default(30),
+    charge_strength: z.number().default(-30),
+    center_strength: prob.default(0.02),
+    /** 向社区质心的锚定力 k（community_id 为空时锚到全局质心） */
+    community_strength: prob.default(0.15),
+    /** 新事实相对质心的初始偏移半径（种子 = hash(fact_id)） */
+    jitter_radius: z.number().min(0).default(5),
+    /** 归一化范围：100 即 [-100,100]³ */
+    extent: z.number().positive().default(100),
+    /** 增量平均位移超过它 → 转全量重算 */
+    displacement_threshold: z.number().min(0).default(15),
+  })
+  .strict();
+
 export const ConfigSchema = z
   .object({
     server: ServerSchema.default({}),
@@ -252,6 +289,7 @@ export const ConfigSchema = z
     ui: UiSchema.default({}),
     log: LogSchema.default({}),
     mcp: McpSchema.default({}),
+    layout: LayoutSchema.default({}),
   })
   .strict();
 
