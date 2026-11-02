@@ -159,6 +159,160 @@ describe('GET /api/facts', () => {
     expect(p3.next_cursor).toBeNull();
     expect(p3.total).toBe(5);
   });
+
+  it('列表带 importance 字段（表格「重要」列与 importance 游标都要读它）', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'aaa', importance: 0.7 });
+    const { app, token } = await makeApp(db);
+    const body = JSON.parse(
+      (await app.inject({ method: 'GET', url: '/api/facts', headers: { 'X-Moshi-Token': token } })).body,
+    );
+    expect(typeof body.items[0].importance).toBe('number');
+    expect(body.items[0].importance).toBeCloseTo(0.7, 5);
+  });
+
+  it('sort=importance：importance DESC、同分按 id ASC（稳定键，翻页不会来回跳）', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_t1', importance: 0.9 });
+    insertFact(db, { id: 'fact_t2', importance: 0.9 });
+    insertFact(db, { id: 'fact_t3', importance: 0.3 });
+    insertFact(db, { id: 'fact_t4', importance: 0.1 });
+    const { app, token } = await makeApp(db);
+    const body = JSON.parse(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/facts?sort=importance',
+          headers: { 'X-Moshi-Token': token },
+        })
+      ).body,
+    );
+    expect(body.items.map((f: { id: string }) => f.id)).toEqual(['fact_t1', 'fact_t2', 'fact_t3', 'fact_t4']);
+  });
+
+  it('sort=importance 的游标翻页：页间不重叠、能翻完、total 不受游标影响', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_t1', importance: 0.9 });
+    insertFact(db, { id: 'fact_t2', importance: 0.9 });
+    insertFact(db, { id: 'fact_t3', importance: 0.3 });
+    insertFact(db, { id: 'fact_t4', importance: 0.1 });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+    const get = async (url: string): Promise<{
+      items: { id: string }[];
+      next_cursor: string | null;
+      total: number;
+    }> => JSON.parse((await app.inject({ method: 'GET', url, headers: h })).body);
+
+    const p1 = await get('/api/facts?sort=importance&limit=2');
+    expect(p1.items.map((f) => f.id)).toEqual(['fact_t1', 'fact_t2']);
+    expect(p1.next_cursor).not.toBeNull();
+    expect(p1.total).toBe(4);
+
+    const p2 = await get(`/api/facts?sort=importance&limit=2&cursor=${String(p1.next_cursor)}`);
+    // 同分跨页：0.9 的两条之后必须是 0.3，不能把 0.9 又捞回来
+    expect(p2.items.map((f) => f.id)).toEqual(['fact_t3', 'fact_t4']);
+    expect(p2.next_cursor).toBeNull();
+    expect(p2.total).toBe(4);
+
+    const ids = new Set([...p1.items, ...p2.items].map((f) => f.id));
+    expect(ids.size).toBe(4);
+  });
+
+  it('sort 拼错回落 time（深链不该因为一个参数白屏）', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 5; i++) insertFact(db, { content: `f${i}` });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+
+    const bogus = await app.inject({ method: 'GET', url: '/api/facts?sort=bogus&limit=2', headers: h });
+    expect(bogus.statusCode).toBe(200);
+    expect(JSON.parse(bogus.body).items).toHaveLength(2);
+  });
+
+  it('limit：缺省 50、1 与 200 原样生效、超上限夹到 200 而不报错', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 205; i++) insertFact(db, { content: `f${i}` });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+    const items = async (qs: string): Promise<unknown[]> =>
+      JSON.parse((await app.inject({ method: 'GET', url: `/api/facts${qs}`, headers: h })).body).items;
+
+    expect(await items('')).toHaveLength(50); // 缺省
+    expect(await items('?limit=1')).toHaveLength(1);
+    expect(await items('?limit=200')).toHaveLength(200);
+    // 手搓 URL 超过上限只夹住（详设口径就是 limit≤200），不当参数错误
+    expect(await items('?limit=201')).toHaveLength(200);
+  });
+
+  it('limit 非正整数一律 400 limit_invalid（不再 500、不再一次拉走全库、空库也不许伪装到底）', async () => {
+    // 空库很关键：limit=0 以前在空库上返回 items:[] + next_cursor:null，看起来"翻完了"
+    const { app, token } = await makeApp(freshDb());
+    const h = { 'X-Moshi-Token': token };
+    for (const raw of ['abc', '1.9', '', '0', '-5']) {
+      const res = await app.inject({ method: 'GET', url: `/api/facts?limit=${raw}`, headers: h });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error).toBe('E_INPUT');
+      expect(body.detail.reason).toBe('limit_invalid');
+    }
+  });
+
+  it('跨 sort 复用游标 → 400 cursor_sort_mismatch（两个方向都不许静默回第 1 页）', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 5; i++) insertFact(db, { content: `f${i}` });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+    const first = async (sort: string): Promise<string> =>
+      String(
+        JSON.parse(
+          (await app.inject({ method: 'GET', url: `/api/facts?sort=${sort}&limit=2`, headers: h })).body,
+        ).next_cursor,
+      );
+    const timeCursor = await first('time');
+    const importanceCursor = await first('importance');
+
+    for (const [sort, cursor] of [
+      ['importance', timeCursor], // time 游标拿去排 importance
+      ['time', importanceCursor], // 反向
+    ] as const) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/facts?sort=${sort}&limit=2&cursor=${cursor}`,
+        headers: h,
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error).toBe('E_INPUT');
+      expect(body.detail.reason).toBe('cursor_sort_mismatch');
+      expect(body.detail.sort).toBe(sort);
+    }
+  });
+
+  it('坏游标一律 400 cursor_invalid（坏 base64 / 坏 JSON / 缺字段 / 无 sort 旧格式）', async () => {
+    const db = freshDb();
+    for (let i = 0; i < 5; i++) insertFact(db, { content: `f${i}` });
+    const { app, token } = await makeApp(db);
+    const h = { 'X-Moshi-Token': token };
+    const b64 = (o: unknown): string => Buffer.from(JSON.stringify(o)).toString('base64url');
+    const cursors = [
+      '***', // 非 base64url 字符集
+      b64('{oops'), // 字符集合法但 JSON 坏
+      b64({ sort: 'time' }), // 缺 id / valid_at
+      b64({ valid_at: '2026-01-01T00:00:00.000Z', id: 'fact_x' }), // 无 sort 的旧格式，不兼容
+    ];
+    for (const cursor of cursors) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/facts?limit=2&cursor=${cursor}`,
+        headers: h,
+      });
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error).toBe('E_INPUT');
+      expect(body.detail.reason).toBe('cursor_invalid');
+    }
+  });
 });
 
 describe('GET /api/facts/:id', () => {

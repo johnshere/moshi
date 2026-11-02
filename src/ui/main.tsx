@@ -4,8 +4,9 @@
  * 职责只有"取数 + 视图切换 + 状态栏"：图怎么画全在 `graph/Graph3D.tsx` 与
  * `graph/Graph2D.tsx`，坐标全在 `/api/graph`，这里一行布局计算都没有（概设 §8.9 纪律 1）。
  *
- * 视图（`?view=3d|2d`）写回 URL：刷新与分享都不丢（P2-03 验收项）。
- * 表格视图是 P2-04，这里只放一个不可点的占位说明。
+ * 视图（`?view=3d|2d|table`）写回 URL：刷新与分享都不丢（P2-03 / P2-04 验收项）。
+ * 表格视图由 `table/FactsTable.tsx` 自理（取数、游标分页、虚拟滚动都在那儿）：
+ * 本文件只负责"切到表格时把图卸掉、且不为表格预拉图数据"。
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -15,6 +16,7 @@ import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
 import { ACTIVITY_TTL_MS } from './graph/pure/encoding.js';
 import { useActivity } from './state/activity.js';
+import { FactsTable } from './table/FactsTable.js';
 
 /**
  * 首屏默认页大小：与服务端 `DEFAULT_GRAPH_LIMIT` 对齐。
@@ -27,8 +29,15 @@ const DEFAULT_LIMIT = 1000;
 /** 与服务端 `MAX_LIMIT` 对齐；调大只会被服务端夹回上限 */
 const FULL_LIMIT = 5000;
 
-type View = '3d' | '2d';
+type View = '3d' | '2d' | 'table';
 const VIEW_KEY = 'view';
+
+/** 三个视图按钮：标题 / 说明都在这里，避免 JSX 里再写一遍三元 */
+const VIEWS: readonly { v: View; label: string; title: string; tag: string }[] = [
+  { v: '3d', label: '3D', title: '3D 发现视图：拖动旋转、点击选中', tag: '3D / §10.3' },
+  { v: '2d', label: '2D', title: '2D 确认视图：看清拓扑、精确点选', tag: '2D / §8.7' },
+  { v: 'table', label: '表格', title: '表格视图：游标分页 + 虚拟滚动（10k 行首屏 < 500ms）', tag: '表格 / §10.8' },
+];
 
 function initialLimit(): number {
   const raw = new URLSearchParams(window.location.search).get('limit');
@@ -37,9 +46,12 @@ function initialLimit(): number {
   return Math.min(Math.floor(n), FULL_LIMIT);
 }
 
-/** 只认 `view=2d`，其余（缺省 / 拼错 / 未来的 view=table）一律 3D——深链不该白屏 */
+/** 只认 `view=2d|table`，其余（缺省 / 拼错）一律 3D——深链不该白屏 */
 function initialView(): View {
-  return new URLSearchParams(window.location.search).get(VIEW_KEY) === '2d' ? '2d' : '3d';
+  const raw = new URLSearchParams(window.location.search).get(VIEW_KEY);
+  if (raw === '2d') return '2d';
+  if (raw === 'table') return 'table';
+  return '3d';
 }
 
 /** 切视图时保留 `limit` / `token` 等其它参数，只改 `view` */
@@ -142,6 +154,13 @@ function App(): JSX.Element {
    * 该挑哪一条当主角（`pickAccessRise`：增量最大者，并列取 importance 高者）。
    */
   const prevNodesRef = useRef<GraphPayload['nodes'] | null>(null);
+  /**
+   * 已拿到的图数据镜像：切到表格再切回来时**不重拉**。
+   *
+   * 用 ref 而不是依赖 `data` 判断，是为了让取数副作用只挂 `view`：`setData` 不该
+   * 反过来触发一次取数（否则刷新按钮每点一次都会自增两轮请求）。
+   */
+  const dataRef = useRef<GraphPayload | null>(null);
 
   const load = useCallback(async (requestLimit: number): Promise<void> => {
     abortRef.current?.abort();
@@ -155,6 +174,7 @@ function App(): JSX.Element {
       // 首屏没有上一份 → `pickAccessRise` 返回 null，不点亮任何东西（默认沉默）。
       const rise = pickAccessRise(prevNodesRef.current, payload.nodes);
       prevNodesRef.current = payload.nodes;
+      dataRef.current = payload;
       setData(payload);
       setLimit(requestLimit);
       if (rise !== null) useActivity.getState().hit(rise);
@@ -167,11 +187,20 @@ function App(): JSX.Element {
   }, []);
 
   useEffect(() => {
+    // 表格视图自己走 `/api/facts`（游标分页），这里不拉图：深链 `?view=table` 的
+    // 首屏预算（< 500ms）不该被 1000 节点 / 3000 边的 `/api/graph` 占掉。
+    if (view === 'table') return;
+    // 图数据还在 → 切回来直接复用（表格卸载时并没有清空 data）
+    if (dataRef.current !== null) return;
     void load(initialLimit());
-    return () => {
+  }, [view, load]);
+
+  useEffect(
+    () => () => {
       abortRef.current?.abort();
-    };
-  }, [load]);
+    },
+    [],
+  );
 
   // 浏览器后退/前进回到上一个视图：URL 是唯一真相源，状态跟着它走
   useEffect(() => {
@@ -190,6 +219,8 @@ function App(): JSX.Element {
   const meta = data?.meta;
   const fps = view === '2d' ? stats2d?.fps : stats3d?.fps;
   const is2d = view === '2d';
+  const isTable = view === 'table';
+  const tag = VIEWS.find((v) => v.v === view)?.tag ?? '3D / §10.3';
   const hitId = useActivity((s) => s.hitId);
   const seq = useActivity((s) => s.seq);
 
@@ -206,8 +237,9 @@ function App(): JSX.Element {
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>
-      {data !== null &&
-        (is2d ? <Graph2D data={data} onStats={setStats2d} /> : <Graph3D data={data} onStats={setStats3d} />)}
+      {/* 表格是第三态：切过去时图整体卸载（不保留 3D 场景、也不保留表格的分页状态） */}
+      {isTable && <FactsTable />}
+      {!isTable && data !== null && (is2d ? <Graph2D data={data} onStats={setStats2d} /> : <Graph3D data={data} onStats={setStats3d} />)}
 
       <div
         style={{
@@ -216,7 +248,7 @@ function App(): JSX.Element {
           left: 0,
           right: 0,
           padding: '10px 14px',
-          background: 'linear-gradient(180deg, rgba(5,7,13,0.92), rgba(5,7,13,0))',
+          background: isTable ? 'transparent' : 'linear-gradient(180deg, rgba(5,7,13,0.92), rgba(5,7,13,0))',
           pointerEvents: 'none',
           fontSize: 12,
           lineHeight: 1.7,
@@ -225,95 +257,86 @@ function App(): JSX.Element {
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 14, color: '#f8fafc', letterSpacing: 1 }}>
             默识 · 记忆图谱{' '}
-            <span style={{ color: '#475569', fontSize: 12 }}>{is2d ? '2D / §8.7' : '3D / §10.3'}</span>
+            <span style={{ color: '#475569', fontSize: 12 }}>{tag}</span>
           </div>
           <span style={{ pointerEvents: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
-            {(['3d', '2d'] as const).map((v) => (
+            {VIEWS.map((item) => (
               <button
-                key={v}
+                key={item.v}
                 type="button"
-                onClick={() => showView(v)}
-                disabled={view === v}
-                aria-pressed={view === v}
-                title={v === '3d' ? '3D 发现视图：拖动旋转、点击选中' : '2D 确认视图：看清拓扑、精确点选'}
-                style={switchStyle(view === v)}
+                onClick={() => showView(item.v)}
+                disabled={view === item.v}
+                aria-pressed={view === item.v}
+                title={item.title}
+                style={switchStyle(view === item.v)}
               >
-                {v === '3d' ? '3D' : '2D'}
+                {item.label}
               </button>
             ))}
-            <span
-              title="表格视图与虚拟滚动是 P2-04（台账 §3），本任务不做，这里只是占位"
-              aria-disabled="true"
-              style={{
-                background: '#080c14',
-                color: '#475569',
-                border: '1px dashed #1f2937',
-                borderRadius: 4,
-                padding: '2px 10px',
-                cursor: 'not-allowed',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              表格（P2-04 未实现）
-            </span>
           </span>
         </div>
-        <div>
-          <Badge label="节点" value={meta === undefined ? '—' : `${meta.returned_nodes} / ${meta.total_nodes}`} />
-          <Badge label="边" value={meta === undefined ? '—' : `${meta.returned_edges} / ${meta.total_edges}`} />
-          {!is2d && (
-            <Badge
-              label="draw calls"
-              value={stats3d === null ? '—' : String(stats3d.renderCalls)}
-            />
-          )}
-          <Badge label="fps" value={fps === undefined ? '—' : fps.toFixed(1)} />
-          {!is2d && <Badge label="标签" value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
-          {is2d && <Badge label="选中" value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
-          <span style={{ pointerEvents: 'auto' }}>
-            <button type="button" onClick={() => void load(limit)} style={buttonStyle}>
-              {loading ? '加载中…' : '刷新'}
-            </button>
-            {meta !== undefined && meta.returned_nodes < meta.total_nodes && (
-              <button
-                type="button"
-                onClick={() => void load(FULL_LIMIT)}
-                style={{ ...buttonStyle, background: '#0b1220', color: '#f59e0b', border: '1px solid #78350f', marginLeft: 6 }}
-              >
-                加载全量（{FULL_LIMIT}）
-              </button>
+        {/* 表格态的状态栏在表格自己的底栏里（行数 / 请求数 / fps 钩子），HUD 不再重复 */}
+        {!isTable && (
+          <div>
+            <Badge label="节点" value={meta === undefined ? '—' : `${meta.returned_nodes} / ${meta.total_nodes}`} />
+            <Badge label="边" value={meta === undefined ? '—' : `${meta.returned_edges} / ${meta.total_edges}`} />
+            {!is2d && (
+              <Badge
+                label="draw calls"
+                value={stats3d === null ? '—' : String(stats3d.renderCalls)}
+              />
             )}
-          </span>
-        </div>
-        {meta !== undefined && meta.truncated && (
+            <Badge label="fps" value={fps === undefined ? '—' : fps.toFixed(1)} />
+            {!is2d && <Badge label="标签" value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
+            {is2d && <Badge label="选中" value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
+            <span style={{ pointerEvents: 'auto' }}>
+              <button type="button" onClick={() => void load(limit)} style={buttonStyle}>
+                {loading ? '加载中…' : '刷新'}
+              </button>
+              {meta !== undefined && meta.returned_nodes < meta.total_nodes && (
+                <button
+                  type="button"
+                  onClick={() => void load(FULL_LIMIT)}
+                  style={{ ...buttonStyle, background: '#0b1220', color: '#f59e0b', border: '1px solid #78350f', marginLeft: 6 }}
+                >
+                  加载全量（{FULL_LIMIT}）
+                </button>
+              )}
+            </span>
+          </div>
+        )}
+        {!isTable && meta !== undefined && meta.truncated && (
           <div style={{ color: '#f59e0b' }}>
             结果被截断：只返回了 {meta.returned_nodes} / {meta.total_nodes} 个节点（limit={meta.limit}）。
             点「加载全量」一次取满（{FULL_LIMIT}），或用 `?limit=` / cursor 分批取。
           </div>
         )}
-        {meta !== undefined && meta.nodes_without_layout > 0 && (
+        {!isTable && meta !== undefined && meta.nodes_without_layout > 0 && (
           <div style={{ color: '#64748b' }}>
             另有 {meta.nodes_without_layout} 个活跃事实还没有 layout 坐标，未参与绘制。
           </div>
         )}
-        {error !== null && <div style={{ color: '#ef4444' }}>取数失败：{error}</div>}
-        <ActivityNote />
+        {!isTable && error !== null && <div style={{ color: '#ef4444' }}>取数失败：{error}</div>}
+        {!isTable && <ActivityNote />}
       </div>
 
-      <div
-        style={{
-          position: 'absolute',
-          bottom: 8,
-          left: 14,
-          color: '#475569',
-          fontSize: 11,
-          pointerEvents: 'none',
-        }}
-      >
-        {is2d
-          ? '拖动平移 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 点空白取消选中 · 坐标取布局表的 (x, z)，前端不跑布局'
-          : '拖动旋转 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 标签只在活跃层、且离相机比整图半径更近时出现 · Y 四层 = strength'}
-      </div>
+      {/* 表格态的操作提示由表格自己的底栏承担（那边还有行数/请求数），这里不再叠一层 */}
+      {!isTable && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: 8,
+            left: 14,
+            color: '#475569',
+            fontSize: 11,
+            pointerEvents: 'none',
+          }}
+        >
+          {is2d
+            ? '拖动平移 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 点空白取消选中 · 坐标取布局表的 (x, z)，前端不跑布局'
+            : '拖动旋转 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 标签只在活跃层、且离相机比整图半径更近时出现 · Y 四层 = strength'}
+        </div>
+      )}
     </div>
   );
 }

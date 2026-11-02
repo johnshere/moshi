@@ -345,6 +345,17 @@ export function countDistinctSubjectsBetween(db: Db, from: string, to: string): 
   return row.n;
 }
 
+/**
+ * keyset 游标：排序键 + 上一页最后一行的键值。
+ *
+ * 为什么把 `sort` 塞进游标而不是两个平行字段：排序键与游标键必须成对出现——
+ * 时间序按 `(valid_at DESC, id DESC)` 走"更早"，重要度序按 `(importance DESC, id ASC)`
+ * 走"更轻"，两种条件的方向相反。写成一个判别联合，调用方不可能只改排序却忘了改游标。
+ */
+export type SearchCursor =
+  | { sort: 'time'; validAt: string; id: string }
+  | { sort: 'importance'; importance: number; id: string };
+
 export interface SearchOptions {
   /** 关键词；对 content / canonical_key 做 LIKE。空则只按时间与生命周期排序 */
   q?: string;
@@ -357,16 +368,16 @@ export interface SearchOptions {
   from?: string;
   to?: string;
   /**
-   * 游标分页（keyset）：只取"严格早于该游标"的行。
-   * 排序键必须与游标键一致——见 `sort` 的说明。若排序与游标不一致，翻页会错乱。
+   * 游标分页（keyset）：只取"严格排在游标之后"的行。
+   * 排序键必须与游标键一致（`cursor.sort`）——若排序与游标不一致，翻页会错乱。
    */
-  cursor?: { validAt: string; id: string };
+  cursor?: SearchCursor;
   /**
-   * 排序键。`strength`（默认）适合召回场景；`time` 用于游标分页——
-   * 游标是 `{valid_at, id}`，排序键必须与之一致，否则翻页会错乱
+   * 排序键。`strength`（默认）适合召回场景；`time` / `importance` 用于列表的游标分页，
+   * 游标键必须与之一致（见 `SearchCursor`），否则翻页会错乱
    * （比如按 strength 排序但按时间过滤，会把上一页的行又捞回来）。
    */
-  sort?: 'strength' | 'time';
+  sort?: 'strength' | 'time' | 'importance';
   limit: number;
 }
 
@@ -406,11 +417,17 @@ function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: 
     where.push('valid_at <= ?');
     params.push(opts.to);
   }
-  // keyset 游标：严格早于游标（valid_at 相同则 id 更小），与 `sort: 'time'` 的排序一致。
-  // 必须下沉到 SQL——先 LIMIT 再内存过滤会把第二页的数据挡在查询结果之外。
+  // keyset 游标：必须下沉到 SQL——先 LIMIT 再内存过滤会把第二页的数据挡在查询结果之外。
+  // 两种排序的越界方向相反：时间序"更早"（valid_at < / id <），重要度序是 DESC + id ASC，
+  // 所以"更轻"要按 importance < 或（同分）id >。
   if (opts.cursor !== undefined) {
-    where.push('(valid_at < ? OR (valid_at = ? AND id < ?))');
-    params.push(opts.cursor.validAt, opts.cursor.validAt, opts.cursor.id);
+    if (opts.cursor.sort === 'importance') {
+      where.push('(importance < ? OR (importance = ? AND id > ?))');
+      params.push(opts.cursor.importance, opts.cursor.importance, opts.cursor.id);
+    } else {
+      where.push('(valid_at < ? OR (valid_at = ? AND id < ?))');
+      params.push(opts.cursor.validAt, opts.cursor.validAt, opts.cursor.id);
+    }
   }
 
   return { sql: where.length > 0 ? ` WHERE ${where.join(' AND ')}` : '', params };
@@ -424,11 +441,28 @@ function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: 
  * 它是**唯一不依赖模型**的通路，冷启动与 sidecar 崩溃时全靠它。
  */
 export function searchFacts(db: Db, opts: SearchOptions): Fact[] {
+  // 排序键与游标键不一致 = 分页必然错乱（同一条会重复出现或被跳过），
+  // 这类 bug 在 UI 上表现为"滚动时行号乱跳"，很难回溯，所以在入口直接炸。
+  // HTTP 层（`routes/facts.ts` 的 decodeCursor）已经先一步返 400
+  // `detail.reason="cursor_sort_mismatch"`，这里是 infra 兜底：绕过 HTTP 直接调
+  // searchFacts 的调用方（评测脚本、将来的 CLI）同样不能带着不一致的键进来。
+  if (
+    opts.cursor !== undefined &&
+    (opts.sort === 'time' || opts.sort === 'importance') &&
+    opts.cursor.sort !== opts.sort
+  ) {
+    throw new MoshiError('E_INPUT', '游标键与排序键不一致', {
+      sort: opts.sort,
+      cursorSort: opts.cursor.sort,
+    });
+  }
   const { sql, params } = buildWhere(opts);
   const orderBy =
     opts.sort === 'time'
       ? 'valid_at DESC, id DESC'
-      : 'strength DESC, confidence DESC, valid_at DESC';
+      : opts.sort === 'importance'
+        ? 'importance DESC, id ASC'
+        : 'strength DESC, confidence DESC, valid_at DESC';
   const rows = db
     .prepare(`SELECT * FROM fact${sql}` + ` ORDER BY ${orderBy} LIMIT ?`)
     .all(...params, opts.limit) as Record<string, unknown>[];

@@ -16,5 +16,13 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["main.tsx", "graph/**/*.ts", "graph/**/*.tsx", "state/**/*.ts", "vite.config.ts"]
+  "include": [
+    "main.tsx",
+    "graph/**/*.ts",
+    "graph/**/*.tsx",
+    "state/**/*.ts",
+    "table/**/*.ts",
+    "table/**/*.tsx",
+    "vite.config.ts"
+  ]
 }

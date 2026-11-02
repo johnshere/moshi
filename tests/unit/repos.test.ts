@@ -173,6 +173,26 @@ describe('factRepo', () => {
     expect(got?.strength).toBe(0.12);
     expect(got?.pool).toBe('value_floor');
   });
+
+  it('searchFacts 拒绝游标排序键与 sort 不一致（infra 兜底，HTTP 层已先返 400）', () => {
+    const db = freshDb();
+    const fact = makeFact();
+    factRepo.insertFact(db, fact);
+    try {
+      // time 序的游标配 sort=importance：拿错键过滤只会静默返回错页
+      factRepo.searchFacts(db, {
+        sort: 'importance',
+        limit: 10,
+        cursor: { sort: 'time', validAt: fact.validAt, id: fact.id },
+      });
+      throw new Error('should throw');
+    } catch (err) {
+      expect(isMoshiError(err)).toBe(true);
+      if (!isMoshiError(err)) throw err;
+      expect(err.code).toBe('E_INPUT');
+      expect(err.detail).toMatchObject({ sort: 'importance', cursorSort: 'time' });
+    }
+  });
 });
 
 describe('edgeRepo', () => {
