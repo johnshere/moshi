@@ -101,6 +101,7 @@ export function rowToEdge(row: Row): Edge {
     validAt: str(row, 'valid_at'),
     validTo: strOrNull(row, 'valid_to'),
     createdAt: str(row, 'recorded_at'),
+    provenance: strOrNull(row, 'provenance'),
   };
 }
 

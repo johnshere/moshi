@@ -212,6 +212,85 @@ export function countFacts(db: Db): number {
   return row.n;
 }
 
+// ── 边抽取的候选查询（P2-22 / 详设 §5.12.6）──
+//
+// 规则留在 `core/write/edges.ts`，SQL 只能待在这一层：
+// `lint:lifecycle` 禁止 core 直接持有 db 句柄（概设 §1.6 第 3 条）。
+
+export interface FactRef {
+  id: string;
+  validAt: string;
+}
+
+/** 同 subject 实体、`valid_at` 落在 [from,to] 内的其他活跃事实（共现候选，近的优先） */
+export function listCoOccurCandidates(
+  db: Db,
+  opts: { id: string; entityId: string; from: string; to: string; at: string },
+): FactRef[] {
+  const rows = db
+    .prepare(
+      `SELECT id, valid_at FROM fact
+        WHERE id <> ? AND valid_to IS NULL
+          AND json_extract(attrs,'$.frozen.subject.entity_id') = ?
+          AND valid_at >= ? AND valid_at <= ?
+        ORDER BY ABS(strftime('%s', valid_at) - strftime('%s', ?)), id
+        LIMIT 50`,
+    )
+    .all(opts.id, opts.entityId, opts.from, opts.to, opts.at) as { id: string; valid_at: string }[];
+  return rows.map((r) => ({ id: r.id, validAt: r.valid_at }));
+}
+
+/** 同实体 + 同谓词、已收口的旧事实（取代候选，新的在前） */
+export function listSupersedeCandidates(
+  db: Db,
+  opts: { id: string; entityId: string; predicate: string; before: string },
+): FactRef[] {
+  const rows = db
+    .prepare(
+      `SELECT id, valid_at FROM fact
+        WHERE id <> ? AND valid_to IS NOT NULL AND valid_at < ?
+          AND json_extract(attrs,'$.frozen.subject.entity_id') = ?
+          AND json_extract(attrs,'$.frozen.predicate') = ?
+        ORDER BY valid_at DESC, id
+        LIMIT 20`,
+    )
+    .all(opts.id, opts.before, opts.entityId, opts.predicate) as {
+    id: string;
+    valid_at: string;
+  }[];
+  return rows.map((r) => ({ id: r.id, validAt: r.valid_at }));
+}
+
+/** 同 episode 的工具观测事实，按 `valid_at` 升序（工具序列候选） */
+export function listEpisodeToolFacts(db: Db, episodeId: string, excludeId: string): FactRef[] {
+  const rows = db
+    .prepare(
+      `SELECT id, valid_at FROM fact
+        WHERE source_episode = ? AND id <> ? AND valid_to IS NULL
+          AND confidence_source = 'tool_obs'
+        ORDER BY valid_at, id`,
+    )
+    .all(episodeId, excludeId) as { id: string; valid_at: string }[];
+  return rows.map((r) => ({ id: r.id, validAt: r.valid_at }));
+}
+
+/** 同 episode 里带 subject 名的事实（过程步骤按 step 名解析） */
+export function listEpisodeFactNames(
+  db: Db,
+  episodeId: string,
+  excludeId: string,
+): { id: string; name: string }[] {
+  const rows = db
+    .prepare(
+      `SELECT id, json_extract(attrs,'$.frozen.subject.name') AS name FROM fact
+        WHERE source_episode = ? AND id <> ? AND valid_to IS NULL`,
+    )
+    .all(episodeId, excludeId) as { id: string; name: string | null }[];
+  return rows.filter(
+    (r): r is { id: string; name: string } => typeof r.name === 'string' && r.name.length > 0,
+  );
+}
+
 /** 会话摘要窗口（详设 §8.2）：`created_at ∈ [from,to]` 的新观测数 */
 export function countCreatedBetween(db: Db, from: string, to: string): number {
   const row = db

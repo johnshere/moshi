@@ -70,6 +70,8 @@ export interface Edge {
   validAt: string;
   validTo: string | null;
   createdAt: string;
+  /** 生成规则（P2-22 / 迁移 004 `edge.provenance`）；人工写入的边为 null */
+  provenance?: string | null;
 }
 
 export interface Entity {

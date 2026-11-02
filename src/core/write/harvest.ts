@@ -26,6 +26,7 @@ import * as factRepo from '../../infra/sqlite/factRepo.js';
 import { withTransaction } from '../../infra/sqlite/tx.js';
 import { parseTurn } from '../parse/registry.js';
 import { applyConflictPolicy, cardinalityOf, type ConflictResult, type OntologyHint } from './conflict.js';
+import { extractEdges, totalCreated } from './edges.js';
 import { mergeOnReobserve, type Priors, DEFAULT_PRIORS } from './confidence.js';
 import { buildIdentity } from './identity.js';
 import type { ToolTurnPayload } from './ingest.js';
@@ -291,6 +292,8 @@ export interface HarvestResult {
   quarantined: number;
   skipped: number;
   failed: number;
+  /** 本轮抽出的边（P2-22 四条规则的合计） */
+  edges: number;
   ms: number;
 }
 
@@ -306,6 +309,7 @@ function emptyResult(): HarvestResult {
     quarantined: 0,
     skipped: 0,
     failed: 0,
+    edges: 0,
     ms: 0,
   };
 }
@@ -391,6 +395,16 @@ function writeOne(
 }
 
 /** 处理一条 annotation。抛错由调用方转成 `annotation.error` */
+/** 事实落地后按批收边（P2-22）：返回本轮新增的边数 */
+function applyEdges(db: Db, factIds: readonly string[]): number {
+  if (factIds.length === 0) return 0;
+  const facts = factIds
+    .map((id) => factRepo.getFact(db, id))
+    .filter((f): f is Fact => f !== null);
+  if (facts.length === 0) return 0;
+  return totalCreated(extractEdges(db, { facts }).created);
+}
+
 function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats: HarvestResult): void {
   let payload: unknown;
   try {
@@ -405,6 +419,7 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
   if (row.channel === 'annotate' || row.channel === 'harvest') {
     const p = payload as { facts?: AnnotatePayload[] } & AnnotatePayload;
     const facts = Array.isArray(p.facts) ? p.facts : [p];
+    const touched: string[] = [];
     for (const f of facts) {
       const content = redactText(f.content, ctx.redact).text;
       const value = redactValue(f.value, ctx.redact);
@@ -439,7 +454,9 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
         ext: redactValue(f.ext ?? {}, ctx.redact) as Record<string, unknown>,
       });
       stats[r.outcome] += 1;
+      touched.push(r.factId);
     }
+    stats.edges += applyEdges(db, touched);
     annotationRepo.markHarvested(db, row.id, ctx.ts);
     return;
   }
@@ -461,6 +478,7 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
     return;
   }
 
+  const touched: string[] = [];
   for (const f of parsed.facts) {
     const content = redactText(f.content, ctx.redact).text;
     const value = redactValue(f.value, ctx.redact);
@@ -492,7 +510,9 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
       ...(f.ext === undefined ? {} : { ext: redactValue(f.ext, ctx.redact) as Record<string, unknown> }),
     });
     stats[r.outcome] += 1;
+    touched.push(r.factId);
   }
+  stats.edges += applyEdges(db, touched);
   annotationRepo.markHarvested(db, row.id, ctx.ts);
 }
 
