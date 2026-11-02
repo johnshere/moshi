@@ -1,0 +1,323 @@
+/**
+ * 2D 记忆图谱（sigma.js + graphology，P2-03；详设 §10.1 `<Graph2D>` / 概设 §8.7「2D = 确认」）。
+ *
+ * 三个不变量，改动前先读：
+ * 1. **坐标只从布局表来**：节点位置 = `layout.x` / `layout.z`（经 `pure/graph2d.ts` 的
+ *    `projectTo2D`），这里一行力导向都没有（概设 §8.9 纪律 1）。sigma 自带布局的入口
+ *    一个都没调——图上每个点落在哪，只由库里那张 `layout` 表决定。
+ * 2. **颜色 / 尺寸 / 失效区分全部来自 `pure/encoding.ts`**，本文件不出现第二个色表。
+ * 3. **选中态只走 `state/selection.ts`**：与 3D 是同一个 store，不是两套高亮。
+ */
+import { useEffect, useRef } from 'react';
+import { MultiGraph } from 'graphology';
+import Sigma from 'sigma';
+import type { GraphEdge, GraphNode, GraphPayload } from '../api.js';
+import { useActivity } from '../state/activity.js';
+import { useSelection } from '../state/selection.js';
+import { edgeKey, type ActivitySnapshot } from './pure/activity.js';
+import { ACTIVITY_TTL_MS, type VisualState } from './pure/encoding.js';
+import { edge2DAttrs, focusAttrs, node2DAttrs } from './pure/graph2d.js';
+
+const BG_COLOR = '#05070d';
+
+export interface Graph2DStats {
+  fps: number;
+  nodeCount: number;
+  edgeCount: number;
+  selectedId: string | null;
+  /** 活跃集规模（详设 §10.3.1 验收 ③/⑥） */
+  activeNodes: number;
+  activeEdges: number;
+}
+
+/**
+ * sigma 4 的样式表：显式绑死每个视觉变量对应的节点属性。
+ *
+ * v4 取消了 v2/v3 的 `nodeReducer` / `edgeReducer`，改成这一张声明表；**给了 styles
+ * 就整体替换 `DEFAULT_STYLES`**，所以 x / y / size / color / label / labelVisibility
+ * 必须自己写全（否则节点直接不画或不带标签）。默认表里没有 `opacity`，而 strength
+ * 的透明度正是靠它，所以这一条是本表存在的首要原因。
+ */
+const SIGMA_STYLES = {
+  nodes: {
+    x: { attribute: 'x' },
+    y: { attribute: 'y' },
+    size: { attribute: 'size' },
+    color: { attribute: 'color' },
+    opacity: { attribute: 'opacity' },
+    label: { attribute: 'label' },
+    labelVisibility: { attribute: 'labelVisibility' },
+    labelSize: 11,
+  },
+  edges: {
+    size: { attribute: 'size' },
+    color: { attribute: 'color' },
+    opacity: { attribute: 'opacity' },
+  },
+  stage: { background: BG_COLOR },
+} as const;
+
+class SigmaScene {
+  private readonly host: HTMLElement;
+  private readonly onStats: ((s: Graph2DStats) => void) | undefined;
+  private readonly graph = new MultiGraph();
+  private renderer: Sigma | null = null;
+  private readonly unsubSelection: () => void;
+  private readonly unsubActivity: () => void;
+
+  /** 原始数据：样式要按活跃态重算，所以不能只留 sigma 图属性 */
+  private nodes: GraphNode[] = [];
+  private readonly rawNodeById = new Map<string, GraphNode>();
+  private readonly rawEdgeByKey = new Map<string, GraphEdge>();
+  private activity: ActivitySnapshot | null = null;
+
+  private selectedId: string | null = null;
+  private raf = 0;
+  private disposed = false;
+  private frames = 0;
+  private fpsAt = performance.now();
+  private fps = 0;
+  private publishAt = 0;
+
+  constructor(host: HTMLElement, onStats?: (s: Graph2DStats) => void) {
+    this.host = host;
+    this.onStats = onStats;
+    this.selectedId = useSelection.getState().focusId;
+    this.activity = useActivity.getState().snapshot;
+    // 命令式渲染器订阅 store：3D 点选后切到 2D，这里要立刻高亮（不是等下一次刷新）
+    this.unsubSelection = useSelection.subscribe((state, prev) => {
+      if (state.focusId !== prev.focusId) this.applyFocus(state.focusId);
+    });
+    // 活跃集与选中态是两个来源（D-89），一起决定节点的最终样式
+    this.unsubActivity = useActivity.subscribe((state, prev) => {
+      if (state.snapshot === prev.snapshot) return;
+      this.activity = state.snapshot;
+      this.applyVisuals();
+    });
+    this.loop();
+  }
+
+  setData(data: GraphPayload): void {
+    this.graph.clear();
+    this.rawNodeById.clear();
+    this.rawEdgeByKey.clear();
+    this.nodes = data.nodes;
+    for (const node of data.nodes) {
+      // 去重靠接口保证，但重复 id 会直接抛，所以这里兜一层
+      if (this.graph.hasNode(node.id)) continue;
+      this.rawNodeById.set(node.id, node);
+      this.graph.addNode(node.id, node2DAttrs(node));
+    }
+    for (const edge of data.edges) {
+      // 端点在别页（cursor 翻页场景）就丢掉，与 3D `buildEdgeBuffers` 同口径
+      if (!this.graph.hasNode(edge.src) || !this.graph.hasNode(edge.dst)) continue;
+      const key = this.graph.addEdge(edge.src, edge.dst, edge2DAttrs(edge));
+      this.rawEdgeByKey.set(key, edge);
+    }
+
+    if (this.renderer === null) this.createRenderer();
+    else this.renderer.refresh();
+
+    // 刷新后沿用 store 里的选中（刷新不该把正在确认的那个点弄丢）
+    this.selectedId = useSelection.getState().focusId;
+    this.activity = useActivity.getState().snapshot;
+    this.applyVisuals();
+    this.publish(performance.now(), true);
+  }
+
+  private createRenderer(): void {
+    const renderer = new Sigma(this.graph, this.host, {
+      styles: SIGMA_STYLES,
+      // sigma v4 把 rendering 选项收在 `settings` 里（`SigmaOptions.settings`）
+      settings: {
+        renderEdgeLabels: false,
+        // 边/标签在相机移动时不许隐藏：那会让 fps 虚高，2D 的职责就是"看清拓扑"
+        hideEdgesOnMove: false,
+        hideLabelsOnMove: false,
+        // 边命中关掉：2000 节点 6000 边下它是白给的开销，本视图只需要点节点
+        enableEdgeEvents: false,
+        // 标签：每个 180px 网格里只出 1 条（sigma 取格内最大的节点），再叠一道
+        // 7px 尺寸地板。2000 节点全标 = 糊成一片，2D 的职责是"看清拓扑 + 精确点选"，
+        // 认出个别节点靠的是选中后的强制标签（见 `focusAttrs`），不是满屏文字。
+        labelDensity: 0.5,
+        labelGridCellSize: 180,
+        labelRenderedSizeThreshold: 7,
+        stagePadding: 24,
+        // `size` 属性按屏幕像素解释，`radiusForImportance` 的 3–12 才是像素语义
+        itemSizesReference: 'screen',
+      },
+    });
+    // 点选 = 写共享选中态（唯一真相源在 state/selection.ts，3D 订阅它做高亮）。
+    renderer.on('clickNode', (payload) => {
+      useSelection.getState().select(payload.node);
+    });
+    // 点空白 = 取消选中：2D 的使命是确认，点完一定会想收拾（概设 §8.7），空白区域也远大于 3D。
+    renderer.on('clickStage', () => {
+      useSelection.getState().clear();
+    });
+    this.renderer = renderer;
+  }
+
+  /**
+   * 节点此刻的状态：**只由活跃集决定**，选中不参与（与 3D 同一条口径）。
+   *
+   * 选中的表达是"放大 + 常显标签"这条常驻通道（见 `applyVisuals` 末尾），不占用颜色
+   * 亮度——否则点过的节点永远挂在活跃态，沉默态就无从谈起。
+   */
+  private stateOfNode(id: string): VisualState {
+    return this.activity?.states.get(id) ?? 'dormant';
+  }
+
+  /** 边此刻的状态：两端都在活跃集 = 活跃；只有一端 = 次级（那圈"边界"） */
+  private stateOfEdge(source: string, target: string): VisualState {
+    const snapshot = this.activity;
+    if (snapshot === null) return 'dormant';
+    if (snapshot.edges.has(edgeKey(source, target))) return 'active';
+    const a = snapshot.states.get(source);
+    const b = snapshot.states.get(target);
+    if (a === undefined || b === undefined) return 'dormant';
+    return 'secondary';
+  }
+
+  /**
+   * 按"沉默 / 次级 / 活跃"重算所有节点与边的颜色、透明度、尺寸（详设 §10.3.1 那张表）。
+   *
+   * 为什么整表重算而不是只改增量：一条边是否是"活跃边"取决于**两端**的状态，增量更新
+   * 要维护反向索引（节点 → 邻边），代码量翻倍而收益只是点击时省几毫秒。2000 节点
+   * 6000 边一次全量重算实测在 10ms 量级，点一下卡一帧可以接受。
+   */
+  private applyVisuals(): void {
+    const renderer = this.renderer;
+    if (renderer === null) return;
+    for (const node of this.nodes) {
+      if (!this.graph.hasNode(node.id)) continue;
+      const attrs = node2DAttrs(node, this.stateOfNode(node.id));
+      // 选中：只叠"放大 + 强制标签"，颜色仍是状态色（ftype 色相是信息，选中不覆盖它）
+      const focused = node.id === this.selectedId;
+      const patch = focusAttrs(attrs, focused);
+      this.graph.setNodeAttribute(node.id, 'color', attrs.color);
+      this.graph.setNodeAttribute(node.id, 'opacity', attrs.opacity);
+      this.graph.setNodeAttribute(node.id, 'size', patch.size);
+      this.graph.setNodeAttribute(node.id, 'baseSize', attrs.baseSize);
+      // 活跃态与选中态都强制显示标签（sigma 的 forced label，不吃网格抽样）
+      this.graph.setNodeAttribute(node.id, 'labelVisibility', patch.labelVisibility);
+    }
+    this.graph.forEachEdge((key, _attrs, source, target) => {
+      const edge = this.rawEdgeByKey.get(key);
+      if (edge === undefined) return;
+      const attrs = edge2DAttrs(edge, this.stateOfEdge(source, target));
+      this.graph.setEdgeAttribute(key, 'color', attrs.color);
+      this.graph.setEdgeAttribute(key, 'size', attrs.size);
+      this.graph.setEdgeAttribute(key, 'opacity', attrs.opacity);
+    });
+    renderer.scheduleRefresh();
+    this.publish(performance.now(), true);
+  }
+
+  /**
+   * 选中切换：改 `selectedId` 后整表重算一次（放大与强制标签都写在 `applyVisuals` 里）。
+   *
+   * 放大是 2D/3D 共用的选中语义（`FOCUS_SCALE`）；颜色不动——ftype 色相是信息，
+   * 选中不该把它覆盖掉（与 `focusAttrs` 的注释同一条理由）。
+   */
+  private applyFocus(next: string | null): void {
+    this.selectedId = next;
+    this.applyVisuals();
+  }
+
+  /** 节点在视口里的像素位置：验收脚本用它证明"位置随布局变" */
+  private screenPos(id: string): { x: number; y: number } | null {
+    const renderer = this.renderer;
+    if (renderer === null || !this.graph.hasNode(id)) return null;
+    const pos = renderer.graphToViewport({
+      x: this.graph.getNodeAttribute(id, 'x') as number,
+      y: this.graph.getNodeAttribute(id, 'y') as number,
+    });
+    const rect = this.host.getBoundingClientRect();
+    return { x: rect.left + pos.x, y: rect.top + pos.y };
+  }
+
+  private publish(now: number, force = false): void {
+    if (!force && now - this.publishAt < 500) return;
+    this.publishAt = now;
+    const stats: Graph2DStats = {
+      fps: Math.round(this.fps * 10) / 10,
+      nodeCount: this.graph.order,
+      edgeCount: this.graph.size,
+      selectedId: this.selectedId,
+      activeNodes: this.activity?.activeNodes ?? 0,
+      activeEdges: this.activity?.activeEdges ?? 0,
+    };
+    window.__moshiGraph2d = { ...stats, screenPos: (id) => this.screenPos(id) };
+    this.onStats?.(stats);
+  }
+
+  private loop = (): void => {
+    if (this.disposed) return;
+    this.raf = requestAnimationFrame(this.loop);
+    const now = performance.now();
+    if (document.hidden) {
+      // 后台标签页的 rAF 被节流到 1Hz，计进 fps 会得到一条假红线
+      this.frames = 0;
+      this.fpsAt = now;
+      return;
+    }
+    // 活跃态到点自己暗回去：不依赖谁来"清场"，这样即使没人再点，图也会回沉默
+    if (this.activity !== null && now - this.activity.hitAt >= ACTIVITY_TTL_MS) {
+      this.activity = null;
+      this.applyVisuals();
+    }
+    this.frames += 1;
+    const elapsed = now - this.fpsAt;
+    if (elapsed >= 500) {
+      this.fps = (this.frames * 1000) / elapsed;
+      this.frames = 0;
+      this.fpsAt = now;
+    }
+    // sigma 是按需渲染的，主循环不会自己跑：这里每帧排一次渲染，
+    // fps 才是"这张图一帧多贵"（与 3D 的持续 rAF 同口径，可横向比较）
+    this.renderer?.scheduleRender();
+    this.publish(now);
+  };
+
+  dispose(): void {
+    this.disposed = true;
+    cancelAnimationFrame(this.raf);
+    this.unsubSelection();
+    this.unsubActivity();
+    this.renderer?.kill();
+    this.renderer = null;
+    delete window.__moshiGraph2d;
+  }
+}
+
+export interface Graph2DProps {
+  data: GraphPayload;
+  onStats?: (s: Graph2DStats) => void;
+}
+
+export function Graph2D({ data, onStats }: Graph2DProps): JSX.Element {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const sceneRef = useRef<SigmaScene | null>(null);
+  const statsRef = useRef(onStats);
+  statsRef.current = onStats;
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (host === null) return;
+    const scene = new SigmaScene(host, (s) => {
+      statsRef.current?.(s);
+    });
+    sceneRef.current = scene;
+    return () => {
+      scene.dispose();
+      sceneRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    sceneRef.current?.setData(data);
+  }, [data]);
+
+  return <div ref={hostRef} style={{ position: 'absolute', inset: 0, background: BG_COLOR }} />;
+}

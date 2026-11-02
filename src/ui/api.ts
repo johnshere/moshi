@@ -54,6 +54,28 @@ declare global {
       nodeCount: number;
       edgeCount: number;
       labelCount: number;
+      /** 上屏的光晕实例数：沉默态为 0（详设 §10.3.1 验收 ①） */
+      halos: number;
+      /** 活跃集规模：命中 + 1-hop，≤64 节点 / ≤256 边（验收 ③/⑥） */
+      activeNodes: number;
+      activeEdges: number;
+      /** 3D 当前画着的选中节点（= 共享 store 的 focusId）：跨视图联动的读数证据 */
+      focusId: string | null;
+    };
+    /**
+     * 2D 视图的可测性钩子（P2-03）：与 3D 的 `__moshiGraph` 同形，外加
+     * `screenPos(id)`——验收脚本要证明"节点屏幕位置随 layout 表变"，
+     * 只靠截图比坐标稳。
+     */
+    __moshiGraph2d?: {
+      fps: number;
+      nodeCount: number;
+      edgeCount: number;
+      selectedId: string | null;
+      /** 活跃集规模（与 3D 同一张表：命中 + 1-hop） */
+      activeNodes: number;
+      activeEdges: number;
+      screenPos(id: string): { x: number; y: number } | null;
     };
   }
 }
