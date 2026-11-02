@@ -26,6 +26,8 @@ import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
 import { buildEvidenceCache, encodeViaSidecar, type McpDeps } from '../mcp/deps.js';
 import { factRoutes } from './routes/facts.js';
+import { graphRoutes } from './routes/graph.js';
+import { defaultUiDistDir, staticRoutes } from './static.js';
 
 export interface HttpDeps {
   db: Db;
@@ -34,6 +36,8 @@ export interface HttpDeps {
   sidecar?: SidecarClient;
   /** `memory_annotate` 入队后唤醒 harvest（P1-22）；CLI 测试不传即无消费者 */
   onEnqueued?: () => void;
+  /** `/ui/graph` 的前端产物目录；不传则用 `src/app/ui/dist`（测试注入临时目录） */
+  uiDistDir?: string;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -56,8 +60,15 @@ export async function buildHttpApp(deps: HttpDeps) {
     return reply.type('text/html; charset=utf-8').send(html);
   });
 
+  // ── /ui/graph 首屏：新 3D 图谱 SPA（P2-02）。老 /ui 保持原样，两套并存 ──
+  await app.register(staticRoutes, {
+    dir: deps.uiDistDir ?? defaultUiDistDir(),
+    token: deps.token,
+  });
+
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+  await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });
 
   // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──
   app.get('/api/status', async (_req, reply) => {

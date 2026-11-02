@@ -1,5 +1,7 @@
 node_modules/
 dist/
+# 前端（src/ui）的构建产物：由 `pnpm build:ui` 生成，不入库
+src/app/ui/dist/
 coverage/
 *.log
 .DS_Store

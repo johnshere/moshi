@@ -1,6 +1,9 @@
-# src/ui 在 P0-19 加入（届时追加一行 'src/ui'）
+# 根包 + 独立前端工程。src/ui 有自己的 package.json（详设 §3.1），
+# 参与 workspace 是为了让根 `pnpm install` 一次装齐前端依赖（react / three / vite），
+# 免得 `pnpm build` 里再去联网装依赖。
 packages:
   - '.'
+  - 'src/ui'
 
 # 只允许这两个依赖执行 install 脚本（其余一律不跑，等同默认的最小权限）。
 # pnpm 10 起不再读 package.json 的 pnpm 字段，本项必须放这里。

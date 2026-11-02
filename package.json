@@ -12,16 +12,18 @@
     "moshi": "./dist/app/main.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node tools/copy-assets.mjs",
+    "build": "pnpm build:ui && tsc -p tsconfig.build.json && node tools/copy-assets.mjs",
+    "build:ui": "pnpm --filter moshi-ui build",
     "dev": "tsx watch src/app/main.ts daemon",
     "start": "node dist/app/main.js daemon",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:ui": "pnpm --filter moshi-ui typecheck",
     "lint": "eslint src tools tests --ext .ts",
     "lint:deps": "tsx tools/lint-deps.ts",
     "lint:desc": "tsx tools/lint-descriptions.ts",
-    "verify": "pnpm typecheck && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm test",
+    "verify": "pnpm typecheck && pnpm typecheck:ui && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm test",
     "lint:lifecycle": "tsx tools/check-lifecycle.ts",
     "lint:writes": "tsx tools/check-writes.ts",
     "bench": "tsx tools/bench.ts"
