@@ -19,6 +19,10 @@ export const ERROR_CODES = [
   'E_QUARANTINED',
   'E_CONFIG',
   'E_ACCESS',
+  /** P2-23 直写闸门：配置未开时，要求直写的调用被拒（不是调用方参数错） */
+  'E_DIRECT_WRITE_DISABLED',
+  /** P2-23 量级约束：单批 / 每分钟超限，拒绝并给出可重试提示 */
+  'E_QUOTA',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -68,6 +72,18 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
   E_QUARANTINED: { httpStatus: 202, mcpCode: null, retryable: false, hint: '已接收但未入图，在隔离区' },
   E_CONFIG: { httpStatus: 500, mcpCode: null, retryable: false, hint: '配置非法，进程不启动' },
   E_ACCESS: { httpStatus: 403, mcpCode: null, retryable: false, hint: '写盘白名单外，拒绝写入' },
+  E_DIRECT_WRITE_DISABLED: {
+    httpStatus: 403,
+    mcpCode: -32602,
+    retryable: false,
+    hint: '直写闸门未开（mcp.allow_direct_write = false），改走默认入队路径',
+  },
+  E_QUOTA: {
+    httpStatus: 429,
+    mcpCode: -32603,
+    retryable: true,
+    hint: '超过直写量级上限（单批 / 每分钟），整批拒绝，稍后重试或拆批',
+  },
 };
 
 export class MoshiError extends Error {

@@ -27,6 +27,8 @@ describe('错误码映射（详设 §1.5）', () => {
     E_QUARANTINED: [202, null, false],
     E_CONFIG: [500, null, false],
     E_ACCESS: [403, null, false],
+    E_DIRECT_WRITE_DISABLED: [403, -32602, false],
+    E_QUOTA: [429, -32603, true],
   };
 
   it('错误码集合与详设表一致', () => {

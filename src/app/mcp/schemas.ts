@@ -41,6 +41,21 @@ export const queryShape = {
   format: z.enum(['json', 'text']).default('json').describe('json = evidence pack, text = numbered list'),
 };
 
+/**
+ * 边关系（详设 §4.1.2）。`etype` 只有三类是 schema 认的：
+ * `depends_on` 允许出现在入参里，但直写时会被扣进隔离区（要审核）；
+ * `co_occur` / `derived_from` 才是直写白名单。`supersedes` 之类根本不在 enum 里，
+ * 校验阶段就拒——这正是「类型白名单」的第一道闸。
+ */
+const annotateRelation = z
+  .object({
+    etype: z.enum(['depends_on', 'co_occur', 'derived_from']),
+    to_fact_id: z.string().min(1).max(64).optional().describe('Target fact id, e.g. f_01j...'),
+    to_key: z.string().min(1).max(256).optional().describe('Target identity key, resolved like subject'),
+    note: z.string().max(512).optional(),
+  })
+  .strict();
+
 const annotateFact = z
   .object({
     content: z.string().min(1).max(2048).describe('One-line statement, stored verbatim'),
@@ -58,11 +73,22 @@ const annotateFact = z
         span: z.array(z.number().int().nonnegative()).length(2).optional(),
       })
       .optional(),
+    relations: z
+      .array(annotateRelation)
+      .max(8)
+      .optional()
+      .describe('Edges from this fact; only honoured by direct write'),
   })
   .strict();
 
 export const annotateShape = {
   facts: z.array(annotateFact).min(1).max(50).describe('Candidate facts, at most 50 per call'),
+  direct_write: z
+    .boolean()
+    .optional()
+    .describe('Ask for this batch to be written to the graph now instead of queued'),
+  session_id: z.string().min(1).max(64).optional().describe('Caller session id, kept for revocation'),
+  turn: z.number().int().nonnegative().optional().describe('Turn number inside that session'),
 };
 
 export const feedbackShape = {

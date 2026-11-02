@@ -1,9 +1,14 @@
 /**
  * `memory_annotate` 的实现（详设 §4.1.2）。
  *
- * 这一层只做**入队**，不做落库：事实要经 harvest 的六步（脱敏 → 解析 → 筛 → 消解 →
+ * 这一层默认只做**入队**，不做落库：事实要经 harvest 的六步（脱敏 → 解析 → 筛 → 消解 →
  * 身份 → 冲突 → 落库）才会进图。所以"接受"的含义是"已进缓冲区"，
  * 而不是"已成事实"——描述里那句 "merged into the graph asynchronously" 就是这件事。
+ *
+ * 唯一的例外是 P2-23 的**直写闸门**：配置显式打开 `[mcp] allow_direct_write`，
+ * 且调用方显式要 `direct_write`（或带了 `relations`）时，本批直接落库并整批可撤销。
+ * 闸门关闭时这类调用整批拒（`E_DIRECT_WRITE_DISABLED`），不静默退回入队——
+ * 否则调用方会以为事实已经进图。细节与四条约束见 `directWrite.ts`。
  *
  * 三个判定必须在这一层做对：
  *
@@ -22,17 +27,14 @@ import { DEFAULT_QUARANTINE, enqueue, screen } from '../../core/write/quarantine
 import * as annotationRepo from '../../infra/sqlite/annotationRepo.js';
 import type { AnnotatePayload } from '../../core/write/harvest.js';
 import { redactText, redactValue } from '../../core/write/redact.js';
-import type { QuarantineReason } from '../../domain/enums.js';
 import { withTransaction } from '../../infra/sqlite/tx.js';
+import { assertDirectWriteAllowed, runDirectWrite, wantsDirectWrite } from './directWrite.js';
+import type { DirectItem, DirectWriteCollector } from './directWrite.js';
 import type { McpDeps } from './deps.js';
 import type { AnnotateInput } from './schemas.js';
 
-export interface AnnotateResult {
-  /** 已入队的 annotation id（按入参顺序，去重后同一 id 可能重复出现） */
-  accepted: string[];
-  quarantined: { index: number; reason: QuarantineReason }[];
-  rejected: { index: number; reason: string }[];
-}
+/** 结果形状由 `directWrite.ts` 定义（那边要往同结构里写），这里只做别名，不复制一份。 */
+export type AnnotateResult = DirectWriteCollector;
 
 export type AnnotateFact = AnnotateInput['facts'][number];
 
@@ -70,6 +72,10 @@ function toPayload(deps: McpDeps, fact: AnnotateFact): AnnotatePayload {
 
 export function runMemoryAnnotate(deps: McpDeps, input: AnnotateInput): AnnotateResult {
   const result: AnnotateResult = { accepted: [], quarantined: [], rejected: [] };
+
+  // 两条路：默认入队（下面这段，行为与 P2-23 之前完全一致）；
+  // 调用方显式要直写、或带了 relations 时走 runDirectWrite（闸门 / 限额 / 白名单都在那边）
+  if (wantsDirectWrite(input)) return runDirect(deps, input, result);
 
   withTransaction(deps.db, () => {
     input.facts.forEach((fact, index) => {
@@ -120,5 +126,27 @@ export function runMemoryAnnotate(deps: McpDeps, input: AnnotateInput): Annotate
   // 回调由调用方注入（daemon = harvest runner 的 wake），这里不 import app 层。
   if (result.accepted.length > 0) deps.onEnqueued?.();
 
+  return result;
+}
+
+/**
+ * 直写分支：先过闸门与量级，再逐条脱敏后交给 `runDirectWrite`。
+ *
+ * 闸门关闭时**整批拒绝**而不是退回入队——静默降级会让调用方以为事实已经进图。
+ */
+function runDirect(deps: McpDeps, input: AnnotateInput, result: AnnotateResult): AnnotateResult {
+  assertDirectWriteAllowed(deps, input.facts.length);
+
+  const items: DirectItem[] = [];
+  input.facts.forEach((fact, index) => {
+    if (fact.content.trim() === '') {
+      result.rejected.push({ index, reason: 'empty_content' });
+      return;
+    }
+    const payload = toPayload(deps, fact);
+    items.push({ index, fact, payload, dedupKey: annotateDedupKey(payload) });
+  });
+
+  if (items.length > 0) runDirectWrite(deps, input, items, result);
   return result;
 }

@@ -73,6 +73,12 @@ export interface UpsertResult {
 export interface UpsertDeps extends ResolveDeps {
   priors?: Priors;
   ontology?: (predicate: string) => OntologyHint | null;
+  /**
+   * 直写闸门用：遇到需要裁决的冲突（单值谓词换值、复活已失效取值）时**不落库**，
+   * 抛 `E_CONFLICT_IDENTITY` 把决定权交回调用方（直写路径据此进隔离区）。
+   * 默认 `false`，harvest / 入队通道的既有裁决行为一字不改。
+   */
+  blockOnConflict?: boolean;
 }
 
 function draftToFact(
@@ -190,6 +196,14 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
 
     // ---- 情形 C：复活（旧行已失效，插新行 + supersedes） ----
     if (existing !== null && existing.validTo !== null) {
+      if (deps.blockOnConflict === true) {
+        // 复活要建 `supersedes`（审核类边），直写通道没有这个权限：交回调用方
+        throw new MoshiError(
+          'E_CONFLICT_IDENTITY',
+          `取值 ${identity.predicate} 的旧版本已失效，复活需要裁决`,
+          { reason: 'revive_conflict', predicate: identity.predicate, existing: [existing.id] },
+        );
+      }
       const fact = draftToFact(draft, parts);
       factRepo.insertFact(db, fact);
       edgeRepo.insertEdge(db, {
@@ -219,6 +233,20 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
       identity.predicate,
       ontologyHint ?? (draft.cardinality === undefined ? null : { cardinality: draft.cardinality }),
     );
+    if (deps.blockOnConflict === true && siblings.length > 0 && card !== 'set') {
+      // 单值/序列谓词的冲突会失效既有事实或建 `supersedes` / `mutually_exclusive`，
+      // 都是直写白名单外的副作用：整条不落库，交回调用方裁决。
+      throw new MoshiError(
+        'E_CONFLICT_IDENTITY',
+        `谓词 ${identity.predicate} 为 ${card}，已有 ${siblings.length} 条有效取值，需裁决`,
+        {
+          reason: card === 'single-valued' ? 'single_valued_conflict' : 'series_conflict',
+          cardinality: card,
+          predicate: identity.predicate,
+          existing: siblings.map((s) => s.id),
+        },
+      );
+    }
     const fact = draftToFact(draft, parts);
     factRepo.insertFact(db, fact);
 

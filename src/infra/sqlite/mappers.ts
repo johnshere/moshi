@@ -87,6 +87,11 @@ export function rowToFact(row: Row): Fact {
         : [num(row, 'span_start'), num(row, 'span_end')],
     createdAt: str(row, 'created_at'),
     updatedAt: str(row, 'updated_at'),
+    // 迁移 005 的直写溯源列；老行全为 NULL，语义就是"不是直写来的"
+    origin: strOrNull(row, 'origin'),
+    sessionId: strOrNull(row, 'session_id'),
+    turn: numOrNull(row, 'turn'),
+    batchId: strOrNull(row, 'batch_id'),
   };
 }
 
@@ -102,6 +107,7 @@ export function rowToEdge(row: Row): Edge {
     validTo: strOrNull(row, 'valid_to'),
     createdAt: str(row, 'recorded_at'),
     provenance: strOrNull(row, 'provenance'),
+    batchId: strOrNull(row, 'batch_id'),
   };
 }
 

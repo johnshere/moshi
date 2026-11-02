@@ -56,13 +56,15 @@ export function insert(
     channel: Channel;
     origin?: string | null;
     receivedAt?: string;
+    /** 直写批次号（P2-23）；普通入队不传 */
+    batchId?: string | null;
   },
 ): { id: string; created: boolean } {
   const id = newId('annotation');
   const info = db
     .prepare(
-      `INSERT INTO annotation (id, dedup_key, payload_json, channel, origin, received_at, harvested_at, error)
-       VALUES (@id, @dedup, @payload, @channel, @origin, @ts, NULL, NULL)
+      `INSERT INTO annotation (id, dedup_key, payload_json, channel, origin, received_at, harvested_at, error, batch_id)
+       VALUES (@id, @dedup, @payload, @channel, @origin, @ts, NULL, NULL, @batch_id)
        ON CONFLICT (dedup_key) DO NOTHING`,
     )
     .run({
@@ -72,6 +74,7 @@ export function insert(
       channel: input.channel,
       origin: input.origin ?? null,
       ts: input.receivedAt ?? nowIso(),
+      batch_id: input.batchId ?? null,
     });
   if (info.changes > 0) return { id, created: true };
 
@@ -129,4 +132,20 @@ export function get(db: Db, id: string): AnnotationRow | null {
     | Record<string, unknown>
     | undefined;
   return row === undefined ? null : rowToAnnotation(row);
+}
+
+/** 直写批次的 annotation 快照（P2-23 撤销时连带回滚） */
+export function listByBatch(db: Db, batchId: string): AnnotationRow[] {
+  const rows = db
+    .prepare('SELECT * FROM annotation WHERE batch_id = ? ORDER BY received_at ASC, id ASC')
+    .all(batchId) as Record<string, unknown>[];
+  return rows.map(rowToAnnotation);
+}
+
+/**
+ * 物理删除一条标注。**只给直写撤销用**：普通入队的行是队列历史，删了就把
+ * "这条曾经提交过"的痕迹一起抹了；直写的行是本批自己造的，撤销就该一起消失。
+ */
+export function remove(db: Db, id: string): void {
+  db.prepare('DELETE FROM annotation WHERE id = ?').run(id);
 }

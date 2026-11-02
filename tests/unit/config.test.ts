@@ -104,6 +104,10 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.archive.include_raw).toBe(false);
     expect(cfg.ui.theme).toBe('system');
     expect(cfg.log.keep_days).toBe(7);
+    // P2-23：直写闸门默认必须关着——示例配置哪天写错了，这条会先炸
+    expect(cfg.mcp.allow_direct_write).toBe(false);
+    expect(cfg.mcp.direct_write_batch_max).toBe(50);
+    expect(cfg.mcp.direct_write_per_minute_max).toBe(120);
   });
 
   it('dataPaths 落在 data_dir 之下', () => {

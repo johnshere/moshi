@@ -57,6 +57,14 @@ export interface Fact {
   span: [number, number] | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * 直写溯源（P2-23 / 迁移 005 `fact.origin`）。非直写路径写的行全是 null，
+   * 所以「这一行是不是某批直写写进来的」只看 `batchId` 就够。
+   */
+  origin?: string | null;
+  sessionId?: string | null;
+  turn?: number | null;
+  batchId?: string | null;
 }
 
 export interface Edge {
@@ -72,6 +80,8 @@ export interface Edge {
   createdAt: string;
   /** 生成规则（P2-22 / 迁移 004 `edge.provenance`）；人工写入的边为 null */
   provenance?: string | null;
+  /** 直写批次号（P2-23 / 迁移 005）；非直写路径为 null */
+  batchId?: string | null;
 }
 
 export interface Entity {

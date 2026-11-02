@@ -90,6 +90,10 @@ export const QUARANTINE_REASON = [
   'mutex_storm',
   'ann_malformed',
   'ann_version_unknown',
+  /** P2-23：直写时出现的「必须走审核的类型」（如 depends_on 边）先扣下等人提升 */
+  'needs_review',
+  /** P2-23：直写撞上需要裁决的冲突（单值谓词换值 / 复活已失效取值），不落库，等裁决 */
+  'conflict_needs_review',
 ] as const;
 export type QuarantineReason = (typeof QUARANTINE_REASON)[number];
 

@@ -213,6 +213,24 @@ const LogSchema = z
   })
   .strict();
 
+/**
+ * MCP 直写闸门（P2-23 / 概设 §3.1.3）。
+ *
+ * 默认**关闭**：`memory_annotate` 只入队，事实要经 harvest 六步才进图。
+ * 打开之后，调用方可以要求本批直接落库（带 `relations` 的调用必须直写才有意义），
+ * 但直写绕过了缓冲，所以量级必须在配置里封顶——否则一次批量提交就能把图写脏。
+ */
+const McpSchema = z
+  .object({
+    /** false = 只入队（默认）；true = 允许 `direct_write` / `relations` 走直写 */
+    allow_direct_write: z.boolean().default(false),
+    /** 单批最多几条事实；超出整批拒绝（E_QUOTA），不部分写入 */
+    direct_write_batch_max: positiveInt.default(50),
+    /** 每分钟最多几条直写事实；超出拒绝并提示稍后重试（E_QUOTA） */
+    direct_write_per_minute_max: positiveInt.default(120),
+  })
+  .strict();
+
 export const ConfigSchema = z
   .object({
     server: ServerSchema.default({}),
@@ -233,6 +251,7 @@ export const ConfigSchema = z
     archive: ArchiveSchema.default({}),
     ui: UiSchema.default({}),
     log: LogSchema.default({}),
+    mcp: McpSchema.default({}),
   })
   .strict();
 

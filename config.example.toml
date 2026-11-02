@@ -122,3 +122,12 @@ inspector_width = 420
 [log]
 level = "info"
 keep_days = 7
+
+# MCP 直写闸门（P2-23 / 概设 §3.1.3）。
+# 默认关闭：memory_annotate 只把候选事实放进队列，事实要经 harvest 六步校验才进图。
+# 打开后，调用方可以要求「本批直接落库」，但只允许新事实与 co_occur / derived_from 边；
+# depends_on / supersedes / mutually_exclusive 仍必须走审核（前者进隔离区，后者被 schema 拒）。
+[mcp]
+allow_direct_write = false
+direct_write_batch_max = 50     # 单批最多几条事实，超了整批拒绝（E_QUOTA）
+direct_write_per_minute_max = 120  # 每分钟最多几条直写事实，超了拒绝（E_QUOTA）

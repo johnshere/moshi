@@ -20,6 +20,8 @@ export interface NewEdge {
   recordedAt?: string;
   /** 生成这条边的规则（`rule:co_occur` 等），迁移 004 新增，用于精度抽样 */
   provenance?: string | null;
+  /** 直写批次号（P2-23）；非直写路径传 null，撤销只按批次号扫 */
+  batchId?: string | null;
 }
 
 export function insertEdge(db: Db, edge: NewEdge): void {
@@ -27,8 +29,8 @@ export function insertEdge(db: Db, edge: NewEdge): void {
     throw new MoshiError('E_INPUT', '自环边没有意义（CHECK 也会拒绝）', { id: edge.src });
   }
   db.prepare(
-    `INSERT INTO edge (id, src, dst, etype, weight, confidence, valid_at, valid_to, recorded_at, provenance)
-     VALUES (@id, @src, @dst, @etype, @weight, @confidence, @valid_at, @valid_to, @recorded_at, @provenance)`,
+    `INSERT INTO edge (id, src, dst, etype, weight, confidence, valid_at, valid_to, recorded_at, provenance, batch_id)
+     VALUES (@id, @src, @dst, @etype, @weight, @confidence, @valid_at, @valid_to, @recorded_at, @provenance, @batch_id)`,
   ).run({
     id: edge.id,
     src: edge.src,
@@ -40,6 +42,7 @@ export function insertEdge(db: Db, edge: NewEdge): void {
     valid_to: edge.validTo ?? null,
     recorded_at: edge.recordedAt ?? nowIso(),
     provenance: edge.provenance ?? null,
+    batch_id: edge.batchId ?? null,
   });
 }
 

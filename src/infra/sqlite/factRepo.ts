@@ -56,6 +56,30 @@ export function listByIdentityKey(db: Db, canonicalKey: string, scope: string): 
   return rows.map(rowToFact);
 }
 
+/**
+ * 按主体名找当前有效事实（P2-23 直写解析边目标用）。
+ *
+ * `to_key` 允许写成主体名（`subject` 的字面值），而 canonical_key 带着谓词与取值摘要，
+ * 调用方未必知道。同名主体可能有多条事实，按 recorded_at 倒序取前几条，由调用方挑。
+ */
+export function findActiveBySubjectName(
+  db: Db,
+  name: string,
+  scope = 'global',
+  limit = 8,
+): Fact[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM fact
+       WHERE valid_to IS NULL AND scope = ?
+         AND json_extract(attrs, '$.frozen.subject.name') = ?
+       ORDER BY recorded_at DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(scope, name, limit) as Record<string, unknown>[];
+  return rows.map(rowToFact);
+}
+
 export function insertFact(db: Db, fact: Fact): void {
   db.prepare(
     `INSERT INTO fact (

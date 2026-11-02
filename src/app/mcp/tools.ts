@@ -40,11 +40,17 @@ function jsonResult(payload: unknown): CallToolResult {
 
 /** 工具错误：保留错误码，让 Agent 能区分"参数错"与"没这条事实" */
 function errorResult(err: unknown): CallToolResult {
-  const code = err instanceof MoshiError ? err.code : 'E_INTERNAL';
+  const isMoshi = err instanceof MoshiError;
+  const code = isMoshi ? err.code : 'E_INTERNAL';
   const message = err instanceof Error ? err.message : String(err);
+  // 只补细节、不改形状：E_QUOTA 的 retry_after_ms 与 E_DIRECT_WRITE_DISABLED 的
+  // config_key 都在 detail / retryAfterMs 里，丢了它们 Agent 只能盲重试。
+  const body: Record<string, unknown> = { error: code, message };
+  if (isMoshi && err.detail !== undefined) body.detail = err.detail;
+  if (isMoshi && err.retryAfterMs !== undefined) body.retry_after_ms = err.retryAfterMs;
   return {
     isError: true,
-    content: [{ type: 'text', text: JSON.stringify({ error: code, message }, null, 2) }],
+    content: [{ type: 'text', text: JSON.stringify(body, null, 2) }],
   };
 }
 

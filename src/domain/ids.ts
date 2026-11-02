@@ -23,6 +23,8 @@ export const ID_PREFIX = {
   adjudication: 'aj',
   topic: 't',
   quarantine: 'qa',
+  /** 直写批次号（P2-23）：一次 memory_annotate 直写 = 一批，撤销按它整批回滚 */
+  batch: 'b',
 } as const;
 
 export type IdKind = keyof typeof ID_PREFIX;

@@ -8,7 +8,8 @@ import { nowIso } from '../../domain/time.js';
 import type { Db } from './db.js';
 
 export interface AuditInput {
-  tbl: 'fact' | 'edge' | 'entity' | 'archive_meta';
+  /** `annotation` 只由直写撤销写（P2-23）：撤销要连带回滚队列快照，同样得留痕 */
+  tbl: 'fact' | 'edge' | 'entity' | 'archive_meta' | 'annotation';
   rowId: string;
   field?: string | null;
   before?: unknown;
