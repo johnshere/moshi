@@ -19,6 +19,7 @@ import { useActivity } from './state/activity.js';
 import { useFilter } from './state/filter.js';
 import { FilterBar } from './filter/FilterBar.js';
 import { FactsTable } from './table/FactsTable.js';
+import { Inspector } from './inspector/Inspector.js';
 
 /**
  * 首屏默认页大小：与服务端 `DEFAULT_GRAPH_LIMIT` 对齐。
@@ -243,6 +244,9 @@ function App(): JSX.Element {
       {/* 表格是第三态：切过去时图整体卸载（不保留 3D 场景、也不保留表格的分页状态） */}
       {isTable && <FactsTable />}
       {!isTable && data !== null && (is2d ? <Graph2D data={data} onStats={setStats2d} /> : <Graph3D data={data} onStats={setStats3d} />)}
+
+      {/* 检查器（P2-06）：右侧抽屉，三视图共用 focusId（表格行 / 3D / 2D 点选都写同一个 store） */}
+      <Inspector />
 
       <div
         style={{

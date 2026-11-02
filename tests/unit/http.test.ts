@@ -11,7 +11,7 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { loadConfig } from '../../src/app/config.js';
 import { buildHttpApp } from '../../src/app/http/server.js';
-import { insertFact } from '../fixtures/factories.js';
+import { insertEdge, insertFact } from '../fixtures/factories.js';
 
 const opened: Db[] = [];
 const dirs: string[] = [];
@@ -357,6 +357,54 @@ describe('GET /api/facts/:id', () => {
     expect(body.epistemic_status).toBe('active');
     expect(typeof body.valid_at).toBe('string');
     expect(Array.isArray(body.audits)).toBe(true);
+    // P2-06 检查器结构档：attrs / canonical_key / confidence_source 必须透传
+    expect(body.attrs.frozen.subject.name).toBeTruthy();
+    expect(typeof body.attrs.ext).toBe('object');
+    expect(typeof body.canonical_key).toBe('string');
+    expect(typeof body.confidence_source).toBe('string');
+    // P2-06 检查器溯源档：依赖链 / 冲突对 / 反向 supersedes 链按空集返回，字段存在即可
+    expect(Array.isArray(body.depends.upstream)).toBe(true);
+    expect(Array.isArray(body.depends.downstream)).toBe(true);
+    expect(Array.isArray(body.conflicts)).toBe(true);
+    expect(Array.isArray(body.superseded)).toBe(true);
+  });
+
+  it('溯源档返回依赖链上下游与冲突对', async () => {
+    const db = freshDb();
+    // 链：up(前提) → self → down(依赖我)；self 与 clash 互斥
+    const upId = insertFact(db, { content: 'up 前提' });
+    const fid = insertFact(db, { content: 'self 主体' });
+    const downId = insertFact(db, { content: 'down 依赖者' });
+    const clashId = insertFact(db, { content: 'clash 冲突' });
+    insertEdge(db, fid, upId, 'depends_on'); // src 依赖 dst：self 依赖 up
+    insertEdge(db, downId, fid, 'depends_on'); // down 依赖 self
+    insertEdge(db, fid, clashId, 'mutually_exclusive');
+    const { app, token } = await makeApp(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/facts/${fid}`,
+      headers: { 'X-Moshi-Token': token },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.depends.upstream.map((d: { id: string }) => d.id)).toEqual([upId]);
+    expect(body.depends.downstream.map((d: { id: string }) => d.id)).toEqual([downId]);
+    expect(body.conflicts.map((d: { id: string }) => d.id)).toEqual([clashId]);
+  });
+
+  it('溯源档返回反向 supersedes 链（我取代了谁）', async () => {
+    const db = freshDb();
+    const fid = insertFact(db, { content: '新版本' });
+    const oldId = insertFact(db, { content: '旧版本', supersededBy: fid });
+    const { app, token } = await makeApp(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/facts/${fid}`,
+      headers: { 'X-Moshi-Token': token },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.superseded.map((d: { id: string }) => d.id)).toEqual([oldId]);
   });
 
   it('不存在的 id 返回 404', async () => {

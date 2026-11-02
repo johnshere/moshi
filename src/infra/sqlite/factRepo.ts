@@ -486,3 +486,122 @@ export function countMatching(db: Db, opts: Omit<SearchOptions, 'limit'>): numbe
   const row = db.prepare(`SELECT COUNT(*) AS n FROM fact${sql}`).get(...params) as { n: number };
   return row.n;
 }
+
+/**
+ * 检查器溯源档的展示用摘要（详设 §10.5 溯源档：依赖链 / 冲突对 / supersedes 链）。
+ * 只带渲染需要的最小字段，不拖整行 Fact。
+ */
+export interface FactDigest {
+  id: string;
+  content: string;
+  validAt: string;
+  validTo: string | null;
+}
+
+/**
+ * 依赖链：depends_on 边 `src → dst` = src 依赖 dst（dst 是上游/前提，
+ * 见 `core/write/edges.ts` 规则「步骤 b 依赖步骤 a：先做的在 dst」）。
+ *
+ * - 上游 = 我依赖的：从 `src = id` 出发沿 dst 方向展开；
+ * - 下游 = 依赖我的：从 `dst = id` 出发沿 src 方向展开。
+ *
+ * 各展开 `hops` 层（详设 §10.5：上下游各 3 跳），BFS 去重（不含自己），
+ * 每层按边 weight 降序截断到 `perHopLimit`——依赖链是"看因果"，不是全图遍历，
+ * 无限展开会把一个事实的检查器拉成整库。
+ */
+export function traceDepends(
+  db: Db,
+  id: string,
+  opts: { hops?: number; perHopLimit?: number } = {},
+): { upstream: FactDigest[]; downstream: FactDigest[] } {
+  const hops = Math.max(0, Math.min(opts.hops ?? 3, 5));
+  const perHopLimit = Math.max(1, Math.min(opts.perHopLimit ?? 20, 50));
+
+  const digests = (rows: { id: string; content: string; valid_at: string; valid_to: string | null }[]): FactDigest[] =>
+    rows.map((r) => ({ id: r.id, content: r.content, validAt: r.valid_at, validTo: r.valid_to }));
+
+  // 上游：src = frontier 的元素 → dst（我依赖的）
+  const upstream: FactDigest[] = [];
+  const upstreamSeen = new Set<string>([id]);
+  let upFrontier: string[] = [id];
+  for (let hop = 0; hop < hops && upFrontier.length > 0; hop += 1) {
+    const ph = upFrontier.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT f.id, f.content, f.valid_at, f.valid_to
+           FROM edge e JOIN fact f ON f.id = e.dst
+          WHERE e.src IN (${ph}) AND e.etype = 'depends_on' AND e.valid_to IS NULL
+          ORDER BY e.weight DESC, f.id
+          LIMIT ?`,
+      )
+      .all(...upFrontier, perHopLimit) as { id: string; content: string; valid_at: string; valid_to: string | null }[];
+    const next: string[] = [];
+    for (const r of rows) {
+      if (upstreamSeen.has(r.id)) continue;
+      upstreamSeen.add(r.id);
+      upstream.push(digests([r])[0]!);
+      next.push(r.id);
+    }
+    upFrontier = next;
+  }
+
+  // 下游：dst = frontier 的元素 → src（依赖我的）
+  const downstream: FactDigest[] = [];
+  const downSeen = new Set<string>([id]);
+  let downFrontier: string[] = [id];
+  for (let hop = 0; hop < hops && downFrontier.length > 0; hop += 1) {
+    const ph = downFrontier.map(() => '?').join(',');
+    const rows = db
+      .prepare(
+        `SELECT f.id, f.content, f.valid_at, f.valid_to
+           FROM edge e JOIN fact f ON f.id = e.src
+          WHERE e.dst IN (${ph}) AND e.etype = 'depends_on' AND e.valid_to IS NULL
+          ORDER BY e.weight DESC, f.id
+          LIMIT ?`,
+      )
+      .all(...downFrontier, perHopLimit) as { id: string; content: string; valid_at: string; valid_to: string | null }[];
+    const next: string[] = [];
+    for (const r of rows) {
+      if (downSeen.has(r.id)) continue;
+      downSeen.add(r.id);
+      downstream.push(digests([r])[0]!);
+      next.push(r.id);
+    }
+    downFrontier = next;
+  }
+
+  return { upstream, downstream };
+}
+
+/**
+ * 冲突对：与 `id` 之间有活跃 `mutually_exclusive` 边的事实（详设 §10.5 溯源档）。
+ * 冲突是成对的，取对侧事实。边的 src/dst 谁是 id 都行，用 CASE 归一。
+ */
+export function listConflicts(db: Db, id: string, limit = 20): FactDigest[] {
+  const rows = db
+    .prepare(
+      `SELECT f.id, f.content, f.valid_at, f.valid_to
+         FROM edge e JOIN fact f ON f.id = CASE WHEN e.src = ? THEN e.dst ELSE e.src END
+        WHERE (e.src = ? OR e.dst = ?) AND e.etype = 'mutually_exclusive' AND e.valid_to IS NULL
+        ORDER BY e.weight DESC, f.id
+        LIMIT ?`,
+    )
+    .all(id, id, id, limit) as { id: string; content: string; valid_at: string; valid_to: string | null }[];
+  return rows.map((r) => ({ id: r.id, content: r.content, validAt: r.valid_at, validTo: r.valid_to }));
+}
+
+/**
+ * 反向 supersedes 链：`superseded_by = id` 的事实 = "我取代了谁"（详设 §10.5 溯源档）。
+ * 被取代的旧事实是收口行（valid_to 非空），但列表里要如实带状态，前端按状态上色。
+ */
+export function listSuperseding(db: Db, id: string, limit = 50): FactDigest[] {
+  const rows = db
+    .prepare(
+      `SELECT id, content, valid_at, valid_to FROM fact
+        WHERE superseded_by = ?
+        ORDER BY valid_at DESC, id
+        LIMIT ?`,
+    )
+    .all(id, limit) as { id: string; content: string; valid_at: string; valid_to: string | null }[];
+  return rows.map((r) => ({ id: r.id, content: r.content, validAt: r.valid_at, validTo: r.valid_to }));
+}

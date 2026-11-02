@@ -14,6 +14,7 @@ import { nowIso } from '../../../domain/time.js';
 import type { Db } from '../../../infra/sqlite/db.js';
 import * as factRepo from '../../../infra/sqlite/factRepo.js';
 import * as auditRepo from '../../../infra/sqlite/auditRepo.js';
+import * as episodeRepo from '../../../infra/sqlite/episodeRepo.js';
 import type { Epistemic } from '../../../domain/enums.js';
 import { withTransaction } from '../../../infra/sqlite/tx.js';
 import { getVec } from '../../../infra/vec/index.js';
@@ -222,21 +223,49 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
     const audits = auditRepo.auditByRow(db, 'fact', id);
     // 向量信息（P1-02）：详情弹窗展示该事实是否已进向量索引 + 前 8 维摘要
     const vec = getVec(db, id);
+    // 溯源数据（详设 §10.5 溯源档）：依赖链上下游各 3 跳 / 冲突对 / 反向 supersedes 链。
+    // 检查器预算 < 50ms（详设 §10.8），详情本就按需请求，一次带全比多次 round-trip 便宜。
+    const depends = factRepo.traceDepends(db, id);
+    const conflicts = factRepo.listConflicts(db, id);
+    const superseding = factRepo.listSuperseding(db, id);
+    const sourceEpisode = fact.sourceEpisode === null ? null : episodeRepo.getById(db, fact.sourceEpisode);
+    const digest = (d: factRepo.FactDigest): { id: string; content: string; valid_at: string; valid_to: string | null } => ({
+      id: d.id,
+      content: d.content,
+      valid_at: d.validAt,
+      valid_to: d.validTo,
+    });
     // 字段命名必须与列表接口一致（snake_case JSON），前端按同一套字段渲染
     return {
       id: fact.id,
       content: fact.content,
       ftype: fact.ftype,
       confidence: fact.confidence,
+      confidence_source: fact.confidenceSource,
       strength: fact.strength,
       importance: fact.importance,
       pool: fact.pool,
       epistemic_status: fact.epistemicStatus,
+      attrs: fact.attrs,
+      canonical_key: fact.canonicalKey,
       scope: fact.scope,
       superseded_by: fact.supersededBy,
       valid_at: fact.validAt,
       valid_to: fact.validTo,
       recorded_at: fact.recordedAt,
+      source_episode:
+        sourceEpisode === null
+          ? null
+          : {
+              id: sourceEpisode.id,
+              ts: sourceEpisode.ts,
+              summary: sourceEpisode.summary,
+              raw_path: sourceEpisode.rawPath,
+            },
+      span: fact.span,
+      depends: { upstream: depends.upstream.map(digest), downstream: depends.downstream.map(digest) },
+      conflicts: conflicts.map(digest),
+      superseded: superseding.map(digest),
       vector: vec === null
         ? { indexed: false }
         : {

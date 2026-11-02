@@ -25,6 +25,8 @@
     "table/**/*.tsx",
     "filter/**/*.ts",
     "filter/**/*.tsx",
+    "inspector/**/*.ts",
+    "inspector/**/*.tsx",
     "vite.config.ts"
   ]
 }

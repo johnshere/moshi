@@ -58,6 +58,14 @@ export function findByRawHash(db: Db, rawHash: string, session: string | null): 
   return row === undefined ? null : rowToEpisode(row);
 }
 
+/** 按 id 取原文回合（P2-06 检查器溯源档的 `source_episode` 跳转） */
+export function getById(db: Db, id: string): EpisodeRow | null {
+  const row = db.prepare('SELECT * FROM episode WHERE id = ?').get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row === undefined ? null : rowToEpisode(row);
+}
+
 /** 同 `(raw_hash, session)` 已存在就不插，返回既有 id */
 export function insertIfAbsent(db: Db, input: EpisodeInput): { id: string; created: boolean } {
   const session = input.session ?? null;
