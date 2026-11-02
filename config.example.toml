@@ -22,6 +22,15 @@ max_fact_bytes = 2048
 quarantine_confidence = 0.25
 # field_map = { ts = "timestamp", session_id = "sessionId" }   # 通用 JSONL 的字段名映射
 
+[collect]
+enabled = true              # 是否启用后台块扫描
+interval_ms = 60000         # 后台扫描周期（0 = 不自动跑）
+llm_scan = true             # 阶段 2：对无块 turn 启用 LLM 归纳兜底
+llm_batch_turns = 40        # 阶段 2 每批最多多少 turn
+llm_per_session_daily = 1   # 每 session 每天最多调用几次 LLM
+llm_daily_token_budget = 100000  # 日 token 预算
+prompt_version = "v1"       # 阶段 2 提示版本（影响幂等键）
+
 [confidence]
 prior_tool_obs = 0.95
 prior_tool_inferred = 0.85

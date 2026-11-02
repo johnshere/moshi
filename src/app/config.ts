@@ -56,6 +56,19 @@ const IngestSchema = z
   })
   .strict();
 
+const CollectSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    /** 后台扫描周期；0 表示不自动跑（测试用） */
+    interval_ms: z.number().int().min(0).default(60_000),
+    llm_scan: z.boolean().default(true),
+    llm_batch_turns: z.number().int().min(1).max(40).default(40),
+    llm_per_session_daily: z.number().int().min(0).default(1),
+    llm_daily_token_budget: z.number().int().min(0).default(100_000),
+    prompt_version: z.string().default('v1'),
+  })
+  .strict();
+
 const ConfidenceSchema = z
   .object({
     prior_tool_obs: prob.default(0.95),
@@ -205,6 +218,7 @@ export const ConfigSchema = z
     server: ServerSchema.default({}),
     storage: StorageSchema.default({}),
     ingest: IngestSchema.default({}),
+    collect: CollectSchema.default({}),
     confidence: ConfidenceSchema.default({}),
     redact: RedactSchema.default({}),
     resolve: ResolveSchema.default({}),
@@ -331,6 +345,7 @@ export function dataPaths(cfg: Config): {
   lock: string;
   cursors: string;
   importCursors: string;
+  collectCursors: string;
   backups: string;
 } {
   const root = cfg.storage.data_dir;
@@ -343,6 +358,8 @@ export function dataPaths(cfg: Config): {
     cursors: path.join(root, 'cursors.json'),
     // import 用独立游标（详设 §5.11）：与日常游标混用会把增量读丢
     importCursors: path.join(root, 'cursors.import.json'),
+    // 块扫描游标（详设 §5.12.4）：与 import 游标分离
+    collectCursors: path.join(root, 'cursors.blocks.json'),
     backups: path.join(root, 'backups'),
   };
 }

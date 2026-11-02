@@ -1,11 +1,13 @@
 #!/usr/bin/env node
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { MoshiError } from '../domain/errors.js';
 import { buildLogger, pruneLogs } from '../infra/log/logger.js';
 import { SidecarClient } from '../infra/sidecar/client.js';
 import { runCli } from './cli/index.js';
-import { loadConfig } from './config.js';
+import { dataPaths, loadConfig } from './config.js';
+import { startCollectRunner, type CollectRunner } from './collectRunner.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
@@ -60,6 +62,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let sidecar: SidecarClient | undefined;
   let runner: HarvestRunner | undefined;
   let schemaRunner: SchemaInferRunner | undefined;
+  let collectRunner: CollectRunner | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
@@ -120,6 +123,27 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.error({ event: 'schema.infer.failed', err: (err as Error).message }, 'schema infer failed');
   }
 
+  // P2-21 采集扫描：daemon 起来后接管会话文件的定时扫描（阶段 1 埋点解析 +
+  // 阶段 2 兜底），入队后唤醒 harvest。P2-17 调度器落地后换成它驱动，扫描逻辑不动。
+  // home 与配置同源（`os.homedir()`）——配置读一个 home、会话扫另一个，是 P0 踩过的坑。
+  try {
+    const paths = dataPaths(cfg);
+    collectRunner = startCollectRunner({
+      db: instance.db,
+      cfg,
+      cursorsFile: paths.collectCursors,
+      home: os.homedir(),
+      genericInbox: path.join(paths.root, 'inbox'),
+      log,
+      onEnqueued: () => runner?.wake(),
+    });
+    if (!cfg.collect.enabled) {
+      log.info({ event: 'collect.disabled' }, 'collect runner disabled by config');
+    }
+  } catch (err) {
+    log.error({ event: 'collect.start.failed', err: (err as Error).message }, 'collect runner failed');
+  }
+
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
   // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
@@ -147,6 +171,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
     runner?.stop();
     schemaRunner?.stop();
+    collectRunner?.stop();
     await sidecar?.shutdown();
     await instance.close();
     await built.close();

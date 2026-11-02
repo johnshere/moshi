@@ -402,47 +402,49 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
     throw new MoshiError('E_INPUT', `annotation payload 不是对象：${row.id}`, { id: row.id });
   }
 
-  if (row.channel === 'annotate') {
-    const p = payload as AnnotatePayload;
-    const content = redactText(p.content, ctx.redact).text;
-    const value = redactValue(p.value, ctx.redact);
-    const confidence = p.confidence ?? 0.55;
-    const s = screen({ content, value, confidence }, ctx.quarantine);
-    if (!s.accepted) {
-      enqueue(
-        db,
-        s.reason ?? 'low_confidence',
-        quarantinePayload(
-          { content, value, confidence, subject: p.subject, predicate: p.predicate },
-          { channel: row.channel, annotationId: row.id },
-        ),
-        ctx.ts,
-      );
-      stats.quarantined += 1;
-      annotationRepo.markHarvested(db, row.id, ctx.ts);
-      return;
+  if (row.channel === 'annotate' || row.channel === 'harvest') {
+    const p = payload as { facts?: AnnotatePayload[] } & AnnotatePayload;
+    const facts = Array.isArray(p.facts) ? p.facts : [p];
+    for (const f of facts) {
+      const content = redactText(f.content, ctx.redact).text;
+      const value = redactValue(f.value, ctx.redact);
+      const confidence = f.confidence ?? 0.55;
+      const s = screen({ content, value, confidence }, ctx.quarantine);
+      if (!s.accepted) {
+        enqueue(
+          db,
+          s.reason ?? 'low_confidence',
+          quarantinePayload(
+            { content, value, confidence, subject: f.subject, predicate: f.predicate },
+            { channel: row.channel, annotationId: row.id },
+          ),
+          ctx.ts,
+        );
+        stats.quarantined += 1;
+        continue;
+      }
+      const r = writeOne(db, ctx, {
+        subject: f.subject,
+        etype: f.etype,
+        predicate: f.predicate,
+        value,
+        content: s.content,
+        confidence,
+        confidenceSource: f.confidenceSource ?? 'llm_claim',
+        ftype: f.ftype ?? 'semantic',
+        ...(f.scope === undefined ? {} : { scope: f.scope }),
+        ...(f.validAt === undefined ? {} : { validAt: f.validAt }),
+        ...(f.sourceEpisode === undefined ? {} : { sourceEpisode: f.sourceEpisode }),
+        ...(f.importance === undefined ? {} : { importance: f.importance }),
+        ext: redactValue(f.ext ?? {}, ctx.redact) as Record<string, unknown>,
+      });
+      stats[r.outcome] += 1;
     }
-    const r = writeOne(db, ctx, {
-      subject: p.subject,
-      etype: p.etype,
-      predicate: p.predicate,
-      value,
-      content: s.content,
-      confidence,
-      confidenceSource: p.confidenceSource ?? 'llm_claim',
-      ftype: p.ftype ?? 'semantic',
-      ...(p.scope === undefined ? {} : { scope: p.scope }),
-      ...(p.validAt === undefined ? {} : { validAt: p.validAt }),
-      ...(p.sourceEpisode === undefined ? {} : { sourceEpisode: p.sourceEpisode }),
-      ...(p.importance === undefined ? {} : { importance: p.importance }),
-      ext: redactValue(p.ext ?? {}, ctx.redact) as Record<string, unknown>,
-    });
-    stats[r.outcome] += 1;
     annotationRepo.markHarvested(db, row.id, ctx.ts);
     return;
   }
 
-  // tool_parse / harvest：payload 是一条工具回合
+  // tool_parse：payload 是一条工具回合
   const turn = payload as ToolTurnPayload;
   const parsed = parseTurn({
     tool: turn.tool,
