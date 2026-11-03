@@ -87,21 +87,26 @@ export async function staticRoutes(app: FastifyInstance, opts: StaticRoutesOpts)
       .send(html);
   };
 
-  // 入口：`/ui/graph` 与 `/ui/graph/`（后者靠显式注册，不指望通配符兜空串）
-  app.get('/ui/graph', async (_req, reply) => sendIndex(reply));
-  app.get('/ui/graph/', async (_req, reply) => sendIndex(reply));
+  // 两个 SPA 入口共用同一份产物：vite `base = '/ui/graph/'`，所以 `/ui/inbox` 页面
+  // 的资源仍从 `/ui/graph/assets/*` 取（由下面的 graph 通配符兜住），这里只需把
+  // `/ui/inbox`、`/ui/inbox/`、`/ui/inbox/*` 也映射到同一份 index.html。
+  for (const prefix of ['/ui/graph', '/ui/inbox'] as const) {
+    // 入口：`/ui/<page>` 与 `/ui/<page>/`（后者靠显式注册，不指望通配符兜空串）
+    app.get(prefix, async (_req, reply) => sendIndex(reply));
+    app.get(`${prefix}/`, async (_req, reply) => sendIndex(reply));
 
-  // 资源 + SPA fallback
-  app.get('/ui/graph/*', async (req, reply) => {
-    const rel = (req.params as Record<string, string>)['*'] ?? '';
-    const file = resolveInside(root, rel);
-    if (file === null) return sendIndex(reply);
-    const ext = path.extname(file).toLowerCase();
-    // assets/ 下是带 hash 的产物，可以长缓存；其余（如 favicon）走协商
-    const cache = rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
-    return reply
-      .type(MIME[ext] ?? 'application/octet-stream')
-      .header('cache-control', cache)
-      .send(readFileSync(file));
-  });
+    // 资源 + SPA fallback
+    app.get(`${prefix}/*`, async (req, reply) => {
+      const rel = (req.params as Record<string, string>)['*'] ?? '';
+      const file = resolveInside(root, rel);
+      if (file === null) return sendIndex(reply);
+      const ext = path.extname(file).toLowerCase();
+      // assets/ 下是带 hash 的产物，可以长缓存；其余（如 favicon）走协商
+      const cache = rel.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
+      return reply
+        .type(MIME[ext] ?? 'application/octet-stream')
+        .header('cache-control', cache)
+        .send(readFileSync(file));
+    });
+  }
 }

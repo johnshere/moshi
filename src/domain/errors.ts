@@ -23,6 +23,8 @@ export const ERROR_CODES = [
   'E_DIRECT_WRITE_DISABLED',
   /** P2-23 量级约束：单批 / 每分钟超限，拒绝并给出可重试提示 */
   'E_QUOTA',
+  /** P2-07 批量撤销窗口（30 秒）已过，op_id 作废，不可再撤销 */
+  'E_OP_EXPIRED',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -83,6 +85,12 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
     mcpCode: -32603,
     retryable: true,
     hint: '超过直写量级上限（单批 / 每分钟），整批拒绝，稍后重试或拆批',
+  },
+  E_OP_EXPIRED: {
+    httpStatus: 410,
+    mcpCode: -32602,
+    retryable: false,
+    hint: '撤销窗口（30 秒）已过，op 作废，不可再撤销',
   },
 };
 

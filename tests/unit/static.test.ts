@@ -133,3 +133,26 @@ describe('/ui/graph 托管', () => {
     expect(res.body).not.toContain('/ui/graph/assets/');
   });
 });
+
+describe('/ui/inbox 托管（P2-07）', () => {
+  it('入口与深链都回同一份 index.html 并注入 token', async () => {
+    const { dist } = makeDist();
+    const app = await makeApp(dist);
+
+    for (const url of ['/ui/inbox', '/ui/inbox/', '/ui/inbox/deep/link']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode).toBe(200);
+      expect(res.headers['content-type']).toContain('text/html');
+      expect(res.body).toContain(`window.__MOSHI_TOKEN__ = '${TOKEN}'`);
+      expect(res.body).not.toContain("window.__MOSHI_TOKEN__ || ''");
+    }
+  });
+
+  it('产物缺失时 /ui/inbox 也回 503 E_UI_NOT_BUILT', async () => {
+    const empty = tempDir('moshi-static-empty-');
+    const app = await makeApp(path.join(empty, 'nope'));
+    const res = await app.inject({ method: 'GET', url: '/ui/inbox' });
+    expect(res.statusCode).toBe(503);
+    expect(res.json<{ error: string }>().error).toBe('E_UI_NOT_BUILT');
+  });
+});

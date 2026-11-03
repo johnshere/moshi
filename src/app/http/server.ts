@@ -27,6 +27,8 @@ import { createMcpHttpHandler } from '../mcp/server.js';
 import { buildEvidenceCache, encodeViaSidecar, type McpDeps } from '../mcp/deps.js';
 import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
+import { batchRoutes } from './routes/batch.js';
+import { queueRoutes } from './routes/queues.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
 
 export interface HttpDeps {
@@ -38,6 +40,8 @@ export interface HttpDeps {
   onEnqueued?: () => void;
   /** `/ui/graph` 的前端产物目录；不传则用 `src/app/ui/dist`（测试注入临时目录） */
   uiDistDir?: string;
+  /** 批量撤销窗口（P2-07）：默认 30s，测试传短 TTL 造过期 */
+  batchOpTtlMs?: number;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -68,6 +72,13 @@ export async function buildHttpApp(deps: HttpDeps) {
 
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+  // 批量动作与 factRoutes 同前缀、不同路由（Fastify 允许多插件共享前缀）
+  await app.register(batchRoutes, {
+    prefix: '/api/facts',
+    db: deps.db,
+    ...(deps.batchOpTtlMs === undefined ? {} : { ttlMs: deps.batchOpTtlMs }),
+  });
+  await app.register(queueRoutes, { prefix: '/api/queues', db: deps.db });
   await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });
 
   // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──

@@ -11,6 +11,8 @@ coverage/
 # 测试用临时目录
 .tmp/
 .tmp-smoke/
+# 构建/验证时的工程内 TEMP 重定向（AGENTS.md DoD 要求，产物不落系统 temp）
+temp/
 # Python 缓存（sidecar）
 __pycache__/
 *.pyc

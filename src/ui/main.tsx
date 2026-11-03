@@ -1,12 +1,9 @@
 /**
- * `/ui/graph` 的 React 入口。
+ * `/ui/graph` 与 `/ui/inbox` 的 React 入口（P2-07 起两页共用同一份产物）。
  *
- * 职责只有"取数 + 视图切换 + 状态栏"：图怎么画全在 `graph/Graph3D.tsx` 与
- * `graph/Graph2D.tsx`，坐标全在 `/api/graph`，这里一行布局计算都没有（概设 §8.9 纪律 1）。
- *
- * 视图（`?view=3d|2d|table`）写回 URL：刷新与分享都不丢（P2-03 / P2-04 验收项）。
- * 表格视图由 `table/FactsTable.tsx` 自理（取数、游标分页、虚拟滚动都在那儿）：
- * 本文件只负责"切到表格时把图卸掉、且不为表格预拉图数据"。
+ * 分派只按路径前缀：`/ui/inbox*` → `InboxPage`，其余一律走图谱 `App`。
+ * 不引路由库（概设 §8.9 纪律：不加没必要的依赖），两页互不 import，
+ * 所以首屏不会因为多了一页而把另一页的代码也拉进来。
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -15,6 +12,7 @@ import { Graph2D, type Graph2DStats } from './graph/Graph2D.js';
 import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
 import { ACTIVITY_TTL_MS } from './graph/pure/encoding.js';
+import { InboxPage } from './inbox/InboxPage.js';
 import { useActivity } from './state/activity.js';
 import { useFilter } from './state/filter.js';
 import { FilterBar } from './filter/FilterBar.js';
@@ -354,4 +352,6 @@ function App(): JSX.Element {
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root not found');
-createRoot(host).render(<App />);
+// 两页共用一份产物：`/ui/inbox*` 渲染待办页，其余（`/ui/graph` 等）渲染图谱。
+const isInbox = window.location.pathname.startsWith('/ui/inbox');
+createRoot(host).render(isInbox ? <InboxPage /> : <App />);

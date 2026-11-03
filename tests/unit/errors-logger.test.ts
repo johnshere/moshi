@@ -29,6 +29,8 @@ describe('错误码映射（详设 §1.5）', () => {
     E_ACCESS: [403, null, false],
     E_DIRECT_WRITE_DISABLED: [403, -32602, false],
     E_QUOTA: [429, -32603, true],
+    /** 详设 §1.5 原表没有 410（P2-07 批量撤销窗口新增），此处按代码实际补一行 */
+    E_OP_EXPIRED: [410, -32602, false],
   };
 
   it('错误码集合与详设表一致', () => {
