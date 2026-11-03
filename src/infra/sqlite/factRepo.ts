@@ -10,6 +10,7 @@ import { MoshiError } from '../../domain/errors.js';
 import type { Epistemic, Ftype, Pool } from '../../domain/enums.js';
 import type { Fact } from '../../domain/types.js';
 import { nowIso } from '../../domain/time.js';
+import { applyStrength as computeStrength, type StrengthEvent } from '../../core/lifecycle/strength.js';
 import { appendAudit } from './auditRepo.js';
 import type { Db } from './db.js';
 import { syncFtsRow } from './ftsRepo.js';
@@ -163,6 +164,69 @@ export function setStrength(db: Db, id: string, strength: number, ts: string = n
     ts,
     id,
   );
+}
+
+/**
+ * 强度写入阈值（详设 §8.1 实现约束第 1 条）。
+ *
+ * 变化不足千分之一就当「没变」：惰性衰减在**每次查询**都会算一遍，
+ * 不设阈值的话读也写库，WAL 会被无意义的 ±1e-9 打爆。
+ * 导出是给 `moshi db rebuild-strength --dry-run` 用的——统计口径必须与写库口径一致。
+ */
+export const STRENGTH_WRITE_EPS = 1e-3;
+
+/**
+ * 事件驱动的强度更新（写入后的那个「算一次」）。
+ *
+ * 与读路径的惰性衰减共用同一个方程，区别只是事件非 `none`。
+ * 值没变就**不写库**——`last_decay_at` 也不动，否则下一次会以为「已经算过了」。
+ */
+export function applyStrength(
+  db: Db,
+  id: string,
+  event: StrengthEvent,
+  now: number = Date.now(),
+): { strength: number; changed: boolean } {
+  const fact = getFact(db, id);
+  if (fact === null) throw new MoshiError('E_NOT_FOUND', `fact 不存在：${id}`, { id });
+
+  const target = computeStrength(fact, event, now);
+  if (Math.abs(target - fact.strength) <= STRENGTH_WRITE_EPS) {
+    return { strength: fact.strength, changed: false };
+  }
+  setStrength(db, id, target, new Date(now).toISOString());
+  return { strength: target, changed: true };
+}
+
+/**
+ * 读路径的惰性衰减：按当前时刻把一批事实算一遍，只把真变了的行批量写回。
+ *
+ * 返回值的 strength 已是「衰减后」的值，供调用方在内存里直接用于融合/裁决——
+ * 不落库的行（Δ ≤ 1e-3）保持原值，因为它本来就被约定俗成为「没变」。
+ * 不改其他列、不删行：失效事实只是被算成 0，行仍然在。
+ */
+export function decayFacts(db: Db, facts: readonly Fact[], now: number): Fact[] {
+  const writes: { id: string; strength: number }[] = [];
+  const out: Fact[] = [];
+
+  for (const fact of facts) {
+    const target = computeStrength(fact, { kind: 'none' }, now);
+    if (Math.abs(target - fact.strength) > STRENGTH_WRITE_EPS) {
+      writes.push({ id: fact.id, strength: target });
+      out.push({ ...fact, strength: target });
+    } else {
+      out.push(fact);
+    }
+  }
+
+  if (writes.length > 0) {
+    const ts = new Date(now).toISOString();
+    const tx = db.transaction(() => {
+      for (const w of writes) setStrength(db, w.id, w.strength, ts);
+    });
+    tx();
+  }
+  return out;
 }
 
 export function setPool(db: Db, id: string, pool: Pool, ts: string = nowIso()): void {
@@ -485,6 +549,23 @@ export function countMatching(db: Db, opts: Omit<SearchOptions, 'limit'>): numbe
   const { sql, params } = buildWhere(opts);
   const row = db.prepare(`SELECT COUNT(*) AS n FROM fact${sql}`).get(...params) as { n: number };
   return row.n;
+}
+
+/**
+ * 按 rowid 分页扫全表（`moshi db rebuild-strength` 用，详设 §8.1 末段「一次遍历全表」）。
+ *
+ * 用 keyset（`rowid > ?`）而不是 OFFSET：重算期间自己会写库，但写强度不改 rowid，
+ * 所以翻页既不跳行也不重复；OFFSET 在大库上还会越翻越慢。
+ */
+export function listFactsPage(
+  db: Db,
+  afterRowid: number,
+  limit: number,
+): { rowid: number; fact: Fact }[] {
+  const rows = db
+    .prepare('SELECT rowid AS rid, * FROM fact WHERE rowid > ? ORDER BY rowid LIMIT ?')
+    .all(afterRowid, limit) as (Record<string, unknown> & { rid: number })[];
+  return rows.map((r) => ({ rowid: r.rid, fact: rowToFact(r) }));
 }
 
 /**

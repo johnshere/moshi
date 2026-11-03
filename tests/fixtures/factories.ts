@@ -29,6 +29,8 @@ export interface FactSeed {
   validAt?: string;
   validTo?: string | null;
   supersededBy?: string | null;
+  /** 惰性衰减的起点；不传即「刚刚」（dt ≈ 0，强度不动）。P2-08 的强度用例靠它造历史 */
+  lastDecayAt?: string;
 }
 
 export function makeEntity(db: Db, name: string, etype = 'pkg'): string {
@@ -81,7 +83,7 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
     valid_at: seed.validAt ?? ts,
     valid_to: seed.validTo ?? null,
     recorded_at: ts,
-    last_decay_at: ts,
+    last_decay_at: seed.lastDecayAt ?? ts,
     created_at: ts,
     updated_at: ts,
   });

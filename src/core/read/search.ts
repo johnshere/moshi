@@ -22,12 +22,12 @@
  */
 import { canonicalJson, sha256Hex } from '../../domain/hash.js';
 import { newId } from '../../domain/ids.js';
-import { nowIso } from '../../domain/time.js';
+import { nowIso, parseTs } from '../../domain/time.js';
 import type { Fact } from '../../domain/types.js';
 import type { Ftype } from '../../domain/enums.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import { countFact, knn, vectorDisabled, VEC_DIM } from '../../infra/vec/index.js';
-import { listByIds } from '../../infra/sqlite/factRepo.js';
+import { decayFacts, listByIds } from '../../infra/sqlite/factRepo.js';
 import { listTopSummaries } from '../../infra/sqlite/communityRepo.js';
 import { schemaRev } from '../../infra/sqlite/metaRepo.js';
 import { logQuery } from '../../infra/sqlite/logRepo.js';
@@ -413,7 +413,11 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   // ── 5) 候选加载与过滤（三路并集）──
   const unionIds = [...new Set([...vectorIds, ...bm25Ids, ...pprIds])];
   const filtered = listByIds(db, unionIds).filter((f) => passFilters(f, input, scope));
-  const factsById = new Map<string, Fact>(filtered.map((f) => [f.id, f]));
+  // 惰性衰减：查询返回前算一次（详设 §8.1）。候选只有几十条，且 Δ≤1e-3 不落库，
+  // 所以这一步对读路径的代价是 O(候选数) 的浮点运算，不是一次批量 UPDATE。
+  // 衰减后的强度直接进融合与裁决，否则排序用的是「上次查询时」的旧值。
+  const live = decayFacts(db, filtered, parseTs(now));
+  const factsById = new Map<string, Fact>(live.map((f) => [f.id, f]));
   const allowed = new Set(factsById.keys());
   mark('load');
 

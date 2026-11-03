@@ -289,6 +289,38 @@ describe('memory_feedback', () => {
     expect(r.unresolved_m_ids).toContain(99);
     expect(r.inserted).toBe(0);
   });
+
+  it('verdict 驱动强度事件：adopt 增量、reject 乘性、correct 不动；重复反馈幂等', async () => {
+    const db = freshDb();
+    const fid = insertFact(db, { content: 'aaa', strength: 0.5 });
+    syncFts(db);
+    const deps = makeDeps(db);
+    const pack = await runMemoryQuery(deps, {
+      query: 'aaa',
+      top_k: 10,
+      scope: 'global',
+      include_history: false,
+      format: 'json',
+    });
+    expect(pack.evidence[0]!.fact_id).toBe(fid);
+
+    // adopt：0.5 + 0.15·(1-0.5) = 0.575
+    runMemoryFeedback(deps, { query_id: pack.query_id, m_ids: [1], verdict: 'adopt' });
+    expect(factRepo.getFact(db, fid)!.strength).toBeCloseTo(0.575, 4);
+
+    // 同一条反馈重发（幂等键命中）不许把强度再推一遍
+    const dup = runMemoryFeedback(deps, { query_id: pack.query_id, m_ids: [1], verdict: 'adopt' });
+    expect(dup.duplicates).toBe(1);
+    expect(factRepo.getFact(db, fid)!.strength).toBeCloseTo(0.575, 4);
+
+    // correct 刻意不动强度（既不是独立验证一致，也不该乘性惩罚）
+    runMemoryFeedback(deps, { query_id: pack.query_id, m_ids: [1], verdict: 'correct' });
+    expect(factRepo.getFact(db, fid)!.strength).toBeCloseTo(0.575, 4);
+
+    // reject：0.575 · 0.7 = 0.4025
+    runMemoryFeedback(deps, { query_id: pack.query_id, m_ids: [1], verdict: 'reject' });
+    expect(factRepo.getFact(db, fid)!.strength).toBeCloseTo(0.4025, 4);
+  });
 });
 
 describe('memory_correct', () => {

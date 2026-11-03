@@ -20,6 +20,7 @@ import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { syncMissingFts } from '../../src/infra/sqlite/ftsRepo.js';
 import { schemaRev } from '../../src/infra/sqlite/metaRepo.js';
 import * as queryLogRepo from '../../src/infra/sqlite/queryLogRepo.js';
+import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import { newId } from '../../src/domain/ids.js';
 import { searchWithPipeline, type SearchRuntime } from '../../src/core/read/search.js';
 import { EvidenceCache } from '../../src/core/read/cache.js';
@@ -296,5 +297,24 @@ describe('searchWithPipeline · 向量相关性地板（P1-29）', () => {
     const out = await searchWithPipeline(withVector(db, { query: basis(1) }), { query: 'zeta', scope: 'global' });
     expect(out.pack.evidence).toEqual([]);
     expect(out.pack.degraded).toContain('no_vector');
+  });
+});
+
+describe('searchWithPipeline · 读路径惰性衰减（P2-08）', () => {
+  it('候选强度按查询时刻重算并落库，last_decay_at 跟着前进', async () => {
+    const db = freshDb();
+    const id = insertFact(db, {
+      content: 'alpha stale',
+      strength: 0.5,
+      lastDecayAt: new Date(Date.now() - 14 * 864e5).toISOString(),
+    });
+    syncFts(db);
+
+    await searchWithPipeline(runtime(db), { query: 'alpha', scope: 'global', topK: 5 });
+
+    // 14 天半衰期：0.5 → 0.25。落库而不是只在内存里算，否则每次查询都要重算旧值
+    const fact = factRepo.getFact(db, id);
+    expect(fact!.strength).toBeCloseTo(0.25, 2);
+    expect(fact!.lastDecayAt > new Date(Date.now() - 60_000).toISOString()).toBe(true);
   });
 });
