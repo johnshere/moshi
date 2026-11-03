@@ -105,6 +105,7 @@ export const dbCommand: Command = {
       if (sub === 'consolidate') {
         const res = await consolidate(db, {
           dryRun,
+          maxContentBytes: ctx.cfg.ingest.max_fact_bytes,
           ...(rate === null ? {} : { ratePerSec: rate }),
         });
         ctx.stdout(`${JSON.stringify({ command: 'db consolidate', ...res, dry_run: dryRun })}\n`);
