@@ -9,9 +9,12 @@
  * - **兜底**：即便没人唤醒（比如队列是上一次进程留下的），每 `intervalMs` 也会扫一轮。
  * - **限深**：单轮最多 `maxBatches` 批，队列再长也会让出事件循环，不阻塞 HTTP。
  * - **不重入**：运行中再来的唤醒只置一个 `again` 标记，一轮结束后再补一次，不并发跑两轮。
+ * - **收尾巩固**：一轮 harvest 结束后串行跑一次情景→语义巩固（P2-09）。巩固是低优先级
+ *   后台维护，跑挂了只记日志，不影响已经落库的事实。
  *
  * 不做的事：不碰 sidecar、不写归档、不改生命周期状态——那些有各自的触发点。
  */
+import { consolidate, type ConsolidateOptions } from '../core/lifecycle/consolidate.js';
 import { harvest, type HarvestResult } from '../core/write/harvest.js';
 import { countPending, countErrors } from '../infra/sqlite/annotationRepo.js';
 import type { Db } from '../infra/sqlite/db.js';
@@ -29,6 +32,11 @@ export interface HarvestRunnerOptions {
   intervalMs?: number;
   batchSize?: number;
   maxBatches?: number;
+  /**
+   * harvest 收尾的情景→语义巩固（P2-09）。默认开，参数直通 `consolidate`；
+   * `false` = 关掉（只想测写入链路、或调用方自己控制巩固时机）。
+   */
+  consolidate?: ConsolidateOptions | false;
 }
 
 export interface HarvestRunnerState {
@@ -58,6 +66,7 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
   const intervalMs = opts.intervalMs ?? HARVEST_INTERVAL_MS;
   const batchSize = opts.batchSize ?? HARVEST_BATCH_SIZE;
   const maxBatches = opts.maxBatches ?? HARVEST_MAX_BATCHES;
+  const consolidateOpts = opts.consolidate === false ? null : (opts.consolidate ?? {});
 
   let timer: NodeJS.Timeout | undefined;
   let running = false;
@@ -69,8 +78,6 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
   const runOnce = async (): Promise<HarvestResult> => {
     const startedAt = performance.now();
     const res = await harvest(db, { batchSize, maxBatches });
-    runs += 1;
-    lastMs = Math.round(performance.now() - startedAt);
     // 只在真有变化或出错时写日志，空转不刷屏
     if (res.created + res.refreshed + res.superseded + res.coexist > 0 || res.failed > 0) {
       log?.info(
@@ -78,6 +85,22 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
         res.failed > 0 ? 'harvest finished with errors' : 'harvest applied',
       );
     }
+    if (consolidateOpts !== null) {
+      // 巩固失败不冒泡：写入闭环是主线，巩固只是它后面的低优先级维护
+      try {
+        const c = await consolidate(db, consolidateOpts);
+        if (c.created + c.superseded > 0) {
+          log?.info({ event: 'consolidate.run', ...c }, 'episodic consolidated');
+        }
+      } catch (err) {
+        log?.error(
+          { event: 'consolidate.failed', err: (err as Error).message },
+          'consolidate round failed',
+        );
+      }
+    }
+    runs += 1;
+    lastMs = Math.round(performance.now() - startedAt);
     return res;
   };
 

@@ -7,6 +7,8 @@
  * - 失效事实强度归 0、行数不变（追加式收口，永不物理删除）；
  * - `--dry-run` 一列都不写；
  * - 未知/缺少子命令退出码 2。
+ *
+ * 另含 P2-09 `moshi db consolidate [--dry-run] [--rate n]`：幂等、dry-run 不写库、参数校验。
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -16,7 +18,7 @@ import { COMMANDS, runCli } from '../../src/app/cli/index.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
-import { insertFact } from '../fixtures/factories.js';
+import { insertFact, makeEntity } from '../fixtures/factories.js';
 
 const DAY = 864e5;
 
@@ -186,5 +188,73 @@ describe('db rebuild-strength', () => {
     const badFlag = await cli(home, ['db', 'rebuild-strength', '--force']);
     expect(badFlag.code).toBe(2);
     expect(badFlag.err).toContain('rebuild-strength');
+  });
+});
+
+/** 同 key 的三条 episodic 观测：工厂的默认 subject 每次都新建实体，这里必须复用同一个 */
+function seedEpisodic(db: Db, values: readonly string[]): void {
+  const entityId = makeEntity(db, 'svc-cli');
+  for (const value of values) {
+    insertFact(db, {
+      subject: { entity_id: entityId, name: 'node' },
+      predicate: 'runtime_state',
+      value,
+      ftype: 'episodic',
+    });
+  }
+}
+
+describe('db consolidate（P2-09）', () => {
+  it('把同 key ≥3 条 episodic 归纳成 1 条要点；再跑一次 created=0', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => seedEpisodic(db, ['listening', 'idle', 'crashed']));
+
+    const first = await cli(home, ['db', 'consolidate']);
+    expect(first.code).toBe(0);
+    expect(JSON.parse(first.out.trim())).toMatchObject({
+      command: 'db consolidate',
+      groups: 1,
+      created: 1,
+      skipped: 0,
+      superseded: 0,
+      dry_run: false,
+    });
+
+    // 幂等：同一批源事实不会再产出一个要点
+    const second = await cli(home, ['db', 'consolidate']);
+    expect(second.code).toBe(0);
+    expect(JSON.parse(second.out.trim())).toMatchObject({ created: 0, skipped: 1 });
+
+    withDb(dbFile, (db) => {
+      expect(factRepo.countFacts(db)).toBe(4);
+      expect(db.prepare("SELECT COUNT(*) AS n FROM edge WHERE etype = 'derived_from'").get()).toEqual({
+        n: 3,
+      });
+    });
+  });
+
+  it('--dry-run 只统计不写库；--rate 可覆盖限速', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => seedEpisodic(db, ['listening', 'idle', 'crashed']));
+
+    const run = await cli(home, ['db', 'consolidate', '--dry-run', '--rate', '0']);
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.out.trim())).toMatchObject({ created: 1, dry_run: true });
+
+    withDb(dbFile, (db) => {
+      expect(factRepo.countFacts(db)).toBe(3); // 一个要点都没写
+    });
+  });
+
+  it('--rate 非数字 / 未知参数 → 退出码 2', async () => {
+    const { home } = fakeHome();
+
+    const badRate = await cli(home, ['db', 'consolidate', '--rate', 'abc']);
+    expect(badRate.code).toBe(2);
+    expect(badRate.err).toContain('--rate');
+
+    const badFlag = await cli(home, ['db', 'consolidate', '--force']);
+    expect(badFlag.code).toBe(2);
+    expect(badFlag.err).toContain('consolidate');
   });
 });

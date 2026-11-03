@@ -4,6 +4,9 @@
  * 这条链路此前只在 `moshi import` 里存在——通过 MCP 说"记住"的事实会永远躺在
  * `annotation` 表里。本文件锁三件事：入队后有人消费、没有唤醒时有兜底轮询、
  * `stop()` 之后不再消费。
+ *
+ * P2-09 补一条：episodic 观测落库后，**同一个 runner 这一轮收尾**就把同 key 的
+ * ≥3 条观测归纳成 1 条 semantic 要点——这是巩固的生产接线点（DoD ⑥）。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -141,5 +144,40 @@ describe('写入闭环（P1-22）', () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(annotationRepo.countPending(db)).toBe(1);
     expect(factRepo.countFacts(db)).toBe(0);
+  });
+
+  it('episodic 观测落库后，同一轮收尾就提炼出 semantic 要点（P2-09 接线点）', async () => {
+    const db = freshDb();
+    const runner = runnerFor(db, 0);
+    const deps = makeDeps(db, () => runner.wake());
+
+    const observations = ['7001', '7002', '7003'].map((port) => ({
+      content: `写入闭环巩固验证：sidecar port ${port} 监听`,
+      subject: 'service:consolidate',
+      subject_type: 'service' as const,
+      predicate: 'episodic_listens_on',
+      value: { port: Number(port) },
+      ftype: 'episodic' as const,
+    }));
+    expect(runMemoryAnnotate(deps, { facts: observations }).accepted).toHaveLength(3);
+
+    // 3 条源事实 + 1 条要点：巩固在 harvest 之后同步跑完（不需要额外调用）
+    await waitUntil(() => factRepo.countFacts(db) >= 4);
+    const sources = factRepo.searchFacts(db, { ftype: ['episodic'], limit: 10 });
+    const points = factRepo.searchFacts(db, { ftype: ['semantic'], limit: 10 });
+    expect(sources).toHaveLength(3);
+    expect(points).toHaveLength(1);
+    expect(points[0]?.confidenceSource).toBe('derived');
+    expect(points[0]?.attrs.ext.derived_from).toBeTypeOf('string');
+    // harvest 自己也会抽边（co_occur 等），这里只数溯源边
+    const derivedEdges = db
+      .prepare("SELECT COUNT(*) AS n FROM edge WHERE etype = 'derived_from' AND valid_to IS NULL")
+      .get() as { n: number };
+    expect(derivedEdges.n).toBe(3);
+
+    // 再跑一轮：源集合没变 → 幂等，不产生第二个要点
+    await runner.runOnce();
+    expect(factRepo.searchFacts(db, { ftype: ['semantic'], limit: 10 })).toHaveLength(1);
+    expect(factRepo.countFacts(db)).toBe(4);
   });
 });
