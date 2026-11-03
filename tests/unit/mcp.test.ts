@@ -16,7 +16,7 @@ import { runMemoryQuery, PROTOCOL_HINT } from '../../src/app/mcp/query.js';
 import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
 import { runMemoryFeedback } from '../../src/app/mcp/feedback.js';
 import { runMemoryCorrect } from '../../src/app/mcp/correct.js';
-import { insertFact } from '../fixtures/factories.js';
+import { insertDerivedPoint, insertFact } from '../fixtures/factories.js';
 import { syncMissingFts } from '../../src/infra/sqlite/ftsRepo.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import * as auditRepo from '../../src/infra/sqlite/auditRepo.js';
@@ -339,6 +339,29 @@ describe('memory_correct', () => {
     expect(fact!.confidence).toBe(0.3);
     const audits = auditRepo.auditByRow(db, 'fact', fid);
     expect(audits.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('失效源事实后立即收口其派生要点', () => {
+    const db = freshDb();
+    const src = insertFact(db, {
+      ftype: 'episodic',
+      validAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const point = insertDerivedPoint(db, [src]);
+    const deps = makeDeps(db);
+
+    const r = runMemoryCorrect(deps, {
+      fact_id: src,
+      patch: { epistemic_status: 'invalidated' },
+      reason: '测试撤回',
+    });
+    expect(r.changed).toContain('valid_to');
+
+    const row = db
+      .prepare('SELECT valid_to, epistemic_status FROM fact WHERE id = ?')
+      .get(point) as { valid_to: string | null; epistemic_status: string };
+    expect(row.valid_to).not.toBeNull();
+    expect(row.epistemic_status).toBe('invalidated');
   });
 
   it('改不可变字段 content 报错', () => {

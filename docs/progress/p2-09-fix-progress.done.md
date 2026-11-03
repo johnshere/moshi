@@ -1,6 +1,6 @@
 # P2-09-fix 审阅整改 — 施工进度
 
-- 起止：2026-11-03 21:30 ~ 22:40
+- 起止：2026-11-03 21:30 ~ 23:34（22:40 首版 DONE；23:30~23:34 接力修正）
 - 依据：`docs/审阅报告-P2-09.md`（复核修订版）中确认的三项：M2 墓碑+反向对账、M1-min disputed 排除与「n 个不同取值」、M5 内容 2 KB 截断。
 - 不在范围：M3（全量扫/限速，I-23）、M4（旧边与平方增长，D-109/I-26）、M6（GAT 特征，I-24）、M7（组级容错/并发，P2-17）、M8（series 派生点，P2-18）。
 
@@ -28,12 +28,17 @@
 
 ## 验证
 
-- `pnpm exec vitest run tests/unit/consolidate.test.ts` → 16 passed
-- `pnpm exec vitest run tests/unit/harvestRunner.test.ts tests/unit/db-cli.test.ts` → 13 passed
-- `pnpm exec vitest run tests/unit/batch-http.test.ts tests/unit/mcp.test.ts` → 36 passed
+- 定向测试（巩固 + 三条接线 + runner/CLI）→ 85 passed
 - `pnpm typecheck` → passed
 - `pnpm build`（TEMP 重定向到工程内）→ exit 0
-- `pnpm verify`（TEMP 重定向）→ 890 passed / 7 failed；7 例全部是 `tests/integration/layout-job.test.ts` 的 `Cannot find module 'src/domain/layout.js'`，layout 四文件 `git diff` 为空、单跑可复现，属既有环境问题，与本整改无关。
+- `pnpm verify`（TEMP 重定向）→ **901 passed / 73 files, 0 failed**（原 7 例 layout-job worker 解析失败已在接力修正中修复：根因是 Node 22.19 的 Worker 不注册父进程 `--import tsx`，worker 内改注册 `tsx/esm/api` 并按运行时扩展名动态导入）
+
+## 接力修正（2026-11-03 23:30 ~ 23:34）
+
+- **layout worker**：`src/app/jobs/layout.worker.ts` 源码态先 `const { register } = await import('tsx/esm/api'); register();`，再按 `import.meta.url` 的运行时扩展名动态导入 `../../domain/layout${ext}`；dist 态 `ext='.js'` 不碰 tsx。`tests/integration/layout-job.test.ts` 7/7 绿。
+- **墓碑收紧**：`hasHumanRejectedDerived` 增加 `AND f.epistemic_status = 'invalidated'`，只有人工 invalidate 才是永久墓碑；archive/prune 将来写 `valid_to` 不会被误判。`consolidate.test.ts` 新增 archived/pruned 反例（expect `created=1`、`skipped=0`）。
+- **接线单测**：`tests/fixtures/factories.ts` 新增 `insertDerivedPoint(db, sourceIds, seed)`；`tests/unit/http.test.ts`（PATCH）、`batch-http.test.ts`（批量）、`mcp.test.ts`（`memory_correct`）各补一条「失效源 → 派生点收口」。
+- **文档**：`docs/详设.md:2572` 删除「单值场景下 content 与原文完全一致。」与「组内取值必然互不相同」矛盾。
 
 ## 遗留
 

@@ -76,6 +76,8 @@ export function listAllActiveDerivedPoints(db: Db): Fact[] {
  * `superseded_by IS NULL` 把"人工失效"（批量 / 单条 PATCH / memory_correct）与
  * "巩固因源集合变化收口"（`superseded_by = 新要点`）分开；反向对账同样会写 NULL，
  * 所以再用 audit 的来源排除它——否则源恢复后永远无法重新产出结论。
+ * `epistemic_status = 'invalidated'` 再排掉 archive/prune 等也会写 `valid_to` 的
+ * 收口路径：它们不是人工否决，不能被墓碑永久压住。
  */
 export function hasHumanRejectedDerived(
   db: Db,
@@ -90,6 +92,7 @@ export function hasHumanRejectedDerived(
          FROM fact f
         WHERE f.canonical_key = ? AND f.scope = ? AND f.confidence_source = 'derived'
           AND f.valid_to IS NOT NULL AND f.superseded_by IS NULL
+          AND f.epistemic_status = 'invalidated'
           AND json_extract(f.attrs, '$.ext.derived_from') = ?
           AND NOT EXISTS (
             SELECT 1 FROM audit a

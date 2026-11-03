@@ -248,6 +248,23 @@ describe('情景 → 语义（P2-09）', () => {
     expect(derivedPoints(db, ck)).toHaveLength(1);
   });
 
+  it('archived/pruned 派生点不算人工墓碑', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+    // 模拟将来的 archive/prune：写 valid_to 但状态不是 invalidated，也没有 reconcile audit
+    db.prepare("UPDATE fact SET valid_to = ?, epistemic_status = 'pruned' WHERE id = ?").run(
+      new Date(Date.parse(point.validAt) + 1).toISOString(),
+      point.id,
+    );
+
+    const res = await consolidate(db, { ratePerSec: 0 });
+    expect(res).toMatchObject({ created: 1, skipped: 0 });
+    expect(derivedPoints(db, ck).filter((f) => f.validTo === null)).toHaveLength(1);
+  });
+
   it('源撤回后旧结论收口；撤销撤回后可重新产出（reconcile 不算墓碑）', async () => {
     const db = freshDb();
     const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
