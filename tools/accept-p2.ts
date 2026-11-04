@@ -9,7 +9,6 @@
  *
  * 不做 30fps 断言：帧率必须人眼/浏览器测，这里只记录 `/api/graph` 的耗时与载荷。
  */
-import { spawnSync } from 'node:child_process';
 import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -26,6 +25,7 @@ import {
   percentile,
   type AcceptStep,
 } from './accept-p2-lib.js';
+import { seedGraph } from './seed-graph.js';
 
 const TOKEN = 'accept_p2_token';
 const SEED_FACTS = 5000;
@@ -60,31 +60,18 @@ async function sampleLatency(runs: number, fn: () => Promise<unknown>): Promise<
   return samples;
 }
 
-function seedGraph(): { facts: number; edges: number; seed_ms: number } {
-  const started = Date.now();
-  // seed-graph 只有 CLI 入口（`seed()` 未导出，且模块顶层直接执行 parseArgs），
-  // 所以这里按任务卡允许的方式 shell 调用；`stdio:'inherit'` 避开管道 EPERM。
-  const result = spawnSync(
-    'pnpm',
-    ['exec', 'tsx', 'tools/seed-graph.ts', '--data', dataDir, '--facts', String(SEED_FACTS), '--edges', String(SEED_EDGES)],
-    { stdio: 'inherit', shell: true, cwd: process.cwd() },
-  );
-  if (result.status !== 0) {
-    throw new Error(`seed-graph 退出码 ${String(result.status ?? 'null')}`);
+/** 直接 import seed-graph 的编程入口（不再起子进程）；返回值就是计数，无需重开库 */
+function seedAcceptData(): { facts: number; edges: number; seed_ms: number } {
+  const result = seedGraph({
+    data: dataDir,
+    facts: SEED_FACTS,
+    edges: SEED_EDGES,
+    quiet: true,
+  });
+  if (result.facts < SEED_FACTS || result.edges < SEED_EDGES) {
+    throw new Error(`种子不足：facts=${String(result.facts)} edges=${String(result.edges)}`);
   }
-  const partial = path.join(dataDir, 'moshi.db');
-  const { db } = openDb({ file: partial });
-  try {
-    migrate(db, { backupsDir: path.join(dataDir, 'backups') });
-    const facts = count(db, 'fact');
-    const edges = count(db, 'edge');
-    if (facts < SEED_FACTS || edges < SEED_EDGES) {
-      throw new Error(`种子不足：facts=${String(facts)} edges=${String(edges)}`);
-    }
-    return { facts, edges, seed_ms: Date.now() - started };
-  } finally {
-    closeDb(db);
-  }
+  return { facts: result.facts, edges: result.edges, seed_ms: result.ms };
 }
 
 async function main(): Promise<void> {
@@ -99,7 +86,7 @@ async function main(): Promise<void> {
     const started = Date.now();
     let step: AcceptStep;
     try {
-      const seed = seedGraph();
+      const seed = seedAcceptData();
       step = { name: 'seed', ok: true, ms: Date.now() - started, detail: seed };
     } catch (err) {
       step = {

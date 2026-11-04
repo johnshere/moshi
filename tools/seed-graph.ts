@@ -15,8 +15,9 @@
  */
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { canonicalKey, valueHash } from '../src/domain/hash.js';
-import { closeDb, openDb } from '../src/infra/sqlite/db.js';
+import { closeDb, openDb, type Db } from '../src/infra/sqlite/db.js';
 import { migrate } from '../src/infra/sqlite/migrate.js';
 
 const SEED_PREFIX = 'fact_seed_';
@@ -69,6 +70,28 @@ function parseArgs(argv: readonly string[]): Args {
     // 删非种子数据（别人灌进来的事实）必须显式 --force，见 seed() 里的护栏
     force: argv.includes('--force'),
   };
+}
+
+/** 编程调用入口的参数；CLI 的 `--facts/--edges/--communities/--missing/--reset/--force` 都映射到这里 */
+export interface SeedGraphOptions {
+  data: string;
+  facts?: number;
+  edges?: number;
+  communities?: number;
+  missing?: number;
+  reset?: boolean;
+  force?: boolean;
+  /** true 时不打印进度（accept-p2 这类调用方自己输出 PASS/FAIL，避免两套日志混在一起） */
+  quiet?: boolean;
+}
+
+export interface SeedGraphResult {
+  facts: number;
+  edges: number;
+  laid: number;
+  drawable: number;
+  inserted_edges: number;
+  ms: number;
 }
 
 interface FactRow {
@@ -145,7 +168,47 @@ class ForeignDataError extends Error {
   }
 }
 
-function seed(args: Args): void {
+function normalizeSeedOptions(opts: SeedGraphOptions): Args {
+  if (opts.data === undefined || opts.data === '') {
+    throw new Error('必须给 --data <数据目录>（脚本不会用默认的 ~/.moshi）');
+  }
+  const positive = (n: number | undefined, fallback: number): number =>
+    n !== undefined && Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+  return {
+    data: path.resolve(opts.data),
+    facts: positive(opts.facts, 5000),
+    edges: positive(opts.edges, 15000),
+    communities: positive(opts.communities, 24),
+    // 故意不给 layout 的节点数：默认 0。给非 0 时 daemon 的 layout runner 一见脏就会重算，
+    // 从而把种子坐标整片覆盖掉（社区分离随之消失）。
+    missing: positive(opts.missing, 0),
+    reset: opts.reset === true,
+    // 删非种子数据（别人灌进来的事实）必须显式 --force，见 seedGraph() 里的护栏
+    force: opts.force === true,
+  };
+}
+
+/** 只删本工具造的行（`fact_seed_*` / `edge_seed_*` / 对应 layout），返回各类删除行数 */
+export function clearSeedData(db: Db): { facts: number; edges: number; layout: number } {
+  const run = db.transaction(() => {
+    const edges = Number(db.prepare("DELETE FROM edge WHERE id LIKE 'edge_seed_%'").run().changes);
+    const layout = Number(
+      db.prepare("DELETE FROM layout WHERE fact_id LIKE 'fact_seed_%'").run().changes,
+    );
+    const facts = Number(db.prepare("DELETE FROM fact WHERE id LIKE 'fact_seed_%'").run().changes);
+    return { facts, edges, layout };
+  });
+  return run();
+}
+
+/**
+ * 灌种子图（编程入口，`tools/accept-p2.ts` 直接调用；CLI 也走这里）。
+ * 幂等：默认只清种子前缀行；`reset` 要求库干净，撞上外来数据抛 ForeignDataError。
+ */
+export function seedGraph(opts: SeedGraphOptions): SeedGraphResult {
+  const started = Date.now();
+  const args = normalizeSeedOptions(opts);
+  const quiet = opts.quiet === true;
   mkdirSync(args.data, { recursive: true });
   const file = path.join(args.data, 'moshi.db');
   const { db } = openDb({ file });
@@ -304,30 +367,46 @@ function seed(args: Args): void {
       )
       .get() as { facts: number; edges: number; laid: number; drawable: number };
 
-    console.log(`[seed-graph] 数据目录 ${args.data}`);
-    console.log(
-      `[seed-graph] fact=${counts.facts} edge=${counts.edges}（本次 ${edges}）layout=${counts.laid} 可上屏=${counts.drawable}`,
-    );
-    console.log('[seed-graph] 下一步：MOSHI_CONFIG=<toml> 里把 storage.data_dir 指到同一目录，起 daemon');
+    if (!quiet) {
+      console.log(`[seed-graph] 数据目录 ${args.data}`);
+      console.log(
+        `[seed-graph] fact=${counts.facts} edge=${counts.edges}（本次 ${edges}）layout=${counts.laid} 可上屏=${counts.drawable}`,
+      );
+      console.log('[seed-graph] 下一步：MOSHI_CONFIG=<toml> 里把 storage.data_dir 指到同一目录，起 daemon');
+    }
+    return { ...counts, inserted_edges: edges, ms: Date.now() - started };
   } finally {
     closeDb(db);
   }
 }
 
-try {
-  seed(parseArgs(process.argv.slice(2)));
-} catch (err) {
-  if (err instanceof ForeignDataError) {
-    const d = err.detail;
-    console.error(
-      `[seed-graph] 拒绝执行：--reset 只允许清空「全是种子数据」的库，但 ${d.data} 里有本工具之外的数据` +
-        `（fact ${d.foreignFacts} / edge ${d.foreignEdges} / layout ${d.foreignLayout} 行 id 不是种子前缀）。`,
-    );
-    console.error(
-      '[seed-graph] 想连这些数据一起删：再加 `--force`；想保留它们：去掉 `--reset`（只删种子行），或换一个空的 --data 目录。',
-    );
-    process.exit(1);
+/** 只有直接 `tsx tools/seed-graph.ts` 时才跑 CLI；被 import 时（accept-p2/测试）不执行 */
+function isCliEntry(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return path.resolve(entry) === fileURLToPath(import.meta.url);
+  } catch {
+    return false;
   }
-  console.error(`[seed-graph] 失败：${(err as Error).message}`);
-  process.exitCode = 1;
+}
+
+if (isCliEntry()) {
+  try {
+    seedGraph(parseArgs(process.argv.slice(2)));
+  } catch (err) {
+    if (err instanceof ForeignDataError) {
+      const d = err.detail;
+      console.error(
+        `[seed-graph] 拒绝执行：--reset 只允许清空「全是种子数据」的库，但 ${d.data} 里有本工具之外的数据` +
+          `（fact ${d.foreignFacts} / edge ${d.foreignEdges} / layout ${d.foreignLayout} 行 id 不是种子前缀）。`,
+      );
+      console.error(
+        '[seed-graph] 想连这些数据一起删：再加 `--force`；想保留它们：去掉 `--reset`（只删种子行），或换一个空的 --data 目录。',
+      );
+      process.exit(1);
+    }
+    console.error(`[seed-graph] 失败：${(err as Error).message}`);
+    process.exitCode = 1;
+  }
 }
