@@ -29,6 +29,9 @@ import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
 import { batchRoutes } from './routes/batch.js';
 import { queueRoutes } from './routes/queues.js';
+import { archiveRoutes } from './routes/archive.js';
+import { TraceStore } from '../../core/read/trace.js';
+import { traceRoutes } from './routes/trace.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
 
 export interface HttpDeps {
@@ -42,6 +45,8 @@ export interface HttpDeps {
   uiDistDir?: string;
   /** 批量撤销窗口（P2-07）：默认 30s，测试传短 TTL 造过期 */
   batchOpTtlMs?: number;
+  /** 证据链 ring buffer（P2-24）：不传则本实例自建一份（daemon 里 MCP 采集与 HTTP 只读共用它） */
+  traceStore?: TraceStore;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -79,7 +84,12 @@ export async function buildHttpApp(deps: HttpDeps) {
     ...(deps.batchOpTtlMs === undefined ? {} : { ttlMs: deps.batchOpTtlMs }),
   });
   await app.register(queueRoutes, { prefix: '/api/queues', db: deps.db });
+  // 归档台账与 .proposed 三选一（P2-15）
+  await app.register(archiveRoutes, { prefix: '/api/archive', db: deps.db, cfg: deps.cfg });
   await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });
+  // 证据链回放（P2-24）：进程内 ring buffer 一份，MCP 采集 / HTTP 只读（D-118：无 SSE）
+  const traceStore = deps.traceStore ?? new TraceStore();
+  await app.register(traceRoutes, { prefix: '/api/trace', store: traceStore });
 
   // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──
   app.get('/api/status', async (_req, reply) => {
@@ -114,6 +124,8 @@ export async function buildHttpApp(deps: HttpDeps) {
     cfg: deps.cfg,
     ...(deps.sidecar === undefined ? {} : { encode: encodeViaSidecar(deps.sidecar) }),
     ...(deps.onEnqueued === undefined ? {} : { onEnqueued: deps.onEnqueued }),
+    // P2-24：MCP 查询把证据链写进同一份 ring buffer，HTTP 只读接口从它取
+    traceStore,
     cache: buildEvidenceCache(deps.db, deps.cfg),
   };
   const mcpHandler = createMcpHttpHandler(mcpDeps);
