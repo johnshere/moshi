@@ -15,14 +15,20 @@
  */
 import { create } from 'zustand';
 import { useActivity } from './activity.js';
+import { focusAfterBox, mergeSelection } from '../graph/pure/select.js';
 
 export interface SelectionState {
-  /** 当前选中的节点 id 集合（P2-03 只有 0 或 1 个元素） */
+  /** 当前选中的节点 id 集合（点选 0/1 个；框选可多个，P2-19A-18） */
   selectedIds: Set<string>;
-  /** 主选中节点：高亮、检查器都以它为准（多选时取最近一次点击） */
+  /** 主选中节点：高亮、检查器都以它为准（多选时取最近一次点击/框选的最后一个） */
   focusId: string | null;
   /** 选中一个节点（覆盖旧选中） */
   select(id: string): void;
+  /**
+   * 批量设置选中（框选）：默认替换，`additive`（Shift）合并。
+   * 空数组 + 非 additive 等价于清空；空数组 + additive 保留旧集合（只把焦点交给空）。
+   */
+  setSelected(ids: readonly string[], options?: { additive?: boolean }): void;
   /** 清空选中（点空白 / Esc） */
   clear(): void;
 }
@@ -36,6 +42,20 @@ export const useSelection = create<SelectionState>()((set) => ({
   select: (id) => {
     useActivity.getState().hit(id);
     set((prev) => (prev.focusId === id ? prev : { selectedIds: new Set([id]), focusId: id }));
+  },
+  // 框选不是"一次调用事件"，不触发活跃集（那是单点命中语义）；只改共享选中集，
+  // 3D/2D/检查器/HUD 都订阅这一份。
+  setSelected: (ids, options) => {
+    set((prev) => {
+      const additive = options?.additive === true;
+      const next = mergeSelection(prev.selectedIds, ids, additive);
+      const focus = focusAfterBox(prev.focusId, ids, additive);
+      const same =
+        next.size === prev.selectedIds.size &&
+        focus === prev.focusId &&
+        [...next].every((id) => prev.selectedIds.has(id));
+      return same ? prev : { selectedIds: next, focusId: focus };
+    });
   },
   clear: () => set((prev) => (prev.focusId === null ? prev : { selectedIds: new Set<string>(), focusId: null })),
 }));

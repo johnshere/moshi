@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
-import { fetchGraph, type GraphPayload } from './api.js';
+import { fetchGraph, resolveToken, type GraphPayload } from './api.js';
 import { ArchivePage } from './archive/ArchivePage.js';
 import { MemoriesPage } from './memories/MemoriesPage.js';
 import { SettingsPage } from './settings/SettingsPage.js';
@@ -187,6 +187,71 @@ function TraceNote(): JSX.Element {
   );
 }
 
+/**
+ * 批量影响预览入口（P2-19A-18 / 概设 §8.1「框选 → 跳批量影响预览」）。
+ *
+ * 只在选中 ≥2 个节点时出现；点击后调 `POST /api/facts/batch/preview`（**只预览不执行**），
+ * 把 `facts / edges / topics / invalidated_by_cascade` 四个计数摆在 HUD 里。
+ * 节点 → fact 的映射：`/api/graph` 的节点 id 本身就是 `fact.id`（`graphRepo` 的
+ * `NODE_COLUMNS` 从 fact 表取 id），所以框选出来的 id 集可以直接当 fact id 用，
+ * 不必先走 `/api/graph/neighbors` 反查。
+ */
+interface ImpactPreviewCounts {
+  facts: number;
+  edges: number;
+  topics: number;
+  invalidated_by_cascade: number;
+}
+
+function ImpactPreview({ ids }: { ids: readonly string[] }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [counts, setCounts] = useState<ImpactPreviewCounts | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const selectionKey = ids.join('\u0000');
+
+  // 选中集变了，旧的影响面数字就不再对应当前框选——立刻清掉，不让它冒充新结果
+  useEffect(() => {
+    setCounts(null);
+    setError(null);
+  }, [selectionKey]);
+
+  const preview = async (): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/facts/batch/preview', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Moshi-Token': resolveToken() },
+        body: JSON.stringify({ action: 'invalidate', ids: [...ids] }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+        throw new Error(body.message ?? body.error ?? `HTTP ${String(res.status)}`);
+      }
+      setCounts((await res.json()) as ImpactPreviewCounts);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
+      <button type="button" onClick={() => void preview()} disabled={busy} style={buttonStyle}>
+        {busy ? '预览中…' : '预览影响'}
+      </button>
+      {counts !== null && (
+        <span style={{ marginLeft: 8, color: '#cbd5e1' }}>
+          事实 {counts.facts} · 边 {counts.edges} · 主题 {counts.topics} · 级联失效{' '}
+          {counts.invalidated_by_cascade}
+        </span>
+      )}
+      {error !== null && <span style={{ marginLeft: 8, color: '#ef4444' }}>预览失败：{error}</span>}
+    </span>
+  );
+}
+
 function App({ route }: { route: RouteInfo }): JSX.Element {
   const [data, setData] = useState<GraphPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -288,6 +353,8 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
   // 选中态 → URL：点节点/表格行/取消选中都走同一个 store，这里用 replaceState 同步
   // `?focus=`（不新增历史条目，后退仍按页面而不是按每次点选回退）。
   const selectedFocusId = useSelection((s) => s.focusId);
+  // 框选多选（P2-19A-18）：≥2 个节点时 HUD 出现「预览影响」，把选中 id 当 fact id 传给批量预览
+  const selectedIds = useSelection((s) => s.selectedIds);
   useEffect(() => {
     const current = `${window.location.pathname}${window.location.search}`;
     const next = focusHref(window.location.pathname, window.location.search, selectedFocusId);
@@ -424,6 +491,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                   加载全量（{FULL_LIMIT}）
                 </button>
               )}
+              {selectedIds.size >= 2 && <ImpactPreview ids={[...selectedIds]} />}
             </span>
           </div>
         )}
@@ -461,7 +529,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           }}
         >
           {is2d
-            ? '拖动平移 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 点空白取消选中 · 坐标取布局表的 (x, z)，前端不跑布局'
+            ? '拖动平移 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 点空白取消选中 · 空白处拖框 = 框选（Shift 合并、Esc 清空） · 坐标取布局表的 (x, z)，前端不跑布局'
             : '拖动旋转 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 标签只在活跃层、且离相机比整图半径更近时出现 · Y 四层 = strength'}
         </div>
       )}

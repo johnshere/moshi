@@ -11,9 +11,14 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { Db } from '../../../infra/sqlite/db.js';
-import { loadGraphPage } from '../../../infra/sqlite/graphRepo.js';
+import { loadGraphNeighborhood, loadGraphPage } from '../../../infra/sqlite/graphRepo.js';
 import type { GraphCursor } from '../../../infra/sqlite/graphRepo.js';
-import type { GraphEdgeRow, GraphNodeRow } from '../../../infra/sqlite/graphRepo.js';
+import type {
+  GraphEdgeRow,
+  GraphNeighborEdgeRow,
+  GraphNeighborNodeRow,
+  GraphNodeRow,
+} from '../../../infra/sqlite/graphRepo.js';
 
 /** 默认页大小：5000 节点上 1000 一屏够看，又不至于一次吐出全部 */
 export const DEFAULT_GRAPH_LIMIT = 1000;
@@ -72,6 +77,34 @@ function edgeJson(e: GraphEdgeRow): Record<string, unknown> {
   return { src: e.src, dst: e.dst, etype: e.etype, confidence: e.confidence };
 }
 
+/**
+ * `?depth=` 只认 `1` / `2`（缺省 1）；空串、数组、`3` 一律 400。
+ * 卡片写的是「上限 2」，不是「夹到 2」——静默夹取会让调用方以为拿到的是 3 跳。
+ */
+function parseDepth(raw: unknown): number | null {
+  if (raw === undefined) return 1;
+  if (raw === '1') return 1;
+  if (raw === '2') return 2;
+  return null;
+}
+
+function neighborNodeJson(n: GraphNeighborNodeRow): Record<string, unknown> {
+  return {
+    id: n.id,
+    label: n.label,
+    // 卡片契约字段名是 `etype`（承载事实类型）；同时保留 `ftype`，前端可直接复用
+    // /api/graph 节点的编码函数，不必为邻域再写一份映射。
+    etype: n.etype,
+    ftype: n.ftype,
+    degree: n.degree,
+    community_id: n.communityId,
+  };
+}
+
+function neighborEdgeJson(e: GraphNeighborEdgeRow): Record<string, unknown> {
+  return { src: e.src, dst: e.dst, etype: e.etype, weight: e.weight };
+}
+
 export async function graphRoutes(app: FastifyInstance, opts: GraphRoutesOpts): Promise<void> {
   const db = opts.db;
 
@@ -103,6 +136,39 @@ export async function graphRoutes(app: FastifyInstance, opts: GraphRoutesOpts): 
         limit,
         next_cursor: nextCursor,
       },
+    };
+  });
+
+  /**
+   * `GET /api/graph/neighbors/:id?depth=1|2`（P2-19A-18）。
+   *
+   * 2D 框选后的「批量影响预览」需要知道选中节点的关联事实——图节点 id 本身就是
+   * `fact.id`，所以这条路由主要给外部调用方/脚本补邻域，UI 选中集可直接当 fact id 用。
+   * 只读、无新表；可见集与 /api/graph 相同（D-97），不要求 layout 坐标。
+   */
+  app.get('/neighbors/:id', async (req, reply) => {
+    const raw = (req.params as { id?: unknown }).id;
+    const id = typeof raw === 'string' ? raw : '';
+    const depth = parseDepth((req.query as Record<string, unknown>).depth);
+    if (depth === null) {
+      return reply
+        .code(400)
+        .send({ error: 'E_INPUT', message: 'depth 只支持 1 或 2', detail: { reason: 'depth_invalid' } });
+    }
+    const hood = loadGraphNeighborhood(db, { id, depth });
+    if (!hood.found) {
+      return reply
+        .code(404)
+        .send({ error: 'E_NOT_FOUND', message: `节点不存在或不可见：${id}`, detail: { id } });
+    }
+    reply.header('cache-control', 'no-store');
+    return {
+      schema: 'moshi-graph/1',
+      id,
+      depth,
+      nodes: hood.nodes.map(neighborNodeJson),
+      edges: hood.edges.map(neighborEdgeJson),
+      truncated: hood.truncated,
     };
   });
 }

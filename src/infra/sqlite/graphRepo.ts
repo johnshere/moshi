@@ -166,6 +166,170 @@ export function loadGraphPage(db: Db, query: GraphPageQuery): GraphPage {
   };
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * 邻域查询（P2-19A-18）：`GET /api/graph/neighbors/:id`
+ *
+ * 与 `loadGraphPage` 同一套可见口径（`active` / `disputed` + 活跃边），区别有两点：
+ * 1. 这里**不要求 layout 坐标**——邻域是被批量影响预览选中的事实子集，画不画在图上
+ *    不影响 `batch/preview` 能不能算；
+ * 2. 遍历用 BFS：`depth` 默认 1、上限 2，每层最多 `NEIGHBOR_LAYER_CAP` 个新节点，
+ *    超出只置 `truncated` 不报错（图不可能一次全展开）。
+ *
+ * 顺序全部显式定死：同层按「边权降序、id 升序」，边按 `(src,dst,etype)`——验收脚本
+ * 两次调用要逐行一致。
+ * ---------------------------------------------------------------------------------------------- */
+
+/** 每层最多带出多少新节点（与卡片一致；测试用它造截断） */
+export const NEIGHBOR_LAYER_CAP = 200;
+/** 邻域最大深度（卡片：`?depth=1|2`，超出按 400 处理，不静默夹取） */
+export const NEIGHBOR_MAX_DEPTH = 2;
+
+export interface GraphNeighborNodeRow {
+  id: string;
+  label: string;
+  /** 卡片契约字段名是 `etype`（承载事实的 `ftype`，与 /api/graph 的 ftype 同值）；另带 ftype 便于前端复用现有编码 */
+  etype: string;
+  ftype: string;
+  degree: number;
+  communityId: number | null;
+}
+
+export interface GraphNeighborEdgeRow {
+  src: string;
+  dst: string;
+  etype: string;
+  weight: number;
+}
+
+export interface GraphNeighborhoodQuery {
+  id: string;
+  /** 1 或 2（默认 1）；调用方负责把非法值挡在 400 */
+  depth?: number;
+  /** 单层节点上限，默认 {@link NEIGHBOR_LAYER_CAP} */
+  perLayerCap?: number;
+}
+
+export interface GraphNeighborhood {
+  /** false = 根 id 不存在或不在可见集（路由据此回 404） */
+  found: boolean;
+  nodes: GraphNeighborNodeRow[];
+  edges: GraphNeighborEdgeRow[];
+  truncated: boolean;
+}
+
+const NEIGHBOR_COLUMNS = `
+  f.id AS id,
+  substr(replace(replace(f.content, char(10), ' '), char(13), ' '), 1, 48) AS label,
+  f.ftype AS ftype,
+  f.degree AS degree,
+  f.community_id AS communityId`;
+
+/** 按 id 批量取可见节点（顺序由调用方重排；IN 用 json_each 一次物化） */
+function loadVisibleNodes(db: Db, ids: readonly string[]): GraphNeighborNodeRow[] {
+  if (ids.length === 0) return [];
+  return db
+    .prepare(
+      `SELECT ${NEIGHBOR_COLUMNS}
+         FROM fact f
+        WHERE ${VISIBLE}
+          AND f.id IN (SELECT value FROM json_each(?))`,
+    )
+    .all(JSON.stringify(ids)) as GraphNeighborNodeRow[];
+}
+
+interface IncidentEdgeRow {
+  src: string;
+  dst: string;
+  etype: string;
+  weight: number;
+}
+
+/** 一端落在 frontier 里的所有活跃边（两个方向 UNION，避免 `OR` 把索引废掉） */
+function loadIncidentEdges(db: Db, frontier: readonly string[]): IncidentEdgeRow[] {
+  if (frontier.length === 0) return [];
+  return db
+    .prepare(
+      `WITH frontier(id) AS MATERIALIZED (SELECT value FROM json_each(?))
+       SELECT e.src AS src, e.dst AS dst, e.etype AS etype, e.weight AS weight
+         FROM frontier s JOIN edge e ON e.src = s.id
+        WHERE e.valid_to IS NULL
+       UNION ALL
+       SELECT e.src AS src, e.dst AS dst, e.etype AS etype, e.weight AS weight
+         FROM frontier s JOIN edge e ON e.dst = s.id
+        WHERE e.valid_to IS NULL`,
+    )
+    .all(JSON.stringify(frontier)) as IncidentEdgeRow[];
+}
+
+/** 两端都在给定 id 集里的活跃边（与 /api/graph 的页内边同口径，只是 id 集不是页） */
+function loadEdgesWithin(db: Db, ids: readonly string[]): GraphNeighborEdgeRow[] {
+  if (ids.length === 0) return [];
+  return db
+    .prepare(
+      `WITH nodes(id) AS MATERIALIZED (SELECT value FROM json_each(?))
+       SELECT e.src AS src, e.dst AS dst, e.etype AS etype, e.weight AS weight
+         FROM nodes s
+         JOIN edge e ON e.src = s.id
+         JOIN nodes d ON d.id = e.dst
+        WHERE e.valid_to IS NULL
+        ORDER BY e.src, e.dst, e.etype`,
+    )
+    .all(JSON.stringify(ids)) as GraphNeighborEdgeRow[];
+}
+
+export function loadGraphNeighborhood(db: Db, query: GraphNeighborhoodQuery): GraphNeighborhood {
+  const rootRows = loadVisibleNodes(db, [query.id]);
+  const root = rootRows[0];
+  if (root === undefined) {
+    return { found: false, nodes: [], edges: [], truncated: false };
+  }
+
+  const depth = Math.min(Math.max(Math.floor(query.depth ?? 1), 1), NEIGHBOR_MAX_DEPTH);
+  const cap = Math.max(1, Math.floor(query.perLayerCap ?? NEIGHBOR_LAYER_CAP));
+
+  const order: string[] = [root.id];
+  const seen = new Set<string>(order);
+  let frontier: string[] = [root.id];
+  let truncated = false;
+
+  for (let level = 1; level <= depth; level += 1) {
+    const incident = loadIncidentEdges(db, frontier);
+    const frontierSet = new Set(frontier);
+    // 同一个邻居可能有多条边/多个方向：取最大权重，作为「谁先出」的依据
+    const weightOf = new Map<string, number>();
+    for (const edge of incident) {
+      const candidates: { from: string; to: string }[] = [];
+      if (frontierSet.has(edge.src)) candidates.push({ from: edge.src, to: edge.dst });
+      if (frontierSet.has(edge.dst)) candidates.push({ from: edge.dst, to: edge.src });
+      for (const { to } of candidates) {
+        if (seen.has(to)) continue;
+        const prev = weightOf.get(to);
+        if (prev === undefined || edge.weight > prev) weightOf.set(to, edge.weight);
+      }
+    }
+    const ranked = [...weightOf.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const visible = new Map(loadVisibleNodes(db, ranked.map(([id]) => id)).map((row) => [row.id, row]));
+    const next: string[] = [];
+    for (const [id] of ranked) {
+      if (!visible.has(id)) continue; // 归档/剪除的邻居不出现，也不占截断名额
+      if (next.length >= cap) {
+        truncated = true;
+        continue; // 继续扫完只为如实报 truncated（候选集已被 seen 去重，代价可控）
+      }
+      next.push(id);
+      seen.add(id);
+      order.push(id);
+    }
+    frontier = next;
+    if (frontier.length === 0) break;
+  }
+
+  const rows = new Map(loadVisibleNodes(db, order).map((row) => [row.id, row]));
+  const nodes = order.map((id) => rows.get(id)).filter((row): row is GraphNeighborNodeRow => row !== undefined);
+
+  return { found: true, nodes, edges: loadEdgesWithin(db, order), truncated };
+}
+
 /**
  * 还有没有下一页：**看最后一行之后还有没有行**，而不是看 `本页条数 === limit`。
  *

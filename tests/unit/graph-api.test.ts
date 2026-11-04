@@ -345,3 +345,172 @@ describe('GET /api/graph', () => {
     expect(label.startsWith('第一行内容')).toBe(true);
   });
 });
+
+
+interface NeighborBody {
+  schema: string;
+  id: string;
+  depth: number;
+  nodes: { id: string; label: string; ftype: string; degree: number }[];
+  edges: { src: string; dst: string; etype: string; weight: number }[];
+  truncated: boolean;
+}
+
+describe('GET /api/graph/neighbors/:id（P2-19A-18）', () => {
+  it('默认 depth=1：只带一跳，根在第一位，字段齐备', async () => {
+    const db = freshDb();
+    seedThree(db);
+    const app = await makeApp(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/graph/neighbors/fact_a',
+      headers: { 'x-moshi-token': TOKEN },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['cache-control']).toContain('no-store');
+    const body = res.json<NeighborBody>();
+    expect(body.schema).toBe('moshi-graph/1');
+    expect(body.id).toBe('fact_a');
+    expect(body.depth).toBe(1);
+    expect(body.truncated).toBe(false);
+    expect(body.nodes.map((n) => n.id)).toEqual(['fact_a', 'fact_b']);
+    expect(body.edges).toHaveLength(1);
+    expect(body.edges[0]).toMatchObject({ src: 'fact_a', dst: 'fact_b', etype: 'depends_on' });
+    expect(body.nodes[0]).toMatchObject({ label: expect.any(String), ftype: 'semantic' });
+    expect(typeof body.nodes[0]?.degree).toBe('number');
+  });
+
+  it('depth=2 展开两跳', async () => {
+    const db = freshDb();
+    seedThree(db);
+    const app = await makeApp(db);
+    const body = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/graph/neighbors/fact_a?depth=2',
+        headers: { 'x-moshi-token': TOKEN },
+      })
+    ).json<NeighborBody>();
+    expect(body.depth).toBe(2);
+    expect(body.nodes.map((n) => n.id)).toEqual(['fact_a', 'fact_b', 'fact_c']);
+    expect(body.edges).toHaveLength(2);
+  });
+
+  it('depth 非法 → 400 E_INPUT', async () => {
+    const db = freshDb();
+    seedThree(db);
+    const app = await makeApp(db);
+    for (const q of ['?depth=3', '?depth=abc', '?depth=', '?depth=0', '?depth=1&depth=2']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/graph/neighbors/fact_a${q}`,
+        headers: { 'x-moshi-token': TOKEN },
+      });
+      expect(res.statusCode, q).toBe(400);
+      expect(res.json<{ error: string }>().error).toBe('E_INPUT');
+    }
+  });
+
+  it('节点不存在 / 已归档 → 404 E_NOT_FOUND', async () => {
+    const db = freshDb();
+    seedThree(db);
+    insertFact(db, { id: 'fact_arch', epistemicStatus: 'archived', content: '已归档' });
+    const app = await makeApp(db);
+    for (const id of ['fact_missing', 'fact_arch']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/graph/neighbors/${id}`,
+        headers: { 'x-moshi-token': TOKEN },
+      });
+      expect(res.statusCode, id).toBe(404);
+      expect(res.json<{ error: string }>().error).toBe('E_NOT_FOUND');
+    }
+  });
+
+  it('每层最多 200 个邻居：超了截断但 200 返回 truncated=true', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_root', content: '根', importance: 1 });
+    for (let i = 0; i < 205; i += 1) {
+      const id = `fact_p${String(i).padStart(3, '0')}`;
+      insertFact(db, { id, content: `邻居 ${i}` });
+      insertEdge(db, 'fact_root', id, 'depends_on');
+    }
+    const app = await makeApp(db);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/graph/neighbors/fact_root',
+      headers: { 'x-moshi-token': TOKEN },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json<NeighborBody>();
+    expect(body.truncated).toBe(true);
+    expect(body.nodes).toHaveLength(201); // 根 + 200
+    expect(body.nodes[1]?.id).toBe('fact_p000');
+    expect(body.edges).toHaveLength(200);
+  });
+
+  it('只含可见邻居（active/disputed）：归档邻居与其边都被剔除，失效边不算', async () => {
+    const db = freshDb();
+    seedThree(db);
+    insertFact(db, { id: 'fact_disp', epistemicStatus: 'disputed', content: '有争议' });
+    insertFact(db, { id: 'fact_arch2', epistemicStatus: 'archived', content: '归档邻居' });
+    insertFact(db, { id: 'fact_inv', content: '失效边对端' });
+    insertEdge(db, 'fact_a', 'fact_disp', 'logic');
+    insertEdge(db, 'fact_a', 'fact_arch2', 'depends_on');
+    insertEdge(db, 'fact_a', 'fact_inv', 'depends_on', '2020-01-01T00:00:00.000Z');
+    const app = await makeApp(db);
+    const body = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/graph/neighbors/fact_a',
+        headers: { 'x-moshi-token': TOKEN },
+      })
+    ).json<NeighborBody>();
+    const ids = body.nodes.map((n) => n.id);
+    expect(ids).toContain('fact_disp');
+    expect(ids).not.toContain('fact_arch2');
+    expect(ids).not.toContain('fact_inv');
+    expect(body.edges.map((e) => e.dst)).toEqual(['fact_b', 'fact_disp']);
+  });
+
+  it('邻居不需要 layout 坐标也能返回（adjacency 只读边表）', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_x', content: 'x' });
+    insertFact(db, { id: 'fact_y', content: 'y' });
+    insertEdge(db, 'fact_x', 'fact_y', 'logic');
+    const app = await makeApp(db);
+    const body = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/graph/neighbors/fact_x',
+        headers: { 'x-moshi-token': TOKEN },
+      })
+    ).json<NeighborBody>();
+    expect(body.nodes.map((n) => n.id)).toEqual(['fact_x', 'fact_y']);
+  });
+
+  it('同权重邻居按 id 升序，两次调用逐行一致', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_root', content: '根' });
+    for (const id of ['fact_z', 'fact_m', 'fact_a']) {
+      insertFact(db, { id, content: id });
+      insertEdge(db, 'fact_root', id, 'depends_on');
+    }
+    const app = await makeApp(db);
+    const url = '/api/graph/neighbors/fact_root?depth=2';
+    const first = (
+      await app.inject({ method: 'GET', url, headers: { 'x-moshi-token': TOKEN } })
+    ).json<NeighborBody>();
+    const second = (
+      await app.inject({ method: 'GET', url, headers: { 'x-moshi-token': TOKEN } })
+    ).json<NeighborBody>();
+    expect(first.nodes.map((n) => n.id)).toEqual(['fact_root', 'fact_a', 'fact_m', 'fact_z']);
+    expect(second).toEqual(first);
+  });
+
+  it('无 token 直接 401', async () => {
+    const app = await makeApp(freshDb());
+    const res = await app.inject({ method: 'GET', url: '/api/graph/neighbors/fact_a' });
+    expect(res.statusCode).toBe(401);
+  });
+});

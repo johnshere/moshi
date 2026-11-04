@@ -27,6 +27,16 @@ import {
   type TraceRecord,
 } from './pure/trace.js';
 import { useTrace } from '../state/trace.js';
+import {
+  beginDrag,
+  dragScreenBox,
+  screenBoxToWorld,
+  selectIdsInBox,
+  updateDrag,
+  type Box,
+  type DragState,
+} from './pure/select.js';
+import { publishSelectedIds } from './selectBridge.js';
 
 const BG_COLOR = '#05070d';
 
@@ -87,6 +97,15 @@ class SigmaScene {
   private readonly traceEdgeByKey = new Map<string, TraceEdgeAttr | null>();
 
   private selectedId: string | null = null;
+  /** 框选（P2-19A-18）：按下鼠标后即进入 pending，越过阈值才抬成"正在框选" */
+  private drag: DragState | null = null;
+  /** 半透明选框是普通 DOM，不新增 WebGL draw call（渲染管线上限 12 不破） */
+  private readonly boxEl: HTMLDivElement;
+  /** 拖框结束后的第一次 click 要吞掉：否则 sigma 的 clickStage 会把刚选好的框选清空 */
+  private suppressClick = false;
+  /** 共享选中集（可能多选）：与 `state/selection.ts` 的 `selectedIds` 同引用 */
+  private selectedIds: ReadonlySet<string> = new Set<string>();
+  private readonly unsubKey: () => void;
   private raf = 0;
   private disposed = false;
   private frames = 0;
@@ -99,11 +118,45 @@ class SigmaScene {
     this.host = host;
     this.onStats = onStats;
     this.selectedId = useSelection.getState().focusId;
+    this.selectedIds = useSelection.getState().selectedIds;
     this.activity = useActivity.getState().snapshot;
-    // 命令式渲染器订阅 store：3D 点选后切到 2D，这里要立刻高亮（不是等下一次刷新）
+    // 选框只在拖拽时显示；`pointer-events: none` 保证它永远不抢事件（否则拖到一半就丢了 move）
+    this.boxEl = document.createElement('div');
+    this.boxEl.style.cssText = [
+      'position:absolute',
+      'display:none',
+      'pointer-events:none',
+      'border:1px solid rgba(125,211,252,0.85)',
+      'background:rgba(56,189,248,0.12)',
+      'border-radius:2px',
+      'z-index:4',
+    ].join(';');
+    host.appendChild(this.boxEl);
+    // 命令式渲染器订阅 store：3D 点选 / 框选后切到 2D，这里要立刻高亮（不是等下一次刷新）
     this.unsubSelection = useSelection.subscribe((state, prev) => {
-      if (state.focusId !== prev.focusId) this.applyFocus(state.focusId);
+      if (state.selectedIds === prev.selectedIds && state.focusId === prev.focusId) return;
+      this.selectedIds = state.selectedIds;
+      this.selectedId = state.focusId;
+      this.applyVisuals();
+      this.publishSelected();
     });
+    // Esc 清空选中（概设 §8.9 键盘可达）。输入框里的 Esc 不抢（那是关弹层用的）。
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      const target = event.target as HTMLElement | null;
+      if (
+        target !== null &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      useSelection.getState().clear();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    this.unsubKey = () => window.removeEventListener('keydown', onKeyDown);
     // 活跃集与选中态是两个来源（D-89），一起决定节点的最终样式
     this.unsubActivity = useActivity.subscribe((state, prev) => {
       if (state.snapshot === prev.snapshot) return;
@@ -148,6 +201,7 @@ class SigmaScene {
 
     // 刷新后沿用 store 里的选中（刷新不该把正在确认的那个点弄丢）
     this.selectedId = useSelection.getState().focusId;
+    this.selectedIds = useSelection.getState().selectedIds;
     this.activity = useActivity.getState().snapshot;
     this.applyVisuals();
     this.publish(performance.now(), true);
@@ -177,13 +231,93 @@ class SigmaScene {
     });
     // 点选 = 写共享选中态（唯一真相源在 state/selection.ts，3D 订阅它做高亮）。
     renderer.on('clickNode', (payload) => {
+      if (this.consumeSuppressedClick()) return;
       useSelection.getState().select(payload.node);
     });
     // 点空白 = 取消选中：2D 的使命是确认，点完一定会想收拾（概设 §8.7），空白区域也远大于 3D。
     renderer.on('clickStage', () => {
+      // 刚结束一次框选：这一次 click 是拖拽的尾巴，不能把框选结果清掉
+      if (this.consumeSuppressedClick()) return;
       useSelection.getState().clear();
     });
+    // 框选（P2-19A-18）：只在**空白处**按下才起框。`downNode` 不进来，点节点仍是点选；
+    // 同时 preventSigmaDefault 阻止 sigma 把这次拖动当成相机平移（框选期间相机不动）。
+    renderer.on('downStage', (payload) => {
+      payload.event.preventSigmaDefault();
+      const original = payload.event.original as MouseEvent;
+      this.beginBoxDrag(payload.event.x, payload.event.y, original.shiftKey);
+    });
     this.renderer = renderer;
+  }
+
+  /** 开始 pending 框选：此时还不动选中集，越过阈值才显示选框 */
+  private beginBoxDrag(x: number, y: number, additive: boolean): void {
+    if (this.renderer === null) return;
+    this.suppressClick = false;
+    this.drag = beginDrag({ x, y }, additive);
+    window.addEventListener('pointermove', this.handleBoxMove);
+    window.addEventListener('pointerup', this.handleBoxUp);
+  }
+
+  private handleBoxMove = (event: PointerEvent): void => {
+    const drag = this.drag;
+    if (drag === null) return;
+    const rect = this.host.getBoundingClientRect();
+    this.drag = updateDrag(drag, { x: event.clientX - rect.left, y: event.clientY - rect.top });
+    if (this.drag.moved) this.showBox(dragScreenBox(this.drag));
+  };
+
+  private handleBoxUp = (event: PointerEvent): void => {
+    const drag = this.drag;
+    this.drag = null;
+    window.removeEventListener('pointermove', this.handleBoxMove);
+    window.removeEventListener('pointerup', this.handleBoxUp);
+    this.hideBox();
+    if (drag === null) return;
+    const rect = this.host.getBoundingClientRect();
+    const finalDrag = updateDrag(drag, {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    });
+    if (!finalDrag.moved) return; // 只是点击空白：让 sigma 的 clickStage 正常清空
+    const renderer = this.renderer;
+    if (renderer === null) return;
+    // 屏幕坐标 → 图坐标：复用 sigma 的相机逆变换（与点选同一套 pan/zoom），
+    // 不自己拿 zoom 比例乘像素，否则拖框与命中会错位。
+    const box = screenBoxToWorld(
+      { viewportToGraph: (point) => renderer.viewportToGraph(point) },
+      finalDrag.start,
+      finalDrag.current,
+    );
+    const ids = selectIdsInBox(
+      this.nodes.map((node) => ({ id: node.id, x: node.x, y: node.z })),
+      box,
+    );
+    this.suppressClick = true;
+    useSelection.getState().setSelected(ids, { additive: finalDrag.additive });
+    this.publish(performance.now(), true);
+  };
+
+  private consumeSuppressedClick(): boolean {
+    if (!this.suppressClick) return false;
+    this.suppressClick = false;
+    return true;
+  }
+
+  private showBox(box: Box): void {
+    this.boxEl.style.display = 'block';
+    this.boxEl.style.left = `${box.x0}px`;
+    this.boxEl.style.top = `${box.y0}px`;
+    this.boxEl.style.width = `${Math.max(box.x1 - box.x0, 1)}px`;
+    this.boxEl.style.height = `${Math.max(box.y1 - box.y0, 1)}px`;
+  }
+
+  private hideBox(): void {
+    this.boxEl.style.display = 'none';
+  }
+
+  private publishSelected(): void {
+    publishSelectedIds([...this.selectedIds]);
   }
 
   /**
@@ -247,7 +381,8 @@ class SigmaScene {
       if (!this.graph.hasNode(node.id)) continue;
       const attrs = node2DAttrs(node, this.stateOfNode(node.id));
       // 选中：只叠"放大 + 强制标签"，颜色仍是状态色（ftype 色相是信息，选中不覆盖它）
-      const focused = node.id === this.selectedId;
+      // 多选（框选）时集合里的每个节点都走这条通道，主焦点不再单独特殊化。
+      const focused = this.selectedIds.has(node.id) || node.id === this.selectedId;
       const patch = focusAttrs(attrs, focused);
       this.graph.setNodeAttribute(node.id, 'color', attrs.color);
       this.graph.setNodeAttribute(node.id, 'opacity', attrs.opacity);
@@ -273,15 +408,10 @@ class SigmaScene {
   }
 
   /**
-   * 选中切换：改 `selectedId` 后整表重算一次（放大与强制标签都写在 `applyVisuals` 里）。
-   *
-   * 放大是 2D/3D 共用的选中语义（`FOCUS_SCALE`）；颜色不动——ftype 色相是信息，
-   * 选中不该把它覆盖掉（与 `focusAttrs` 的注释同一条理由）。
+   * 选中态只在 `useSelection` 订阅回调里统一处理（`selectedId` / `selectedIds` 一起更新后
+   * 调一次 `applyVisuals`）：放大与强制标签都写在 `applyVisuals` 里，颜色不动——ftype
+   * 色相是信息，选中不该把它覆盖掉（与 `focusAttrs` 的注释同一条理由）。
    */
-  private applyFocus(next: string | null): void {
-    this.selectedId = next;
-    this.applyVisuals();
-  }
 
   /** 节点在视口里的像素位置：验收脚本用它证明"位置随布局变" */
   private screenPos(id: string): { x: number; y: number } | null {
@@ -307,6 +437,8 @@ class SigmaScene {
       activeEdges: this.activity?.activeEdges ?? 0,
     };
     window.__moshiGraph2d = { ...stats, screenPos: (id) => this.screenPos(id) };
+    // 2D 视图没有 3D 场景在跑 publish，选中集得由这里补写到同一个验收对象上（只加字段）
+    this.publishSelected();
     this.onStats?.(stats);
   }
 
@@ -341,9 +473,13 @@ class SigmaScene {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    window.removeEventListener('pointermove', this.handleBoxMove);
+    window.removeEventListener('pointerup', this.handleBoxUp);
     this.unsubSelection();
     this.unsubActivity();
     this.unsubTrace();
+    this.unsubKey();
+    this.boxEl.remove();
     this.renderer?.kill();
     this.renderer = null;
     delete window.__moshiGraph2d;

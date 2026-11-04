@@ -1110,14 +1110,19 @@ class GraphScene {
     // P2-26：`mode` / `query_id` 区分「实时」与「历史回放」——回放成功后脚本可直接读
     // `mode === 'replay' && query_id === <选中的 id>`，不用猜图上是哪条 trace。
     const traceState = useTrace.getState();
-    window.__moshiGraph = {
+    // P2-19A-18：选中集发布到既有验收对象的 `selected` 字段（只加字段，不新建全局）。
+    // `Window.__moshiGraph` 的类型声明不含它，但因为不会改变既有字段，运行时按对象字面量
+    // 扩展、类型上做一次收口即可（声明文件不归本卡改）。
+    const published = {
       ...stats,
       calls: stats.renderCalls,
       mode: traceState.mode,
       query_id: traceState.mode === 'replay' ? traceState.queryId : (this.traceSummary?.query_id ?? null),
       trace: this.traceSummary,
       edges: this.traceReadout,
+      selected: [...useSelection.getState().selectedIds],
     };
+    window.__moshiGraph = published as unknown as Window['__moshiGraph'];
     this.onStats?.(stats);
   }
 
