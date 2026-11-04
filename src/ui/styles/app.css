@@ -81,3 +81,182 @@ body {
 *::after {
   box-sizing: border-box;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * P2-19-B 外壳与 HUD 动效（D-133）
+ *
+ * 只做 DOM 层：玻璃面板、指示条、呼吸灯、数值淡出、加载 spinner。
+ * 不触碰 graph 画布与 draw call；所有动画在 prefers-reduced-motion 下停用。
+ * 颜色一律走 @theme token 或 color-mix，不写裸 hex/rgba。
+ * ───────────────────────────────────────────────────────────────────────── */
+
+.moshi-glass {
+  background: color-mix(in srgb, var(--color-bg-raised) 68%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--color-border-subtle);
+}
+
+/* 左侧导航：整块玻璃面板；外层 aside 自身同时是定位容器 */
+.moshi-nav {
+  background: color-mix(in srgb, var(--color-bg-raised) 66%, transparent);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border-right: 1px solid var(--color-border-subtle);
+}
+
+.moshi-nav-item {
+  position: relative;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.moshi-nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.moshi-nav-item[data-active='true']::before {
+  background: var(--color-accent);
+  box-shadow: 0 0 8px var(--color-glow), 0 0 2px var(--color-accent);
+}
+
+.moshi-nav-item[data-active='true'] {
+  background: var(--color-bg-active);
+  color: var(--color-text-primary);
+}
+
+.moshi-nav-item:hover {
+  background: color-mix(in srgb, var(--color-bg-hover) 70%, transparent);
+}
+
+/* 顶栏搜索：聚焦时 accent 边框 + glow 外发光（边框由组件内联给出，过渡在这里） */
+.moshi-search {
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+/* 待办角标：N>0 警告色调 + 微光；N=0 中性灰静默（不抖动、不发光） */
+.moshi-inbox-badge {
+  transition: border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+}
+
+.moshi-inbox-badge[data-count='active'] {
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 28%, transparent);
+}
+
+/* 三灯：ok 常亮；warn 2.4s 呼吸；off/failed 保持原样 */
+.moshi-light-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.moshi-light-dot[data-state='warn'] {
+  animation: moshi-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes moshi-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 color-mix(in srgb, var(--color-warning) 0%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 6px var(--color-warning-soft);
+  }
+}
+
+/* 首开提示：玻璃卡片 + 顶部一条细引导线（不抢 HUD） */
+.moshi-firstrun {
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  box-shadow: var(--shadow-menu);
+}
+
+.moshi-firstrun::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  opacity: 0.55;
+}
+
+/* HUD：玻璃面板，替代原来的纯渐变（表格态保持透明，避免盖住表格） */
+.moshi-hud {
+  backdrop-filter: blur(12px) saturate(130%);
+  -webkit-backdrop-filter: blur(12px) saturate(130%);
+}
+
+/* HUD 数值：等宽 + tabular-nums；变化时 150ms 高亮淡出 */
+.moshi-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.moshi-value-flash {
+  animation: moshi-flash 160ms ease-out;
+}
+
+@keyframes moshi-flash {
+  from {
+    color: var(--color-accent-soft);
+    text-shadow: 0 0 8px var(--color-glow);
+  }
+  to {
+    color: var(--color-text-primary);
+    text-shadow: none;
+  }
+}
+
+/* 证据链徽章：直击 / 1 跳 / 2+ 跳 */
+.moshi-trace-badge {
+  padding: 0 6px;
+  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
+  border-radius: 999px;
+  line-height: 1.5;
+}
+
+/* HUD 右上加载 spinner（纯 CSS，完成即卸载） */
+.moshi-spinner {
+  width: 12px;
+  height: 12px;
+  margin-left: 10px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 22%, transparent);
+  border-top-color: var(--color-accent);
+  animation: moshi-spin 700ms linear infinite;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@keyframes moshi-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moshi-nav-item,
+  .moshi-nav-item::before,
+  .moshi-search,
+  .moshi-inbox-badge,
+  .moshi-light-dot {
+    transition: none;
+  }
+  .moshi-light-dot[data-state='warn'],
+  .moshi-value-flash,
+  .moshi-spinner {
+    animation: none;
+  }
+}

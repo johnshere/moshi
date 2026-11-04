@@ -32,8 +32,6 @@ const navStyle: CSSProperties = {
   flex: '0 0 172px',
   display: 'flex',
   flexDirection: 'column',
-  background: 'var(--color-bg-raised)',
-  borderRight: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
   padding: '10px 8px',
   gap: 2,
@@ -67,7 +65,6 @@ function navItemStyle(active: boolean): CSSProperties {
     padding: '7px 10px',
     borderRadius: 5,
     color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-    background: active ? 'var(--color-bg-hover)' : 'transparent',
     textDecoration: 'none',
     fontSize: 13,
     cursor: 'pointer',
@@ -86,6 +83,7 @@ export interface ShellProps {
 export function Shell({ route, children }: ShellProps): ReactElement {
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
+  const badgeCount = badge?.total ?? 0;
   /** `g` 序列的起点时刻；600ms 内按第二个键才跳页（见 keyboard.ts） */
   const pendingGRef = useRef<number | null>(null);
 
@@ -172,7 +170,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
   return (
     <div style={shellStyle}>
       <FirstRun />
-      <aside style={navStyle} data-testid="shell-nav">
+      <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
         <div style={brandStyle}>默识</div>
         {PAGES.map((page) => {
           const active = page.key === route;
@@ -182,6 +180,8 @@ export function Shell({ route, children }: ShellProps): ReactElement {
               href={pageHref(page.key, window.location.search)}
               aria-current={active ? 'page' : undefined}
               data-testid={`nav-${page.key}`}
+              data-active={active ? 'true' : 'false'}
+              className="moshi-nav-item"
               style={navItemStyle(active)}
               onClick={(event) => {
                 if (!isPlainLeftClick(event)) return;
@@ -212,6 +212,8 @@ export function Shell({ route, children }: ShellProps): ReactElement {
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-text-secondary)' }}
               >
                 <span
+                  className="moshi-light-dot"
+                  data-state={light.state}
                   style={{
                     width: 7,
                     height: 7,
@@ -227,13 +229,15 @@ export function Shell({ route, children }: ShellProps): ReactElement {
           <a
             href={pageHref('inbox', window.location.search)}
             data-testid="inbox-badge"
+            data-count={badgeCount > 0 ? 'active' : 'zero'}
+            className="moshi-inbox-badge"
             title="待办：消解确认 / 低置信 / 淘汰候选（按单页 200 条估算）"
             style={{
-              color: 'var(--color-warning-soft)',
+              color: badgeCount > 0 ? 'var(--color-warning-soft)' : 'var(--color-text-muted)',
               textDecoration: 'none',
               fontSize: 12,
-              border: '1px solid var(--color-warning-dim)',
-              background: 'var(--color-warning-bg)',
+              border: `1px solid ${badgeCount > 0 ? 'var(--color-warning-dim)' : 'var(--color-border-subtle)'}`,
+              background: badgeCount > 0 ? 'var(--color-warning-bg)' : 'var(--color-bg-raised)',
               borderRadius: 999,
               padding: '2px 10px',
             }}

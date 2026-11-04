@@ -73,9 +73,27 @@ function viewHref(view: View): string {
 }
 
 function Badge({ label, value }: { label: string; value: string }): JSX.Element {
+  const previous = useRef(value);
+  const [flash, setFlash] = useState(false);
+
+  // 数值变化时 150ms 高亮淡出（P2-19-B）：只闪一次，随后回到常态颜色。
+  useEffect(() => {
+    if (previous.current === value) return;
+    previous.current = value;
+    setFlash(true);
+    const timer = window.setTimeout(() => setFlash(false), 160);
+    return () => window.clearTimeout(timer);
+  }, [value]);
+
   return (
     <span style={{ marginRight: 14, whiteSpace: 'nowrap' }}>
-      <span style={{ color: 'var(--color-text-muted)' }}>{label}</span> <span style={{ color: 'var(--color-text-primary)' }}>{value}</span>
+      <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>{' '}
+      <span
+        className={`moshi-value${flash ? ' moshi-value-flash' : ''}`}
+        style={{ color: 'var(--color-text-primary)' }}
+      >
+        {value}
+      </span>
     </span>
   );
 }
@@ -180,9 +198,15 @@ function TraceNote(): JSX.Element {
       <span>
         {summary.route} · {summary.source}/{summary.model_mode}
       </span>
-      <span style={{ color: 'var(--color-text-primary)' }}>● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）</span>
-      <span style={{ color: 'var(--color-accent-soft)' }}>→ 1 跳 {summary.hop1}（快流）</span>
-      <span style={{ color: 'var(--color-text-muted)' }}>→ 2+ 跳 {summary.hop2}（慢流）</span>
+      <span className="moshi-trace-badge" style={{ color: 'var(--color-text-primary)' }}>
+        ● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）
+      </span>
+      <span className="moshi-trace-badge" style={{ color: 'var(--color-accent-soft)' }}>
+        → 1 跳 {summary.hop1}（快流）
+      </span>
+      <span className="moshi-trace-badge" style={{ color: 'var(--color-text-muted)' }}>
+        → 2+ 跳 {summary.hop2}（慢流）
+      </span>
       <span>证据边 {summary.edges}</span>
     </div>
   );
@@ -428,13 +452,16 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
       {!isTable && <HistoryPanel />}
 
       <div
+        className="moshi-hud"
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
           padding: '10px 14px',
-          background: isTable ? 'transparent' : 'linear-gradient(180deg, color-mix(in srgb, var(--color-bg-base) 92%, transparent), transparent)',
+          background: isTable
+            ? 'transparent'
+            : 'linear-gradient(180deg, color-mix(in srgb, var(--color-bg-overlay) 58%, transparent), color-mix(in srgb, var(--color-bg-base) 34%, transparent))',
           pointerEvents: 'none',
           fontSize: 12,
           lineHeight: 1.7,
@@ -459,6 +486,9 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                 {item.label}
               </button>
             ))}
+          </span>
+          <span style={{ marginLeft: 'auto' }}>
+            {loading && <span className="moshi-spinner" data-testid="hud-spinner" role="status" aria-label="加载中" />}
           </span>
         </div>
         {/* 筛选条：三视图共享同一份状态（详设 §10.2），URL 是唯一真相源，写 URL 可分享可回退 */}

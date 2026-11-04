@@ -15,17 +15,20 @@ const boxStyle: CSSProperties = {
   maxWidth: '46vw',
 };
 
-const inputStyle: CSSProperties = {
+const inputStyle = (focused: boolean): CSSProperties => ({
   width: '100%',
   boxSizing: 'border-box',
   background: 'var(--color-bg-raised)',
   color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
+  border: `1px solid ${focused ? 'var(--color-accent)' : 'var(--color-border-strong)'}`,
   borderRadius: 5,
   padding: '5px 9px 5px 26px',
   fontSize: 12,
   outline: 'none',
-};
+  boxShadow: focused
+    ? '0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent), 0 0 16px var(--color-glow)'
+    : 'none',
+});
 
 const listStyle: CSSProperties = {
   position: 'absolute',
@@ -114,6 +117,8 @@ export function SearchBox(): ReactElement {
         ref={inputRef}
         data-testid="global-search"
         aria-label="全局搜索"
+        data-focus={focusWithin ? 'true' : 'false'}
+        className="moshi-search"
         placeholder="搜索事实（/）"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -132,7 +137,7 @@ export function SearchBox(): ReactElement {
             inputRef.current?.blur();
           }
         }}
-        style={inputStyle}
+        style={inputStyle(focusWithin)}
       />
       {!focusWithin && query === '' ? (
         <span

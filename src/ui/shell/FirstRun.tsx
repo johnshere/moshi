@@ -27,17 +27,17 @@ const TONE_STYLE: Record<BannerSpec['tone'], CSSProperties> = {
 
 const bannerStyle = (tone: BannerSpec['tone']): CSSProperties => ({
   position: 'fixed',
-  top: 56,
-  left: '50%',
-  transform: 'translateX(-50%)',
+  top: 196,
+  right: 14,
   zIndex: 60,
-  maxWidth: 'min(720px, calc(100vw - 48px))',
+  maxWidth: 'min(440px, calc(100vw - 32px))',
   display: 'flex',
   alignItems: 'center',
   gap: 10,
   flexWrap: 'wrap',
-  padding: '8px 14px',
-  borderRadius: 8,
+  padding: '9px 14px',
+  borderRadius: 10,
+  textAlign: 'left',
   boxShadow: 'var(--shadow-menu)',
   fontSize: 12,
   lineHeight: 1.5,
@@ -137,6 +137,7 @@ export function FirstRun(): ReactElement | null {
       aria-live="polite"
       data-testid="first-run"
       data-state={state}
+      className="moshi-firstrun"
     >
       <strong style={{ fontWeight: 600 }}>{banner.text}</strong>
       <span style={{ opacity: 0.85 }}>{banner.hint}</span>
