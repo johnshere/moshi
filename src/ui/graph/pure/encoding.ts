@@ -8,23 +8,25 @@
  * 2. 单测能直接断言数值，不需要 WebGL（jsdom 里跑不了 WebGL）。
  */
 
-// ── 色板（详设 §10.3 表，一个字母都不改）─────────────────────────────
+import { etypeHex, ftypeHex } from './palette.js';
 
-/** `fact.ftype` → 色相 */
+// ── 色板（详设 §10.3 表；颜色值统一收在 pure/palette.ts，这里只保留键名映射）──
+
+/** `fact.ftype` → 色相（取值转调 palette，token 化后这里不再有颜色字面量） */
 export const FTYPE_HEX = {
-  semantic: '#22d3ee',
-  episodic: '#a78bfa',
-  conditional: '#f59e0b',
+  semantic: ftypeHex('semantic'),
+  episodic: ftypeHex('episodic'),
+  conditional: ftypeHex('conditional'),
 } as const;
 
 /** `edge.etype` → 色相；键用库里的真实枚举值（`mutually_exclusive` / `derived_from`） */
 export const ETYPE_HEX = {
-  depends_on: '#8b5cf6',
-  logic: '#06b6d4',
-  mutually_exclusive: '#f59e0b',
-  co_occur: '#6b7280',
-  supersedes: '#ef4444',
-  derived_from: '#475569',
+  depends_on: etypeHex('depends_on'),
+  logic: etypeHex('logic'),
+  mutually_exclusive: etypeHex('mutually_exclusive'),
+  co_occur: etypeHex('co_occur'),
+  supersedes: etypeHex('supersedes'),
+  derived_from: etypeHex('derived_from'),
 } as const;
 
 /** shader 里 `aType` 的下标顺序，必须与 `ETYPE_ORDER_RGB` 对齐 */

@@ -62,8 +62,8 @@ describe('颜色：与 3D 同一张色表', () => {
   it('etype → hex 走同一张表并认短名别名', () => {
     expect(edgeColorHex('depends_on')).toBe('#8b5cf6');
     expect(edgeColorHex('mutex')).toBe('#f59e0b');
-    expect(edgeColorHex('derived')).toBe('#475569');
-    expect(edgeColorHex('nope')).toBe('#475569');
+    expect(edgeColorHex('derived')).toBe('#1e293b');
+    expect(edgeColorHex('nope')).toBe('#1e293b');
   });
 
   it('沉默态压暗但不黑：比 encoding 的沉默色亮一档，比活跃色暗', () => {

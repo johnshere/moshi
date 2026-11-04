@@ -37,8 +37,22 @@ import {
   type DragState,
 } from './pure/select.js';
 import { publishSelectedIds } from './selectBridge.js';
-
-const BG_COLOR = '#05070d';
+import {
+  arrowCss,
+  bgBaseHex,
+  boxBorderCss,
+  boxFillCss,
+  gridCss,
+  stageGlowCss,
+} from './pure/palette.js';
+import {
+  ARROW_MIN_LENGTH_PX,
+  arrowPhase,
+  arrowStride,
+  gridOpacity,
+  placeArrow,
+  screenLength,
+} from './pure/fx.js';
 
 export interface Graph2DStats {
   fps: number;
@@ -74,7 +88,7 @@ const SIGMA_STYLES = {
     color: { attribute: 'color' },
     opacity: { attribute: 'opacity' },
   },
-  stage: { background: BG_COLOR },
+  stage: { background: bgBaseHex() },
 } as const;
 
 class SigmaScene {
@@ -101,6 +115,13 @@ class SigmaScene {
   private drag: DragState | null = null;
   /** 半透明选框是普通 DOM，不新增 WebGL draw call（渲染管线上限 12 不破） */
   private readonly boxEl: HTMLDivElement;
+  /** P2-19-B 背景层：网格雾 + 径向光晕（DOM，不占 sigma 的 draw call） */
+  private readonly gridEl: HTMLDivElement;
+  private readonly glowEl: HTMLDivElement;
+  /** 方向箭头层：2D canvas 叠加，只在有 trace（aFlow>0）时绘制 */
+  private readonly arrowCanvas: HTMLCanvasElement;
+  private readonly arrowCtx: CanvasRenderingContext2D | null;
+  private readonly startedAt = performance.now();
   /** 拖框结束后的第一次 click 要吞掉：否则 sigma 的 clickStage 会把刚选好的框选清空 */
   private suppressClick = false;
   /** 共享选中集（可能多选）：与 `state/selection.ts` 的 `selectedIds` 同引用 */
@@ -126,12 +147,39 @@ class SigmaScene {
       'position:absolute',
       'display:none',
       'pointer-events:none',
-      'border:1px solid rgba(125,211,252,0.85)',
-      'background:rgba(56,189,248,0.12)',
+      `border:1px solid ${boxBorderCss()}`,
+      `background:${boxFillCss()}`,
       'border-radius:2px',
       'z-index:4',
     ].join(';');
     host.appendChild(this.boxEl);
+    // P2-19-B 背景：底色 + 网格雾（随缩放调透明度）+ 径向光晕。都是 DOM 层，
+    // 不进入 sigma 的渲染管线——`__moshiGraph2d` 的 node/edge draw 数不受影响。
+    host.style.background = bgBaseHex();
+    this.gridEl = document.createElement('div');
+    this.gridEl.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'pointer-events:none',
+      'z-index:1',
+      `background:${gridCss()}`,
+      'opacity:0.28',
+    ].join(';');
+    host.appendChild(this.gridEl);
+    this.glowEl = document.createElement('div');
+    this.glowEl.style.cssText = [
+      'position:absolute',
+      'inset:0',
+      'pointer-events:none',
+      'z-index:2',
+      `background:${stageGlowCss()}`,
+      'mix-blend-mode:screen',
+    ].join(';');
+    host.appendChild(this.glowEl);
+    this.arrowCanvas = document.createElement('canvas');
+    this.arrowCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3;width:100%;height:100%';
+    host.appendChild(this.arrowCanvas);
+    this.arrowCtx = this.arrowCanvas.getContext('2d');
     // 命令式渲染器订阅 store：3D 点选 / 框选后切到 2D，这里要立刻高亮（不是等下一次刷新）
     this.unsubSelection = useSelection.subscribe((state, prev) => {
       if (state.selectedIds === prev.selectedIds && state.focusId === prev.focusId) return;
@@ -442,6 +490,82 @@ class SigmaScene {
     this.onStats?.(stats);
   }
 
+  /**
+   * 逐帧画方向箭头（P2-19-B）：只画证据边（`traceAttr.flow > 0`），按密度跳采样，
+   * 同屏最多 `ARROW_MAX_2D` 支；没有 trace 时这一层是空画布，不产生任何流动。
+   *
+   * 箭头是独立 2D canvas，不进入 sigma/WebGL 的 draw call——画布层数不变，
+   * 5k 节点下成本只与"证据边数量"有关（≤ 几百条），与总边数无关。
+   */
+  private drawArrows(now: number): void {
+    const canvas = this.arrowCanvas;
+    const ctx = this.arrowCtx;
+    if (ctx === null) return;
+    const rect = this.host.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio, 1.5);
+    const w = Math.max(Math.round(rect.width * dpr), 1);
+    const h = Math.max(Math.round(rect.height * dpr), 1);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const renderer = this.renderer;
+    if (renderer === null || this.trace === null) return;
+    const items: { edge: GraphEdge; attr: TraceEdgeAttr }[] = [];
+    this.graph.forEachEdge((key) => {
+      const edge = this.rawEdgeByKey.get(key);
+      if (edge === undefined) return;
+      const attr = this.traceAttrOf(edge);
+      if (attr === null || attr === undefined || attr.flow <= 0) return;
+      items.push({ edge, attr });
+    });
+    if (items.length === 0) return;
+    const stride = arrowStride(items.length);
+    const elapsed = (now - this.startedAt) / 1000;
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    const viewportOf = (id: string): { x: number; y: number } | null => {
+      if (!this.graph.hasNode(id)) return null;
+      return renderer.graphToViewport({
+        x: this.graph.getNodeAttribute(id, 'x') as number,
+        y: this.graph.getNodeAttribute(id, 'y') as number,
+      });
+    };
+    for (let i = 0; i < items.length; i += stride) {
+      const item = items[i];
+      if (item === undefined) continue;
+      const a = viewportOf(item.edge.src);
+      const b = viewportOf(item.edge.dst);
+      if (a === null || b === null) continue;
+      const screenEdge = {
+        ax: a.x,
+        ay: a.y,
+        bx: b.x,
+        by: b.y,
+        mass: item.attr.mass,
+        flow: item.attr.flow,
+        hopPhase: item.attr.hop * 0.33,
+        dir: item.attr.dir,
+      };
+      if (screenLength(screenEdge) < ARROW_MIN_LENGTH_PX) continue;
+      const at = placeArrow(screenEdge, arrowPhase(elapsed, item.attr.flow, item.attr.hop * 0.33));
+      const size = 4 + 3 * clamp01(item.attr.mass);
+      ctx.save();
+      ctx.translate(at.x, at.y);
+      ctx.rotate(at.angle);
+      ctx.fillStyle = arrowCss(item.attr.mass);
+      ctx.beginPath();
+      ctx.moveTo(size, 0);
+      ctx.lineTo(-size * 0.7, size * 0.62);
+      ctx.lineTo(-size * 0.7, -size * 0.62);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   private loop = (): void => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
@@ -467,6 +591,9 @@ class SigmaScene {
     // sigma 是按需渲染的，主循环不会自己跑：这里每帧排一次渲染，
     // fps 才是"这张图一帧多贵"（与 3D 的持续 rAF 同口径，可横向比较）
     this.renderer?.scheduleRender();
+    // 网格雾随缩放变淡；箭头层只跟证据边数量走（无 trace 时只是清一层空画布）
+    this.gridEl.style.opacity = gridOpacity(this.renderer?.getCamera().ratio ?? 0.5).toFixed(3);
+    this.drawArrows(now);
     this.publish(now);
   };
 
@@ -480,6 +607,9 @@ class SigmaScene {
     this.unsubTrace();
     this.unsubKey();
     this.boxEl.remove();
+    this.gridEl.remove();
+    this.glowEl.remove();
+    this.arrowCanvas.remove();
     this.renderer?.kill();
     this.renderer = null;
     delete window.__moshiGraph2d;
@@ -514,5 +644,5 @@ export function Graph2D({ data, onStats }: Graph2DProps): JSX.Element {
     sceneRef.current?.setData(data);
   }, [data]);
 
-  return <div ref={hostRef} style={{ position: 'absolute', inset: 0, background: BG_COLOR }} />;
+  return <div ref={hostRef} style={{ position: 'absolute', inset: 0, background: bgBaseHex() }} />;
 }

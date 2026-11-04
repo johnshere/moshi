@@ -27,6 +27,7 @@ import {
   ACTIVE_NODE_CAP,
   ENVELOPE_ACTIVE,
   ENVELOPE_DORMANT,
+  ETYPE_ORDER,
   FOCUS_SCALE,
   LAYER_INVALID,
   LAYER_LOW,
@@ -61,8 +62,16 @@ import {
   type TraceSummary,
 } from './pure/trace.js';
 import { useTrace } from '../state/trace.js';
+import { SCAN_SPEED, SCAN_WIDTH } from './pure/fx.js';
+import {
+  etypeHex,
+  haloStops,
+  labelCss,
+  layerPlaneHexes,
+  sceneBackdropCss,
+  sceneVignetteCss,
+} from './pure/palette.js';
 
-const BG_COLOR = 0x05070d;
 const MAX_LABELS = 48;
 /** 光晕相对节点半径的倍数与不透明度：集显上这两个数直接决定填充率 */
 const HALO_SCALE = 2.2;
@@ -88,15 +97,17 @@ export interface GraphStats {
 
 interface LayerPlane {
   y: number;
-  color: number;
+  color: string;
   opacity: number;
 }
 
+const PLANE_HEX = layerPlaneHexes();
+
 const PLANES: readonly LayerPlane[] = [
-  { y: LAYER_TOP, color: 0x22d3ee, opacity: 0.2 },
-  { y: LAYER_MID, color: 0x64748b, opacity: 0.14 },
-  { y: LAYER_LOW, color: 0x475569, opacity: 0.1 },
-  { y: LAYER_INVALID, color: 0xef4444, opacity: 0.08 },
+  { y: LAYER_TOP, color: PLANE_HEX[0], opacity: 0.2 },
+  { y: LAYER_MID, color: PLANE_HEX[1], opacity: 0.14 },
+  { y: LAYER_LOW, color: PLANE_HEX[2], opacity: 0.1 },
+  { y: LAYER_INVALID, color: PLANE_HEX[3], opacity: 0.08 },
 ];
 
 /**
@@ -164,12 +175,13 @@ const EDGE_FRAG = /* glsl */ `
 
   void main() {
     float x = fract(vUv.x * uDash - vPhase);
-    float dot = smoothstep(0.72, 1.0, x);
+    // 方向感（P2-19-B）：一段"彗星"——0.62 开始抬、0.86 到峰值、0.9–0.96 骤收。
+    // 亮端在 x 增大的一侧，沿 aDir 翻转后亮端就是证据传播方向，肉眼读成箭头。
+    float head = smoothstep(0.62, 0.86, x) * (1.0 - smoothstep(0.9, 0.96, x));
     float flowing = step(0.0001, vFlow);
-    // 亮度/透明度：状态表 + 流动点 + 证据质量（aMass 让证据边在沉默底上也亮得起来）。
-    // 加法混合下 aVis 仍是底，dot 是运动的高光，aMass 是「这条边确实参与了扩散」的读数。
-    float intensity = 0.5 + 0.5 * vAlpha + 1.6 * dot * flowing + 1.4 * vMass;
-    float alpha = vVis + 0.45 * dot * flowing + 0.55 * vMass;
+    // 亮度/透明度：状态表 + 流动头 + 证据质量（aMass 让证据边在沉默底上也亮得起来）。
+    float intensity = 0.5 + 0.5 * vAlpha + 2.1 * head * flowing + 1.4 * vMass;
+    float alpha = vVis + 0.6 * head * flowing + 0.55 * vMass;
     gl_FragColor = vec4(vColor * intensity, clamp(alpha, 0.0, 1.0));
   }
 `;
@@ -236,10 +248,11 @@ function radialGlowTexture(): THREE.Texture {
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   if (ctx !== null) {
+    const [inner, mid, outer] = haloStops();
     const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    g.addColorStop(0, 'rgba(255,255,255,0.9)');
-    g.addColorStop(0.35, 'rgba(190,225,255,0.28)');
-    g.addColorStop(1, 'rgba(120,180,255,0)');
+    g.addColorStop(0, inner);
+    g.addColorStop(0.35, mid);
+    g.addColorStop(1, outer);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
   }
@@ -273,6 +286,10 @@ class GraphScene {
   private nodeGeometry: THREE.SphereGeometry | null = null;
   private nodeMaterial: THREE.MeshBasicMaterial | null = null;
   private glowTexture: THREE.Texture | null = null;
+  /** P2-19-B：逐节点选中遮罩（环/扫描共用）+ 节点 shader 的时间 uniform 句柄 */
+  private nodeSelAttr: THREE.InstancedBufferAttribute | null = null;
+  private nodeShader: { uniforms: Record<string, { value: number }> } | null = null;
+  private vignette: HTMLDivElement | null = null;
 
   private nodes: GraphPayload['nodes'] = [];
   private edgeCount = 0;
@@ -338,7 +355,9 @@ class GraphScene {
     this.host = host;
     this.onStats = onStats;
 
-    this.scene.background = new THREE.Color(BG_COLOR);
+    // P2-19-B：背景是 DOM 双层（径向雾 + 暗角），3D 画布变透明——渐变的填充成本
+    // 留在合成器里，`renderer.info.render.calls` 一个都不多。
+    host.style.background = sceneBackdropCss();
 
     const width = Math.max(host.clientWidth, 1);
     const height = Math.max(host.clientHeight, 1);
@@ -347,11 +366,14 @@ class GraphScene {
 
     // 集显（UHD 630）上 MSAA 是最大的一笔固定开销：1080p × 4x 采样白给。
     // 节点是圆球、边是细线，关掉 MSAA 后靠光晕的柔边遮掩锯齿，实测收益远大于画质损失。
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    // alpha:true 让 DOM 背景透上来（P2-19-B）；画布本身仍是同一个 draw call 预算。
+    this.renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     this.renderer.setSize(width, height);
-    this.renderer.setClearColor(BG_COLOR, 1);
+    // 画布透明（背景由 DOM 层提供）；clearColor 保持默认黑，只把 alpha 清零
+    this.renderer.setClearAlpha(0);
     this.renderer.domElement.style.display = 'block';
+    this.renderer.domElement.style.zIndex = '1';
     host.appendChild(this.renderer.domElement);
 
     this.labelRenderer = new CSS2DRenderer();
@@ -361,7 +383,14 @@ class GraphScene {
     labelStyle.top = '0';
     labelStyle.left = '0';
     labelStyle.pointerEvents = 'none';
+    labelStyle.zIndex = '3';
     host.appendChild(this.labelRenderer.domElement);
+
+    // 暗角压在 canvas 之上、标签之下：边缘往背景色收，中心的图自然成为焦点。
+    const vignette = document.createElement('div');
+    vignette.style.cssText = `position:absolute;inset:0;pointer-events:none;z-index:2;background:${sceneVignetteCss()}`;
+    host.appendChild(vignette);
+    this.vignette = vignette;
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -390,6 +419,7 @@ class GraphScene {
 
     // 3D → store → 2D：点选写进共享 store，2D 那边订阅同一份状态
     this.unsubSelection = useSelection.subscribe((state, prev) => {
+      if (state.selectedIds !== prev.selectedIds) this.updateSelectionAttr();
       if (state.focusId !== prev.focusId) this.setFocus(state.focusId);
     });
 
@@ -444,6 +474,8 @@ class GraphScene {
       if (i >= 0 && i < this.nodes.length) this.writeNodeMatrix(i);
     }
     if (this.nodesMesh !== null) this.nodesMesh.instanceMatrix.needsUpdate = true;
+    // 选中扫描环的开关走同一份 store：这里只重写逐实例遮罩，不新建材质
+    this.updateSelectionAttr();
     // 选中标签立刻进池，不等 300ms 的节流
     this.labelTickAt = 0;
   }
@@ -527,7 +559,11 @@ class GraphScene {
     }
     this.nodeAlphaAttr = new THREE.InstancedBufferAttribute(alpha, 1);
     this.nodeGeometry.setAttribute('aAlpha', this.nodeAlphaAttr);
-    this.installNodeAlpha(this.nodeMaterial);
+    // P2-19-B：选中遮罩是逐实例 attribute（0/1），环与扫描带都在同一个 shader 里，
+    // 不新增几何体、不新增 draw call（已选中节点最多也就一份 InstancedMesh）。
+    this.nodeSelAttr = new THREE.InstancedBufferAttribute(new Float32Array(n), 1);
+    this.nodeGeometry.setAttribute('aNodeSel', this.nodeSelAttr);
+    this.installNodeFx(this.nodeMaterial);
 
     this.nodesMesh = new THREE.InstancedMesh(this.nodeGeometry, this.nodeMaterial, Math.max(n, 1));
     this.nodesMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -556,6 +592,7 @@ class GraphScene {
     // 刷新后选中可能指向已不在本页的节点：以 store 为准重算一次下标
     this.focusIndex = -1;
     this.setFocus(useSelection.getState().focusId);
+    this.updateSelectionAttr();
 
     // 活跃集也以 store 为准（刷新不该把正在亮的那一小块抹掉）；已过期的直接丢弃
     const active = useActivity.getState().snapshot;
@@ -771,20 +808,62 @@ class GraphScene {
     attr.needsUpdate = true;
   }
 
-  /** 每实例不透明度：给 MeshBasicMaterial 打一个小补丁（`instanceColor` 只有 rgb） */
-  private installNodeAlpha(material: THREE.MeshBasicMaterial): void {
+  /**
+   * 节点环 / 内芯 / 选中扫描环：给 MeshBasicMaterial 打一个小补丁（P2-19-B）。
+   *
+   * - 环与内芯：只改 `diffuseColor` 的乘值，靠球面 rim（视空间法线 z）分区，不换材质；
+   * - 扫描环：选中实例（aNodeSel=1）按方位角扫一道亮带，时间由 `uTimeSel` 驱动；
+   * - 全部走已有 InstancedMesh 的 shader，不增几何体、不增 draw call（仍是节点 1 笔）。
+   */
+  private installNodeFx(material: THREE.MeshBasicMaterial): void {
+    this.nodeShader = null;
     material.onBeforeCompile = (shader) => {
+      shader.uniforms['uTimeSel'] = { value: 0 };
+      shader.uniforms['uScanSpeed'] = { value: SCAN_SPEED };
+      shader.uniforms['uScanWidth'] = { value: SCAN_WIDTH };
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aAlpha;\nvarying float vNodeAlpha;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\nvNodeAlpha = aAlpha;');
+        .replace(
+          '#include <common>',
+          '#include <common>\nattribute float aAlpha;\nattribute float aNodeSel;\nvarying float vNodeAlpha;\nvarying float vNodeSel;\nvarying vec3 vViewNormal;',
+        )
+        .replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\nvNodeAlpha = aAlpha;\nvNodeSel = aNodeSel;\nvViewNormal = normalize(normalMatrix * normal);',
+        );
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying float vNodeAlpha;')
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float uTimeSel;\nuniform float uScanSpeed;\nuniform float uScanWidth;\nvarying float vNodeAlpha;\nvarying float vNodeSel;\nvarying vec3 vViewNormal;\nfloat moshiSmooth(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-5), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }',
+        )
         .replace(
           'vec4 diffuseColor = vec4( diffuse, opacity );',
-          'vec4 diffuseColor = vec4( diffuse, opacity * vNodeAlpha );',
+          [
+            'float rim = 1.0 - abs(normalize(vViewNormal).z);',
+            'float ring = moshiSmooth(0.74, 0.86, rim) * (1.0 - moshiSmooth(0.96, 1.0, rim));',
+            'float core = 1.0 - moshiSmooth(0.0, 0.45, rim);',
+            'float sel = step(0.5, vNodeSel);',
+            'float ang = atan(normalize(vViewNormal).y, normalize(vViewNormal).x);',
+            'float scan = mod(uTimeSel * uScanSpeed, 6.2831853);',
+            'float ad = abs(mod(ang - scan + 3.14159265, 6.2831853) - 3.14159265);',
+            'float sweep = sel * (1.0 - smoothstep(0.0, uScanWidth, ad));',
+            'vec4 diffuseColor = vec4( diffuse * (0.62 + 1.2 * ring + 0.32 * core) + vec3(1.0) * (0.55 * sweep), opacity * vNodeAlpha * (0.82 + 0.18 * core + 0.45 * sweep) );',
+          ].join('\n'),
         );
+      this.nodeShader = shader as unknown as { uniforms: Record<string, { value: number }> };
     };
-    material.customProgramCacheKey = () => 'moshi-node-alpha';
+    material.customProgramCacheKey = () => 'moshi-node-fx';
+  }
+
+  /** 选中遮罩：选中集（可多选）+ 焦点都算 1，写进已有 InstancedMesh 的属性，不动几何 */
+  private updateSelectionAttr(): void {
+    const attr = this.nodeSelAttr;
+    if (attr === null) return;
+    const { selectedIds, focusId } = useSelection.getState();
+    for (let i = 0; i < this.nodes.length; i += 1) {
+      const id = this.nodes[i]!.id;
+      attr.array[i] = selectedIds.has(id) || id === focusId ? 1 : 0;
+    }
+    attr.needsUpdate = true;
   }
 
   private buildEdges(data: GraphPayload): void {
@@ -980,8 +1059,8 @@ class GraphScene {
     this.labelPool.length = 0;
     for (let i = 0; i < MAX_LABELS; i += 1) {
       const div = document.createElement('div');
-      div.style.cssText =
-        'color:#e2e8f0;font:11px/1.2 ui-sans-serif,system-ui;text-shadow:0 0 4px #05070d,0 0 8px #05070d;white-space:nowrap;padding:1px 3px;border-radius:3px;';
+      // P2-19-B：颜色/描边统一从 palette 取（CSS 变量 + fallback），不再内联 hex
+      div.style.cssText = labelCss();
       const obj = new CSS2DObject(div);
       obj.visible = false;
       this.labelPool.push({ obj, div });
@@ -1132,6 +1211,8 @@ class GraphScene {
     const now = performance.now();
     const dt = this.clock.getDelta();
     if (this.edgeMaterial !== null) this.edgeMaterial.uniforms['uTime']!.value += dt;
+    // 选中扫描环的转动时间（只在选中实例上可见；无选中时片元里 sel=0，扫描带自动熄灭）
+    if (this.nodeShader !== null) this.nodeShader.uniforms['uTimeSel']!.value += dt;
 
     // 双态衰减：光晕强度与边流动速度都从衰减权重连续取值，不硬切；到期整表回落一次
     // （回落是 O(N) 的全量重算，所以只做一次，不做逐帧）。
@@ -1185,6 +1266,8 @@ class GraphScene {
     this.edgeCount = 0;
     this.haloMaterial = null;
     this.nodeAlphaAttr = null;
+    this.nodeSelAttr = null;
+    this.nodeShader = null;
     this.edgeVisAttr = null;
     this.edgeFlowAttr = null;
     this.edgeMassAttr = null;
@@ -1221,21 +1304,16 @@ class GraphScene {
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.labelRenderer.domElement.remove();
+    this.vignette?.remove();
+    this.vignette = null;
     delete window.__moshiGraph;
   }
 }
 
 function etypeUniforms(): THREE.Vector3[] {
-  const table = [
-    '#8b5cf6', // depends_on
-    '#06b6d4', // logic
-    '#f59e0b', // mutually_exclusive
-    '#6b7280', // co_occur
-    '#ef4444', // supersedes
-    '#475569', // derived_from
-  ];
-  return table.map((hex) => {
-    const c = new THREE.Color(hex);
+  // 颜色只从 palette 取（CSS 变量 + fallback），顺序与 ETYPE_ORDER 对齐
+  return ETYPE_ORDER.map((etype) => {
+    const c = new THREE.Color(etypeHex(etype));
     return new THREE.Vector3(c.r, c.g, c.b);
   });
 }
