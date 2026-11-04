@@ -1,12 +1,22 @@
 /**
- * 社区维度读取（详设 §9.1 / §2.2；台账 P1-15、P1-10）。
+ * 社区维度读取（详设 §9.1 / §2.2；台账 P1-15、P1-10、P2-11）。
  *
  * edge 表没有 community_id，社区归属只能经两端 fact 关联——这些 JOIN 是数据库细节，
  * 收在 infra，core 只做选取阈值与渲染决策。
+ *
+ * P2-11 追加：图输入装载（`loadCommunityGraph` / `loadOldAssignment`）与划分结果
+ * 写回（`applyCommunityAssignment` / `communityRev` / `bumpCommunityRev`）。
+ * 写回必须经 `factRepo.setCommunity` 专用入口、放在事务里（progress P2-11 开工核查）；
+ * `setCommunity` 不更新 `updated_at`、不推 `schema_rev`（DDL 只有 INSERT 触发器），
+ * 符合"社区是派生投影"的语义——投影刷新不会反过来触发自身重算。
  */
-import type { Db } from './db.js';
-import { rowToFact } from './mappers.js';
+import type { CommunityEdge, CommunityGraphInput } from '../../core/lifecycle/community.js';
 import type { Fact } from '../../domain/types.js';
+import type { Db } from './db.js';
+import { setCommunity } from './factRepo.js';
+import { rowToFact } from './mappers.js';
+import { getMeta, setMeta } from './metaRepo.js';
+import { withTransaction } from './tx.js';
 
 export interface TopicCandidateRow {
   communityId: number;
@@ -152,4 +162,100 @@ export function getLatestSummary(db: Db, communityId: number): CommunitySummaryR
     | undefined;
   if (row === undefined) return null;
   return { label: row.label, summary: row.summary, factCount: row.fact_count, derivedAt: row.derived_at };
+}
+
+// ────────────────────────────────────────────────────────────
+// P2-11 社区划分：图输入装载与写回
+// ────────────────────────────────────────────────────────────
+
+/** 参与划分的活跃节点（只取 active/disputed，progress P2-11 开工核查口径），按 id 升序 */
+export function loadCommunityNodes(db: Db): string[] {
+  const rows = db
+    .prepare(
+      `SELECT id FROM fact
+        WHERE epistemic_status IN ('active','disputed')
+        ORDER BY id`,
+    )
+    .all() as { id: string }[];
+  return rows.map((r) => r.id);
+}
+
+/** 活跃边：valid_to IS NULL 且两端都在参与集合内；按 (src,dst) 升序（确定性输入） */
+export function loadCommunityEdges(db: Db): CommunityEdge[] {
+  const rows = db
+    .prepare(
+      `SELECT e.src, e.dst, e.weight FROM edge e
+         JOIN fact fs ON fs.id = e.src AND fs.epistemic_status IN ('active','disputed')
+         JOIN fact fd ON fd.id = e.dst AND fd.epistemic_status IN ('active','disputed')
+        WHERE e.valid_to IS NULL
+        ORDER BY e.src, e.dst`,
+    )
+    .all() as { src: string; dst: string; weight: number }[];
+  return rows.map((r) => ({ src: r.src, dst: r.dst, weight: r.weight }));
+}
+
+/** 社区划分图输入：节点 + 边（确定性排序） */
+export function loadCommunityGraph(db: Db): CommunityGraphInput {
+  const nodes = loadCommunityNodes(db);
+  const edges = loadCommunityEdges(db);
+  return { nodes, edges, oldAssignment: loadOldAssignment(db) };
+}
+
+/** 旧分配：fact_id → community_id（仅非空行；空 Map = 首次划分） */
+export function loadOldAssignment(db: Db): Map<string, number> {
+  const rows = db
+    .prepare('SELECT id, community_id FROM fact WHERE community_id IS NOT NULL')
+    .all() as { id: string; community_id: number }[];
+  return new Map(rows.map((r) => [r.id, r.community_id]));
+}
+
+/**
+ * 写回划分结果：单事务内只更新变化行 + 推进 `community_rev`，返回写入行数。
+ * 专用入口 `setCommunity`，不新增裸 SQL 到 core；`community_rev` 与写回同事务，
+ * 避免"写了一半版本没推进"的中间态。
+ */
+export function applyCommunityAssignment(
+  db: Db,
+  assignment: ReadonlyMap<string, number>,
+): number {
+  return withTransaction(db, () => {
+    const current = db
+      .prepare('SELECT id, community_id FROM fact')
+      .all() as { id: string; community_id: number | null }[];
+    const currentById = new Map(current.map((r) => [r.id, r.community_id]));
+    let wrote = 0;
+    for (const [factId, cid] of assignment) {
+      if ((currentById.get(factId) ?? null) !== cid) {
+        setCommunity(db, factId, cid);
+        wrote += 1;
+      }
+    }
+    // 只有实际发生变化才推进版本：无变化的重跑不该产生"新版本"
+    if (wrote > 0) setMeta(db, 'community_rev', String(communityRev(db) + 1));
+    return wrote;
+  });
+}
+
+/** 当前 community_rev（未初始化按 0 处理） */
+export function communityRev(db: Db): number {
+  const raw = getMeta(db, 'community_rev');
+  if (raw === null) return 0;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** dryRun 用的"将写入"行数：与库内当前值比较，不落库（lint:lifecycle：core/app 不得持 db 句柄） */
+export function countCommunityChanges(
+  db: Db,
+  assignment: ReadonlyMap<string, number>,
+): number {
+  const current = db
+    .prepare('SELECT id, community_id FROM fact')
+    .all() as { id: string; community_id: number | null }[];
+  const currentById = new Map(current.map((r) => [r.id, r.community_id]));
+  let changed = 0;
+  for (const [factId, cid] of assignment) {
+    if ((currentById.get(factId) ?? null) !== cid) changed += 1;
+  }
+  return changed;
 }

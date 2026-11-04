@@ -13,6 +13,7 @@ import { removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
 import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
 import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRunner.js';
+import { startCommunityRunner, type CommunityRunner } from './communityRunner.js';
 import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
@@ -63,6 +64,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let sidecar: SidecarClient | undefined;
   let runner: HarvestRunner | undefined;
   let schemaRunner: SchemaInferRunner | undefined;
+  let communityRunner: CommunityRunner | undefined;
   let collectRunner: CollectRunner | undefined;
   let layoutRunner: LayoutRunner | undefined;
   try {
@@ -83,6 +85,9 @@ export async function main(argv: readonly string[]): Promise<number> {
         // P1-24 互斥裁决的前置：ontology 里得有谓词基数性。启动即算一次，
         // 之后按 schema_rev 脏检查兜底重算（见 schemaInferRunner）。
         schemaRunner = startSchemaInferRunner({ db, log });
+        // P2-11 社区划分：归档/UI 社区视觉的数据源。启动即算一次，
+        // 之后按 schema_rev + 活跃边数脏检查兜底重算（见 communityRunner）。
+        communityRunner = startCommunityRunner({ db, log });
         const { server } = await buildHttpApp({
           db,
           cfg: booted,
@@ -191,6 +196,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
     runner?.stop();
     schemaRunner?.stop();
+    communityRunner?.stop();
     collectRunner?.stop();
     layoutRunner?.stop();
     await sidecar?.shutdown();

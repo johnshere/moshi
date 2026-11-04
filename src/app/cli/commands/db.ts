@@ -13,6 +13,7 @@
  * 两个子命令都支持 `--dry-run`（一次写都不发）。
  */
 import { existsSync } from 'node:fs';
+import { runCommunityOnce } from '../../communityRunner.js';
 import {
   consolidate,
   CONSOLIDATE_RATE_PER_SEC,
@@ -38,6 +39,7 @@ const USAGE = [
   '子命令：',
   '  rebuild-strength [--dry-run]               按当前时刻惰性衰减全表重算强度（幂等；只写有变化的行）',
   '  consolidate [--dry-run] [--rate <n>]       归纳同 key episodic 要点，并提炼同 cwd 重复工具过程',
+  '  community [--dry-run]                      全图 Louvain 重算社区划分（Jaccard≥0.5 继承旧 id）',
   '',
   '公共参数：',
   '  --dry-run  只统计不写库',
@@ -47,7 +49,7 @@ const USAGE = [
   '',
 ].join('\n');
 
-const SUBCOMMANDS = ['rebuild-strength', 'consolidate'] as const;
+const SUBCOMMANDS = ['rebuild-strength', 'consolidate', 'community'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 function isSubcommand(s: string): s is Subcommand {
@@ -56,7 +58,7 @@ function isSubcommand(s: string): s is Subcommand {
 
 export const dbCommand: Command = {
   name: 'db',
-  summary: '库维护（db rebuild-strength | db consolidate 均支持 --dry-run）',
+  summary: '库维护（db rebuild-strength | db consolidate | db community 均支持 --dry-run）',
   async run(ctx) {
     const sub = ctx.args[0];
     if (sub === undefined) {
@@ -114,6 +116,12 @@ export const dbCommand: Command = {
         ctx.stdout(
           `${JSON.stringify({ command: 'db consolidate', ...res, procedures, dry_run: dryRun })}\n`,
         );
+        return 0;
+      }
+
+      if (sub === 'community') {
+        const res = runCommunityOnce(db, { dryRun });
+        ctx.stdout(`${JSON.stringify({ command: 'db community', ...res, dry_run: dryRun })}\n`);
         return 0;
       }
 
