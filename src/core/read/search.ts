@@ -34,7 +34,7 @@ import { logQuery } from '../../infra/sqlite/logRepo.js';
 import { routeIntent } from './route.js';
 import { recognizeEntities, type RecognizedEntity } from './recognize.js';
 import { recallBm25, tokenizeForFts } from './recall/bm25.js';
-import { recallPpr } from './recall/ppr.js';
+import { recallPpr, type PprResult } from './recall/ppr.js';
 import { fuseRank, fusedScores, type FusedItem, type RecallChannel } from './fuse.js';
 import { buildSubgraph } from './subgraph.js';
 import { adjudicate, type AdjudicatedFact } from './adjudicate.js';
@@ -42,6 +42,7 @@ import { packFacts, type PackItem } from './pack.js';
 import { assembleEvidence, type ConflictEntry, type EvidencePackage, type TopicHint } from './evidence.js';
 import { mapDegradation, type InternalSignal } from './errors.js';
 import { cacheKeyOf, type EvidenceCache } from './cache.js';
+import { buildTrace, collectTrace, type TraceRecord, type TraceSink } from './trace.js';
 
 /** 编排参数（app 层从 cfg 映射过来——core 不认识 Config 类型） */
 export interface SearchParams {
@@ -101,6 +102,13 @@ export interface SearchRuntime {
   cache?: EvidenceCache;
   /** GAT 开关（P3）；只进 flags 快照 */
   gatMode?: 'off' | 'shadow' | 'on';
+  /** GAT 模型版本（P3）；缺省 null。P2 恒 null——模型未生效（§4.7） */
+  modelVersion?: string | null;
+  /**
+   * 证据链采集注入点（P2-24，详设 §4.7）。**不传 = 完全不采集**，行为与 P2-24 之前
+   * 逐字节一致；daemon 注入 TraceStore 后每次查询留一条内存 trace（不落库）。
+   */
+  trace?: TraceSink;
   newQueryId?: () => string;
   /** 注入时钟（ISO），让时态断言可测 */
   now?: () => string;
@@ -124,6 +132,21 @@ function flagsSnapshot(vectorOn: boolean, gatMode: string): Record<string, strin
     bm25: 'on',
     ppr: 'on',
   };
+}
+
+/** trace 采集是旁路：sink 自己抛错也绝不能把读取链带崩（§6.13 降级纪律） */
+function emitTrace(rt: SearchRuntime, record: TraceRecord): void {
+  if (rt.trace === undefined) return;
+  try {
+    rt.trace.put(record);
+  } catch {
+    /* 采集失败只是少一条回放，不是查询失败 */
+  }
+}
+
+/** trace 的公共字段（三处出口共用，避免 model_mode/model_version 漂移） */
+function traceMeta(rt: SearchRuntime): { modelMode: 'off' | 'shadow' | 'on'; modelVersion: string | null } {
+  return { modelMode: rt.gatMode ?? 'off', modelVersion: rt.modelVersion ?? null };
 }
 
 /** 候选过滤：scope / ftype / 生命周期 / 有效时间窗（§4.1.1 入参语义） */
@@ -259,6 +282,19 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     const queryId = newQueryId();
     const pack = buildGlobalPack(db, queryId, scope, params, signals, Math.round(performance.now() - startedAt));
     mark('global');
+    // 全局路径没有事实级证据链，但仍记一条空 trace：前端轮询任意 query_id 都有回放，
+    // 不会因为「这次是话题概览」而 404（§12.2「trace 缺失返回空而非报错」）。
+    emitTrace(
+      rt,
+      buildTrace({
+        queryId,
+        ts: parseTs(now),
+        route: 'global',
+        ...traceMeta(rt),
+        seeds: [],
+        results: [],
+      }),
+    );
     logQuery(
       db,
       {
@@ -325,6 +361,25 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
       const cachedPack: EvidencePackage = { ...hit.pack, query_id: hit.queryId };
       mark('cache');
       const latencyMs = Math.round(performance.now() - startedAt);
+      // 缓存命中没有跑召回（§6.11 直接返回整包）：只能把入包事实记成直击，
+      // seeds 留空——没有发生过的扩散不能出现在回放里。
+      emitTrace(
+        rt,
+        buildTrace({
+          queryId: hit.queryId,
+          ts: parseTs(now),
+          route: 'local',
+          ...traceMeta(rt),
+          seeds: [],
+          results: cachedPack.evidence.map((e) => ({
+            fact_id: e.fact_id,
+            hop: 0,
+            path: [],
+            fused_rank: null,
+            rank_symbolic: e.m_id,
+          })),
+        }),
+      );
       logQuery(
         db,
         {
@@ -395,6 +450,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   // 没有种子不是故障：其他两路照常出结果。
   const seeds = (vectorIds.length > 0 ? vectorIds : bm25Ids).slice(0, 3);
   let pprIds: string[] = [];
+  let pprResult: PprResult | null = null;
   if (seeds.length > 0) {
     try {
       const ppr = recallPpr(db, seeds, {
@@ -402,6 +458,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
         maxIter: params.pprIters,
         d: params.pprDamping,
       });
+      pprResult = ppr;
       pprIds = ppr.ids.slice(0, params.pprTopK);
       if (ppr.timedOut) signals.push('ppr_timeout');
     } catch {
@@ -431,6 +488,8 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     query: input.query,
     now: () => new Date(now),
   });
+  // 融合排名（1-based）进 trace 的 fused_rank；不在融合结果里的入包事实记 null
+  const fusedRankOf = new Map<string, number>(fused.map((f, i) => [f.fact_id, i + 1]));
   mark('fuse');
 
   // ── 7) 子图（§6.6）──
@@ -486,6 +545,29 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     now,
   });
   mark('assemble');
+
+  // ── 10.5) 证据链回放（P2-24 / §4.7）：旁路采集，不改变证据包 ──
+  // 路径只重建「入包事实」这一段：seeds=直击命中，hop=从 PPR 种子出发的跳数，
+  // edge_mass=PPR 扩散份额。子图边已在手，trace 不做额外召回。
+  emitTrace(
+    rt,
+    collectTrace({
+      db,
+      queryId,
+      ts: parseTs(now),
+      route: 'local',
+      ...traceMeta(rt),
+      directIds: [...new Set([...vectorIds, ...bm25Ids])],
+      pprSeeds: seeds,
+      ppr: pprResult,
+      subEdges: sub.edges,
+      packed: items.map((item, i) => ({
+        fact_id: item.fact.id,
+        rank: i + 1,
+        fused_rank: fusedRankOf.get(item.fact.id) ?? null,
+      })),
+    }),
+  );
 
   // ── 11) 埋点（§6.12）与会话内缓存（§6.11）──
   logQuery(

@@ -8,6 +8,7 @@
  * - `cache`：会话内证据缓存（详设 §6.11）。**每个进程一份**，`schema_rev` 变化即全清。
  */
 import { EvidenceCache } from '../../core/read/cache.js';
+import type { TraceStore } from '../../core/read/trace.js';
 import { schemaRev } from '../../infra/sqlite/metaRepo.js';
 import type { SidecarClient } from '../../infra/sidecar/client.js';
 import type { Config } from '../config.js';
@@ -26,6 +27,12 @@ export interface McpDeps {
    * `wake`；CLI / 测试不注入时只是"入队了但没人消费"，与注入前的行为一致。
    */
   onEnqueued?: () => void;
+  /**
+   * 证据链回放存储（P2-24，详设 §4.7）。daemon 注入进程内单例后，每次
+   * `memory_query` 都往 ring buffer 留一条 trace，`GET /api/trace/:query_id` 读它；
+   * CLI / 测试不注入时完全不采集（行为与 P2-24 之前一致）。
+   */
+  traceStore?: TraceStore;
 }
 
 export function buildEvidenceCache(db: Db, cfg: Config): EvidenceCache {

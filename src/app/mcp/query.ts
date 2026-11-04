@@ -106,6 +106,7 @@ export async function runMemoryQuery(deps: McpDeps, input: QueryInput): Promise<
       gatMode: deps.cfg.model.gat_mode,
       ...(deps.encode === undefined ? {} : { encode: deps.encode }),
       ...(deps.cache === undefined ? {} : { cache: deps.cache }),
+      ...(deps.traceStore === undefined ? {} : { trace: deps.traceStore }),
     },
     {
       query: input.query,
