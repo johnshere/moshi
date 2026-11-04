@@ -17,6 +17,7 @@ import path from 'node:path';
 import TOML from '@iarna/toml';
 import { z } from 'zod';
 import { MoshiError } from '../domain/errors.js';
+import { safeEnsureDir, safeWriteFile, type WriteRoots } from '../infra/fs/safeWrite.js';
 
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'] as const;
 
@@ -419,4 +420,171 @@ export function dataPaths(cfg: Config): {
     collectCursors: path.join(root, 'cursors.blocks.json'),
     backups: path.join(root, 'backups'),
   };
+}
+
+// ── 配置编辑（P2-19A-06：GET/PUT /api/config）─────────────────────────────
+//
+// 原则：
+// 1. **白名单**：只允许改这里登记过的键；`sidecar`/`model`/`mcp` 等运行期敏感段
+//    不对外暴露，也不接受写入；
+// 2. **只增不改**：读取/校验/序列化都复用已有 `loadConfig` / `ConfigSchema`，
+//    写盘走 `safeWriteFile`（.tmp + rename，白名单根内），不新开 fs 写路径；
+// 3. 对外路径与配置文件路径可以不同（`http.port` 实际落在 `server.port`），
+//    这张表是唯一映射来源。
+
+/** GET /api/config 的响应 schema 版本 */
+export const PUBLIC_CONFIG_SCHEMA = 'moshi-config/1';
+
+export interface EditableConfigEntry {
+  /** 对外（GET/PUT）路径，例如 `http.port` */
+  path: string;
+  /** 配置文件里的实际段名（`http.port` 实际落在 `server.port`） */
+  section: string;
+  key: string;
+}
+
+/** 设置页可读写的键（白名单；顺序即 UI 分组顺序） */
+export const EDITABLE_CONFIG_ENTRIES: readonly EditableConfigEntry[] = [
+  { path: 'ingest.harvest_cron', section: 'ingest', key: 'harvest_cron' },
+  { path: 'archive.export_cron', section: 'archive', key: 'export_cron' },
+  { path: 'archive.dirty_threshold_facts', section: 'archive', key: 'dirty_threshold_facts' },
+  {
+    path: 'archive.dirty_threshold_confidence',
+    section: 'archive',
+    key: 'dirty_threshold_confidence',
+  },
+  { path: 'archive.min_facts', section: 'archive', key: 'min_facts' },
+  { path: 'archive.history_keep', section: 'archive', key: 'history_keep' },
+  { path: 'layout.enabled', section: 'layout', key: 'enabled' },
+  { path: 'layout.interval_ms', section: 'layout', key: 'interval_ms' },
+  { path: 'collect.enabled', section: 'collect', key: 'enabled' },
+  { path: 'collect.interval_ms', section: 'collect', key: 'interval_ms' },
+  { path: 'collect.llm_scan', section: 'collect', key: 'llm_scan' },
+  { path: 'http.port', section: 'server', key: 'port' },
+  { path: 'storage.data_dir', section: 'storage', key: 'data_dir' },
+  { path: 'storage.archive_dir', section: 'storage', key: 'archive_dir' },
+  { path: 'storage.backup_keep', section: 'storage', key: 'backup_keep' },
+];
+
+/** 改动后必须重启 daemon 才生效的键 */
+export const RESTART_REQUIRED_PATHS: readonly string[] = [
+  'http.port',
+  'storage.data_dir',
+  'storage.archive_dir',
+];
+
+export function findEditableConfigEntry(dotted: string): EditableConfigEntry | undefined {
+  return EDITABLE_CONFIG_ENTRIES.find((entry) => entry.path === dotted);
+}
+
+/**
+ * 读原始 TOML 文档（不做默认值填充、不展开 `~`）。
+ *
+ * 编辑必须保留用户文件里已有的、不在白名单里的键（例如 `model.gat_mode`），
+ * 所以这里返回原始对象，而不是 `loadConfig()` 的结果。
+ */
+export function readConfigDocument(file: string): Record<string, unknown> {
+  if (!existsSync(file)) return {};
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch (err) {
+    throw new MoshiError('E_CONFIG', `配置文件读不出来：${file}`, {
+      file,
+      cause: (err as Error).message,
+    });
+  }
+  try {
+    return TOML.parse(text) as Record<string, unknown>;
+  } catch (err) {
+    throw new MoshiError('E_CONFIG', `配置文件不是合法 TOML：${file}`, {
+      file,
+      cause: (err as Error).message,
+    });
+  }
+}
+
+/** 原始对象 → TOML 文本；只做序列化，不做校验 */
+export function stringifyConfigDocument(raw: Record<string, unknown>): string {
+  const text = TOML.stringify(raw as Parameters<typeof TOML.stringify>[0]);
+  return text.endsWith('\n') ? text : `${text}\n`;
+}
+
+/** 原子写配置（safeWriteFile 内部先写 .tmp 再 rename；根外拒绝） */
+export function writeConfigDocument(
+  file: string,
+  raw: Record<string, unknown>,
+  roots: WriteRoots,
+): void {
+  safeEnsureDir(path.dirname(file), roots);
+  safeWriteFile(file, stringifyConfigDocument(raw), roots);
+}
+
+export type ConfigDocumentCheck =
+  | { ok: true; cfg: Config }
+  | { ok: false; issues: string[] };
+
+/**
+ * 用 `ConfigSchema` 校验一份**原始文档**（允许只写部分键，缺省走默认值）。
+ * 不复用 `loadConfig()` 是因为它还会展开路径、检查 host/port 关系，写盘前只想
+ * 先确认「这份 TOML 能被加载」。
+ */
+export function checkConfigDocument(raw: unknown): ConfigDocumentCheck {
+  const parsed = ConfigSchema.safeParse(raw);
+  if (!parsed.success) return { ok: false, issues: formatIssues(parsed.error) };
+  return { ok: true, cfg: parsed.data };
+}
+
+/** 深合并（数组/标量直接覆盖）；返回新对象，不改入参 */
+export function mergeConfigDocument(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const out = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
+  for (const [section, value] of Object.entries(patch)) {
+    if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+      const current = out[section];
+      const bag =
+        current !== null && typeof current === 'object' && !Array.isArray(current)
+          ? (current as Record<string, unknown>)
+          : {};
+      out[section] = mergeConfigDocument(bag, value as Record<string, unknown>);
+    } else {
+      out[section] = value;
+    }
+  }
+  return out;
+}
+
+const CRON_BOUNDS: readonly (readonly [number, number])[] = [
+  [0, 59], // 分
+  [0, 23], // 时
+  [1, 31], // 日
+  [1, 12], // 月
+  [0, 7], // 周（0 与 7 都表示周日）
+];
+
+/**
+ * 校验 5 段 cron（标准 Vixie 语法：`*`、列表、范围、步长）。
+ * 与 `src/app/jobs/scheduler.ts` 的解析口径一致，但这里只判合法、不做调度。
+ */
+export function isValidCronExpression(expr: string): boolean {
+  const fields = expr.trim().split(/\s+/);
+  if (fields.length !== 5) return false;
+  for (let i = 0; i < 5; i += 1) {
+    const field = fields[i]!;
+    const [min, max] = CRON_BOUNDS[i]!;
+    for (const item of field.split(',')) {
+      const match = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(item);
+      if (match === null) return false;
+      const step = match[4];
+      if (step !== undefined && Number(step) < 1) return false;
+      if (match[1] === '*' && match[2] === undefined) continue;
+      const start = Number(match[2]);
+      const end = match[3] === undefined ? start : Number(match[3]);
+      if (!Number.isInteger(start) || !Number.isInteger(end)) return false;
+      if (start < min || start > max || end < min || end > max || start > end) return false;
+    }
+  }
+  return true;
 }

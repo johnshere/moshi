@@ -32,6 +32,7 @@ import { queueRoutes } from './routes/queues.js';
 import { diagRoutes } from './routes/diag.js';
 import { archiveRoutes } from './routes/archive.js';
 import { searchRoutes } from './routes/search.js';
+import { configRoutes } from './routes/config.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
@@ -87,7 +88,14 @@ export async function buildHttpApp(deps: HttpDeps) {
     ...(deps.batchOpTtlMs === undefined ? {} : { ttlMs: deps.batchOpTtlMs }),
   });
   await app.register(queueRoutes, { prefix: '/api/queues', db: deps.db });
-await app.register(diagRoutes, { prefix: '/api/diag', db: deps.db, cfg: deps.cfg });
+  await app.register(diagRoutes, { prefix: '/api/diag', db: deps.db, cfg: deps.cfg });
+  // 设置页：配置白名单读写 + 维护重建（P2-19-A）
+  await app.register(configRoutes, {
+    prefix: '/api',
+    db: deps.db,
+    cfg: deps.cfg,
+    ...(deps.sidecar === undefined ? {} : { sidecar: deps.sidecar }),
+  });
   // 归档台账与 .proposed 三选一（P2-15）
   await app.register(archiveRoutes, { prefix: '/api/archive', db: deps.db, cfg: deps.cfg });
   await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });

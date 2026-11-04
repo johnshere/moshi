@@ -1,11 +1,13 @@
 /**
- * 设置与诊断页（P2-19-A，详设 §10.1）：只挂载既有 DiagPanel（P2-18）。
+ * 设置与诊断页（P2-19-A / P2-19A-06，详设 §10.1）。
  *
- * 不做配置编辑（P2-19-B 视觉/交互另议），这里只是给诊断面板一个一级入口，
- * 读取仍走 `GET /api/diag`，不新增接口（D-89）。
+ * 三块：配置表单（GET/PUT /api/config）、维护重建（POST /api/maintenance/rebuild）、
+ * 只读自检（既有 DiagPanel，P2-18）。不新增接口符号之外的契约（D-89）。
  */
 import type { ReactElement } from 'react';
+import { ConfigForm } from './ConfigForm.js';
 import { DiagPanel } from './DiagPanel.js';
+import { MaintenancePanel } from './MaintenancePanel.js';
 
 export function SettingsPage(): ReactElement {
   return (
@@ -17,9 +19,13 @@ export function SettingsPage(): ReactElement {
         设置与诊断
       </div>
       <div style={{ color: '#64748b', fontSize: 12, padding: '4px 18px 10px' }}>
-        自检红绿灯（I1–I10）、索引、图质量与最近 harvest；只读，不触发重建。
+        配置（白名单键，原子写回 TOML）、索引维护，以及只读自检（I1–I10 / 图质量 / 模型归档）。
       </div>
-      <DiagPanel />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 18px 18px' }}>
+        <ConfigForm />
+        <MaintenancePanel />
+        <DiagPanel />
+      </div>
     </div>
   );
 }
