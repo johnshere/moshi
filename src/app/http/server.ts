@@ -32,6 +32,7 @@ import { queueRoutes } from './routes/queues.js';
 import { diagRoutes } from './routes/diag.js';
 import { archiveRoutes } from './routes/archive.js';
 import { searchRoutes } from './routes/search.js';
+import { entitiesRoutes } from './routes/entities.js';
 import { configRoutes } from './routes/config.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
@@ -89,6 +90,8 @@ export async function buildHttpApp(deps: HttpDeps) {
     ...(deps.batchOpTtlMs === undefined ? {} : { ttlMs: deps.batchOpTtlMs }),
   });
   await app.register(queueRoutes, { prefix: '/api/queues', db: deps.db });
+  // 实体合并（P2-19-A）：list / merge/preview / merge
+  await app.register(entitiesRoutes, { prefix: '/api/entities', db: deps.db });
   await app.register(diagRoutes, { prefix: '/api/diag', db: deps.db, cfg: deps.cfg });
   // 设置页：配置白名单读写 + 维护重建（P2-19-A）
   await app.register(configRoutes, {

@@ -12,6 +12,7 @@ import { FilterBar } from '../filter/FilterBar.js';
 import { Inspector } from '../inspector/Inspector.js';
 import { useSelection } from '../state/selection.js';
 import type { RouteInfo } from '../shell/pure.js';
+import { EntityMergePanel } from './EntityMergePanel.js';
 
 const overlayStyle: CSSProperties = {
   position: 'absolute',
@@ -71,8 +72,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
           <FilterBar />
         </div>
       </div>
-      {route.canonicalKey === null ? null : (
-        <div
+      {route.canonicalKey === null ? null : (        <div
           data-testid="canonical-note"
           style={{
             position: 'absolute',
@@ -91,6 +91,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
           canonical_key={route.canonicalKey} · 后端 /api/facts 无该筛选参数，已按 q 近似检索
         </div>
       )}
+      <EntityMergePanel />
     </div>
   );
 }

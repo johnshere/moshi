@@ -186,3 +186,176 @@ export function countEntities(db: Db): number {
   const row = db.prepare('SELECT COUNT(*) AS n FROM entity').get() as { n: number };
   return row.n;
 }
+
+// ── 实体合并（P2-19A-09） ─────────────────────────────────────────────────
+//
+// `fact.attrs.frozen` 不可变（I2），实体归属只存在于 frozen 的
+// `subject.entity_id`，没有独立列。所以合并的事实侧改判 = 重算
+// `canonical_key`（它不和 frozen 绑触发器），frozen 里的 entity_id 作为
+// 写入期来源保留；实体行靠 `merged_into` 表达归并。所有 SQL 留在 infra，
+// core 只做决策与事务编排。
+
+export interface EntityFactForMerge {
+  factId: string;
+  canonicalKey: string;
+  valueHash: string;
+  scope: string;
+  predicate: string;
+  value: unknown;
+  validTo: string | null;
+  epistemicStatus: string;
+}
+
+/** 某实体名下（frozen.subject.entity_id）的全部事实，按 valid_at 升序 */
+export function listEntityFactsForMerge(db: Db, entityId: string): EntityFactForMerge[] {
+  const rows = db
+    .prepare(
+      `SELECT id, canonical_key, value_hash, scope, valid_to, epistemic_status,
+              json_extract(attrs, '$.frozen.predicate') AS predicate,
+              json_extract(attrs, '$.frozen.value') AS value
+         FROM fact
+        WHERE json_extract(attrs, '$.frozen.subject.entity_id') = ?
+        ORDER BY valid_at ASC, id ASC`,
+    )
+    .all(entityId) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    factId: String(row['id']),
+    canonicalKey: String(row['canonical_key']),
+    valueHash: String(row['value_hash']),
+    scope: String(row['scope']),
+    predicate: String(row['predicate']),
+    value: row['value'],
+    validTo: (row['valid_to'] as string | null) ?? null,
+    epistemicStatus: String(row['epistemic_status']),
+  }));
+}
+
+/** 直接挂在实体下（不看 merged_into 链）的活跃事实数：预览用 */
+export function countActiveFactsForEntity(db: Db, entityId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM fact
+        WHERE json_extract(attrs, '$.frozen.subject.entity_id') = ?
+          AND epistemic_status = 'active'
+          AND valid_to IS NULL`,
+    )
+    .get(entityId) as { n: number };
+  return row.n;
+}
+
+/** 与该实体事实相连的活跃边数（两端任一命中）：预览的 will_move.edges */
+export function countActiveEdgesForEntity(db: Db, entityId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM edge e
+        WHERE e.valid_to IS NULL
+          AND (EXISTS (SELECT 1 FROM fact f WHERE f.id = e.src
+                        AND json_extract(f.attrs, '$.frozen.subject.entity_id') = ?)
+            OR EXISTS (SELECT 1 FROM fact f WHERE f.id = e.dst
+                        AND json_extract(f.attrs, '$.frozen.subject.entity_id') = ?))`,
+    )
+    .get(entityId, entityId) as { n: number };
+  return row.n;
+}
+
+export function countAliasesForEntity(db: Db, entityId: string): number {
+  const row = db.prepare('SELECT COUNT(*) AS n FROM alias WHERE entity_id = ?').get(entityId) as {
+    n: number;
+  };
+  return row.n;
+}
+
+/** 合并时只改 canonical_key；frozen/content 由触发器保护，不碰 */
+export function updateFactCanonicalKey(db: Db, factId: string, key: string, ts: string): void {
+  db.prepare('UPDATE fact SET canonical_key = ?, updated_at = ? WHERE id = ?').run(key, ts, factId);
+}
+
+/**
+ * 完全重复（同 canonical_key + scope + value_hash）且对方已有活跃行：
+ * 不物理删除，按生命周期收口——写 valid_to + superseded_by 指向保留行。
+ */
+export function closeFactAsDuplicate(
+  db: Db,
+  factId: string,
+  supersededBy: string,
+  ts: string,
+): void {
+  db.prepare(
+    'UPDATE fact SET valid_to = ?, superseded_by = ?, updated_at = ? WHERE id = ? AND valid_to IS NULL',
+  ).run(ts, supersededBy, ts, factId);
+}
+
+/**
+ * 别名改指：先 INSERT OR IGNORE 搬到新实体（PK 是 alias+entity_id，同名别名可在两边，
+ * 搬到目标后 loser 侧删除），再重算两侧 alias_count（详设 §5.5：重算而不是 +1）。
+ */
+export function moveAliasesToEntity(db: Db, fromId: string, toId: string): number {
+  const inserted = db
+    .prepare(
+      `INSERT OR IGNORE INTO alias (alias, entity_id, source, confidence, created_at)
+       SELECT alias, ?, source, confidence, created_at FROM alias WHERE entity_id = ?`,
+    )
+    .run(toId, fromId);
+  db.prepare('DELETE FROM alias WHERE entity_id = ?').run(fromId);
+  refreshAliasCount(db, fromId);
+  refreshAliasCount(db, toId);
+  return inserted.changes;
+}
+
+export function refreshAliasCount(db: Db, entityId: string): number {
+  const row = db
+    .prepare(
+      `UPDATE entity
+          SET alias_count = (SELECT COUNT(*) FROM alias WHERE entity_id = ?)
+        WHERE id = ?
+        RETURNING alias_count`,
+    )
+    .get(entityId, entityId) as { alias_count: number } | undefined;
+  return row?.alias_count ?? 0;
+}
+
+export interface EntityListRow {
+  entity_id: string;
+  canonical_name: string;
+  etype: EntityType;
+  fact_count: number;
+  alias_count: number;
+}
+
+/**
+ * 实体列表 + **归并后**事实数：沿 merged_into 把 loser 的事实算到根实体头上。
+ * 只改 canonical_key 而不改 frozen 的话（本实现如此），直接按 frozen id COUNT
+ * 会把合并后的事实仍算给 loser；这里用递归 CTE 从根往下收。
+ */
+export function listEntitiesAggregated(db: Db, q: string, limit = 20): EntityListRow[] {
+  const pattern = `%${escapeLike(q)}%`;
+  return db
+    .prepare(
+      `WITH RECURSIVE roots(id, root) AS (
+         SELECT id, id FROM entity WHERE merged_into IS NULL
+         UNION ALL
+         SELECT e.id, r.root FROM entity e JOIN roots r ON e.merged_into = r.id
+       ),
+       counts AS (
+         SELECT ch.root AS root, COUNT(f.id) AS n
+           FROM roots ch
+           LEFT JOIN fact f
+             ON json_extract(f.attrs, '$.frozen.subject.entity_id') = ch.id
+            AND f.epistemic_status = 'active'
+            AND f.valid_to IS NULL
+          GROUP BY ch.root
+       )
+       SELECT e.id AS entity_id, e.canonical_name, e.etype,
+              COALESCE(c.n, 0) AS fact_count,
+              (SELECT COUNT(*) FROM alias a WHERE a.entity_id = e.id) AS alias_count
+         FROM entity e
+         LEFT JOIN counts c ON c.root = e.id
+        WHERE e.merged_into IS NULL
+          AND (e.canonical_name LIKE ? ESCAPE '\\'
+               OR EXISTS (SELECT 1 FROM alias a
+                           WHERE a.entity_id = e.id AND a.alias LIKE ? ESCAPE '\\'))
+        ORDER BY fact_count DESC, e.id ASC
+        LIMIT ?`,
+    )
+    .all(pattern, pattern, limit) as EntityListRow[];
+}
