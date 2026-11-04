@@ -1,13 +1,20 @@
 /**
- * `/ui/inbox` 的 API 契约（P2-07）。
+ * `/ui/inbox` 的 API 契约（P2-07 / P2-13）。
  *
  * 与 `../api.ts` 同一套约定：token 走 `resolveToken()`、请求带 `X-Moshi-Token`、
  * 非 2xx 一律抛错（错误信封 `{error, message, detail}`，`message` 直接可展示）。
  *
  * 这里的 `InboxApiError` 多带 `status` 与 `code`：撤销要区分 410（窗口已过，提示后刷新）
  * 与 404（op 不存在），只靠 `message` 文本判断太脆。
+ *
+ * 两个批量动作共用一套接口（P2-13 起）：
+ * - `invalidate`：失效（清 valid_to）；
+ * - `prune`：剪枝（软删 epistemic_status='pruned'，行保留）。
  */
 import { resolveToken } from '../api.js';
+
+/** 批量动作：低置信 tab 用 invalidate，淘汰候选 tab 用 prune */
+export type BatchAction = 'invalidate' | 'prune';
 
 export interface ResolveRow {
   alias: string;
@@ -30,11 +37,22 @@ export interface PruneRow {
   last_access_at: string | null;
 }
 
+/** prune 队列随包下发的判据（只增字段，UI 不用再抄 0.15 / 60） */
+export interface PruneThresholds {
+  strength: number;
+  idle_days: number;
+}
+
+export interface PruneQueueResult {
+  items: PruneRow[];
+  thresholds: PruneThresholds;
+}
+
 export interface PreviewResult {
   facts: number;
   edges: number;
   topics: number;
-  /** 连带失效：依赖这批事实、但自己不在这批里的活跃事实数（必须展示，否则等于盲签） */
+  /** 连带失效：依赖这批事实、但自己不在这批里的活跃事实数（invalidate 必须展示，否则等于盲签） */
   invalidated_by_cascade: number;
   preview_sample: { id: string; content: string }[];
 }
@@ -97,17 +115,16 @@ export async function fetchLowConfQueue(limit = 50): Promise<LowConfRow[]> {
   return body.items;
 }
 
-export async function fetchPruneQueue(limit = 50): Promise<PruneRow[]> {
-  const body = await request<{ items: PruneRow[] }>(`/api/queues/prune?limit=${String(limit)}`);
-  return body.items;
+export async function fetchPruneQueue(limit = 50): Promise<PruneQueueResult> {
+  return request<PruneQueueResult>(`/api/queues/prune?limit=${String(limit)}`);
 }
 
-export function previewInvalidate(ids: string[]): Promise<PreviewResult> {
-  return post<PreviewResult>('/api/facts/batch/preview', { action: 'invalidate', ids });
+export function previewBatch(action: BatchAction, ids: string[]): Promise<PreviewResult> {
+  return post<PreviewResult>('/api/facts/batch/preview', { action, ids });
 }
 
-export function submitInvalidate(ids: string[]): Promise<BatchResult> {
-  return post<BatchResult>('/api/facts/batch', { action: 'invalidate', ids });
+export function submitBatch(action: BatchAction, ids: string[]): Promise<BatchResult> {
+  return post<BatchResult>('/api/facts/batch', { action, ids });
 }
 
 export function undoBatch(opId: string): Promise<UndoResult> {

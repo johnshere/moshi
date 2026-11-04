@@ -110,7 +110,15 @@ export async function queueRoutes(app: FastifyInstance, opts: QueueRoutesOpts): 
         strength: r.strength,
         last_access_at: r.lastAccessAt,
       }));
-      return { items };
+      // 只增字段（P2-13）：把"什么算淘汰候选"的判据随队列一起下发，
+      // UI 不必再把 0.15 / 60 天抄一份；既有 `items[].*` 字段不变。
+      return {
+        items,
+        thresholds: {
+          strength: inboxRepo.PRUNE_STRENGTH_THRESHOLD,
+          idle_days: inboxRepo.PRUNE_IDLE_DAYS,
+        },
+      };
     });
   });
 }

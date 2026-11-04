@@ -138,6 +138,23 @@ describe('listPruneQueue（淘汰候选）', () => {
     expect(rows[0]?.strength).toBe(0.05);
     expect(rows[0]?.lastAccessAt).toBeNull();
   });
+
+  it('P2-13：60 天未访问口径——最近访问过的不进，61 天前/从未访问的进', () => {
+    const db = freshDb();
+    const sqlDate = (modifier: string): string =>
+      (db.prepare(`SELECT date('now', ?) AS d`).get(modifier) as { d: string }).d;
+
+    const recent = insertFact(db, { content: 'recent', strength: 0.01 });
+    db.prepare('UPDATE fact SET last_access_at = ? WHERE id = ?').run(nowIso(), recent);
+    const boundary = insertFact(db, { content: 'boundary', strength: 0.02 });
+    db.prepare('UPDATE fact SET last_access_at = ? WHERE id = ?').run(sqlDate('-60 day'), boundary);
+    const old = insertFact(db, { content: 'old', strength: 0.03 });
+    db.prepare('UPDATE fact SET last_access_at = ? WHERE id = ?').run(sqlDate('-61 day'), old);
+    const never = insertFact(db, { content: 'never', strength: 0.04 });
+
+    const rows = inboxRepo.listPruneQueue(db, { limit: 50 });
+    expect(rows.map((r) => r.id)).toEqual([old, never]); // strength 升序
+  });
 });
 
 // ── 2. 影响面预览 ──

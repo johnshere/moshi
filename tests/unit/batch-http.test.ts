@@ -327,3 +327,99 @@ describe('POST /api/facts/batch 与 undo', () => {
     expect(res.statusCode).toBe(404);
   });
 });
+
+// ── P2-13：淘汰候选剪枝（软删）全链路 ──
+
+describe('POST /api/facts/batch（action=prune，P2-13）', () => {
+  it('prune 队列附带 thresholds（判据随包下发，只增字段）', async () => {
+    const app = await makeApp(freshDb());
+    const res = await app.inject({ method: 'GET', url: '/api/queues/prune', headers: auth });
+    expect(res.statusCode).toBe(200);
+    expect(body(res).thresholds).toEqual({ strength: 0.15, idle_days: 60 });
+    expect(body(res).items).toEqual([]);
+  });
+
+  it('preview prune：四计数同形、cascade 恒 0，且不写库', async () => {
+    const db = freshDb();
+    const f1 = insertFact(db, { content: 'f1', importance: 0.9, strength: 0.05 });
+    const f2 = insertFact(db, { content: 'f2', strength: 0.06 });
+    const f3 = insertFact(db, { content: 'f3' });
+    db.prepare('UPDATE fact SET community_id = 5 WHERE id IN (?, ?)').run(f1, f2);
+    insertEdge(db, f1, f3);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch/preview', { action: 'prune', ids: [f1, f2] });
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({
+      facts: 2,
+      edges: 1, // f1→f3 的 dst 端命中
+      topics: 1,
+      invalidated_by_cascade: 0, // 剪枝不连锁
+      preview_sample: [
+        { id: f1, content: 'f1' },
+        { id: f2, content: 'f2' },
+      ],
+    });
+    expect(factRow(db, f1)).toMatchObject({ valid_to: null, epistemic_status: 'active' });
+  });
+
+  it('执行 prune：软删（只改 epistemic_status，valid_to/strength 原样），撤销还原原状态', async () => {
+    const db = freshDb();
+    const a = insertFact(db, { content: 'a', strength: 0.05 });
+    const b = insertFact(db, { content: 'b', strength: 0.09, epistemicStatus: 'disputed' });
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch', { action: 'prune', ids: [a, b] });
+    expect(res.statusCode).toBe(200);
+    const out = body(res);
+    expect(String(out.op_id)).toMatch(/^b_[0-9a-z]{26}$/);
+    expect(out.facts).toBe(2);
+    expect(out.invalidated_by_cascade).toBe(0);
+    for (const id of [a, b]) {
+      expect(factRow(db, id).epistemic_status).toBe('pruned');
+      expect(factRow(db, id).valid_to).toBeNull(); // 软删：有效区间不变
+    }
+    // 队列里不再出现（读侧只认 active/disputed）
+    const queue = await app.inject({ method: 'GET', url: '/api/queues/prune', headers: auth });
+    expect(body(queue).items).toEqual([]);
+
+    const undo = await post(app, '/api/facts/batch/undo', { op_id: String(out.op_id) });
+    expect(undo.statusCode).toBe(200);
+    expect(body(undo)).toEqual({ restored: 2 });
+    expect(factRow(db, a)).toMatchObject({ epistemic_status: 'active', valid_to: null });
+    expect(factRow(db, b)).toMatchObject({ epistemic_status: 'disputed', valid_to: null });
+
+    const again = await post(app, '/api/facts/batch/undo', { op_id: String(out.op_id) });
+    expect(again.statusCode).toBe(404);
+    expect(factRow(db, a).epistemic_status).toBe('active'); // 二次撤销绝不重复还原
+  });
+
+  it('prune 不跑派生点对账（派生点不在 30s 内被永久收口）', async () => {
+    const db = freshDb();
+    const src = insertFact(db, {
+      ftype: 'episodic',
+      validAt: new Date(Date.now() - 1000).toISOString(),
+      strength: 0.05,
+    });
+    const point = insertDerivedPoint(db, [src]);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch', { action: 'prune', ids: [src] });
+    expect(res.statusCode).toBe(200);
+    const row = db
+      .prepare('SELECT valid_to, epistemic_status FROM fact WHERE id = ?')
+      .get(point) as { valid_to: string | null; epistemic_status: string };
+    expect(row.valid_to).toBeNull();
+    expect(row.epistemic_status).toBe('active');
+  });
+
+  it('prune 也整批拒绝未知 id（400 unknown_ids，一条都没动）', async () => {
+    const db = freshDb();
+    const a = insertFact(db, { content: 'a', strength: 0.05 });
+    const app = await makeApp(db);
+    const res = await post(app, '/api/facts/batch', { action: 'prune', ids: [a, 'f_missing'] });
+    expect(res.statusCode).toBe(400);
+    expect((body(res).detail as { reason: string }).reason).toBe('unknown_ids');
+    expect(factRow(db, a).epistemic_status).toBe('active');
+  });
+});
