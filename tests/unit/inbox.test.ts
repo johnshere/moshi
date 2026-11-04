@@ -78,7 +78,9 @@ describe('listResolveQueue（消解确认）', () => {
 
     const rows = inboxRepo.listResolveQueue(db, { limit: 50 });
     expect(rows.map((r) => r.alias)).toEqual(['pkg-a@24', 'pkg-a@23', 'pkg-a@22']);
-    expect(rows[0]).toEqual({
+    // P2-19-A：行 id 是 alias+entity 的不透明编码，供 decide 回传
+    expect(typeof rows[0]?.id).toBe('string');
+    expect(rows[0]).toMatchObject({
       alias: 'pkg-a@24',
       entityId: e,
       canonicalName: 'pkg-a',

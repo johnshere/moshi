@@ -1,5 +1,5 @@
 /**
- * `/ui/inbox` 的 API 契约（P2-07 / P2-13）。
+ * `/ui/inbox` 的 API 契约（P2-07 / P2-13 / P2-19-A）。
  *
  * 与 `../api.ts` 同一套约定：token 走 `resolveToken()`、请求带 `X-Moshi-Token`、
  * 非 2xx 一律抛错（错误信封 `{error, message, detail}`，`message` 直接可展示）。
@@ -7,16 +7,28 @@
  * 这里的 `InboxApiError` 多带 `status` 与 `code`：撤销要区分 410（窗口已过，提示后刷新）
  * 与 404（op 不存在），只靠 `message` 文本判断太脆。
  *
- * 两个批量动作共用一套接口（P2-13 起）：
+ * 三类动作共用撤销入口（`POST /api/facts/batch/undo` 或 `/api/facts/ops/:id/undo`）：
  * - `invalidate`：失效（清 valid_to）；
- * - `prune`：剪枝（软删 epistemic_status='pruned'，行保留）。
+ * - `prune`：剪枝（软删 epistemic_status='pruned'，行保留）；
+ * - `alias_merge`：并入（单条 decide；撤销把 alias 的 source/confidence 还原）。
  */
 import { resolveToken } from '../api.js';
 
 /** 批量动作：低置信 tab 用 invalidate，淘汰候选 tab 用 prune */
 export type BatchAction = 'invalidate' | 'prune';
 
+/** 撤销条的动作：批量两种 + 单条并入（P2-19-A） */
+export type UndoAction = BatchAction | 'alias_merge';
+
+/** 队列种类（单条决策可用 resolve / lowconf；prune 只有批量剪枝） */
+export type QueueKind = 'resolve' | 'lowconf';
+export type ResolveDecision = 'merge' | 'keep' | 'reject';
+export type LowConfDecision = 'promote' | 'invalidate';
+export type DecideAction = ResolveDecision | LowConfDecision;
+
 export interface ResolveRow {
+  /** 不透明行标识（alias + entity_id 编码），单条 decide 用它定位 */
+  id: string;
   alias: string;
   entity_id: string;
   canonical_name: string;
@@ -37,14 +49,19 @@ export interface PruneRow {
   last_access_at: string | null;
 }
 
+/** 队列一页：`next_cursor` 为 null 表示没有下一页（UI 暂只取首页，API 已支持翻页） */
+export interface QueuePage<T> {
+  items: T[];
+  next_cursor: string | null;
+}
+
 /** prune 队列随包下发的判据（只增字段，UI 不用再抄 0.15 / 60） */
 export interface PruneThresholds {
   strength: number;
   idle_days: number;
 }
 
-export interface PruneQueueResult {
-  items: PruneRow[];
+export interface PruneQueueResult extends QueuePage<PruneRow> {
   thresholds: PruneThresholds;
 }
 
@@ -65,6 +82,18 @@ export interface BatchResult extends Omit<PreviewResult, 'preview_sample'> {
 
 export interface UndoResult {
   restored: number;
+}
+
+/** 单条决策的响应：成功一定带 before/after（UI 可直接展示改了什么） */
+export interface DecideResult {
+  ok: true;
+  kind: QueueKind;
+  action: DecideAction;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  /** merge / invalidate 才有：30 秒撤销句柄 */
+  op_id?: string;
+  undo_deadline?: string;
 }
 
 export class InboxApiError extends Error {
@@ -105,18 +134,26 @@ function post<T>(url: string, payload: unknown): Promise<T> {
   });
 }
 
-export async function fetchResolveQueue(limit = 50): Promise<ResolveRow[]> {
-  const body = await request<{ items: ResolveRow[] }>(`/api/queues/resolve?limit=${String(limit)}`);
-  return body.items;
+function queueUrl(kind: 'resolve' | 'lowconf' | 'prune', limit: number, cursor?: string | null): string {
+  const base = `/api/queues/${kind}?limit=${String(limit)}`;
+  return cursor === undefined || cursor === null || cursor === '' ? base : `${base}&cursor=${cursor}`;
 }
 
-export async function fetchLowConfQueue(limit = 50): Promise<LowConfRow[]> {
-  const body = await request<{ items: LowConfRow[] }>(`/api/queues/lowconf?limit=${String(limit)}`);
-  return body.items;
+export async function fetchResolveQueue(limit = 50, cursor?: string | null): Promise<QueuePage<ResolveRow>> {
+  return request<QueuePage<ResolveRow>>(queueUrl('resolve', limit, cursor));
 }
 
-export async function fetchPruneQueue(limit = 50): Promise<PruneQueueResult> {
-  return request<PruneQueueResult>(`/api/queues/prune?limit=${String(limit)}`);
+export async function fetchLowConfQueue(limit = 50, cursor?: string | null): Promise<QueuePage<LowConfRow>> {
+  return request<QueuePage<LowConfRow>>(queueUrl('lowconf', limit, cursor));
+}
+
+export async function fetchPruneQueue(limit = 50, cursor?: string | null): Promise<PruneQueueResult> {
+  return request<PruneQueueResult>(queueUrl('prune', limit, cursor));
+}
+
+/** 单条决策：`kind` 与 `action` 的组合由服务端再校验一次（这里只做类型收窄） */
+export function decideQueue(kind: QueueKind, id: string, action: DecideAction): Promise<DecideResult> {
+  return post<DecideResult>(`/api/queues/${kind}/decide`, { id, action });
 }
 
 export function previewBatch(action: BatchAction, ids: string[]): Promise<PreviewResult> {

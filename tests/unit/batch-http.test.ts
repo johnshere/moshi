@@ -97,9 +97,23 @@ describe('GET /api/queues/*', () => {
     const app = await makeApp(db);
     const res = await app.inject({ method: 'GET', url: '/api/queues/resolve', headers: auth });
     expect(res.statusCode).toBe(200);
-    expect(body(res).items).toEqual([
-      { alias: 'pkg-q@22', entity_id: e, canonical_name: 'pkg-q', confidence: 0.77 },
-    ]);
+    const items = body(res).items as {
+      id: string;
+      alias: string;
+      entity_id: string;
+      canonical_name: string;
+      confidence: number;
+    }[];
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      alias: 'pkg-q@22',
+      entity_id: e,
+      canonical_name: 'pkg-q',
+      confidence: 0.77,
+    });
+    // P2-19-A：队列行附带不透明 id，供单条决策（decide）回传
+    expect(typeof items[0]?.id).toBe('string');
+    expect(items[0]?.id).not.toBe('');
   });
 
   it('lowconf 返回 id/content/confidence/importance', async () => {
@@ -178,9 +192,9 @@ describe('POST /api/facts/batch/preview', () => {
     expect(factRow(db, f1).valid_to).toBeNull();
   });
 
-  it('action 非 invalidate → 400 E_INPUT unsupported_action', async () => {
+  it('action 不在白名单 → 400 E_INPUT unsupported_action', async () => {
     const app = await makeApp(freshDb());
-    const res = await post(app, '/api/facts/batch/preview', { action: 'archive', ids: ['f_x'] });
+    const res = await post(app, '/api/facts/batch/preview', { action: 'explode', ids: ['f_x'] });
     expect(res.statusCode).toBe(400);
     expect((body(res).detail as { reason: string }).reason).toBe('unsupported_action');
   });
@@ -421,5 +435,95 @@ describe('POST /api/facts/batch（action=prune，P2-13）', () => {
     expect(res.statusCode).toBe(400);
     expect((body(res).detail as { reason: string }).reason).toBe('unknown_ids');
     expect(factRow(db, a).epistemic_status).toBe('active');
+  });
+});
+
+// ── P2-19-A：批量归档（archived 软删，不删行不删边）全链路 ──
+
+describe('POST /api/facts/batch（action=archive，P2-19-A）', () => {
+  it('preview archive：四计数同形、cascade 恒 0，且不写库', async () => {
+    const db = freshDb();
+    const f1 = insertFact(db, { content: 'f1', importance: 0.9 });
+    const f2 = insertFact(db, { content: 'f2' });
+    const f3 = insertFact(db, { content: 'f3' });
+    db.prepare('UPDATE fact SET community_id = 5 WHERE id = ?').run(f1);
+    insertEdge(db, f1, f3);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch/preview', { action: 'archive', ids: [f1, f2] });
+    expect(res.statusCode).toBe(200);
+    expect(body(res)).toEqual({
+      facts: 2,
+      edges: 1, // f1→f3 的 src 端命中
+      topics: 1,
+      invalidated_by_cascade: 0, // 归档不连锁
+      preview_sample: [
+        { id: f1, content: 'f1' },
+        { id: f2, content: 'f2' },
+      ],
+    });
+    expect(factRow(db, f1)).toMatchObject({ valid_to: null, epistemic_status: 'active' });
+  });
+
+  it('执行 archive：置 archived、valid_to 与 strength 原样、边不动；撤销还原原状态', async () => {
+    const db = freshDb();
+    const a = insertFact(db, { content: 'a', strength: 0.05 });
+    const b = insertFact(db, { content: 'b', epistemicStatus: 'disputed' });
+    const edgeId = insertEdge(db, a, b);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch', { action: 'archive', ids: [a, b] });
+    expect(res.statusCode).toBe(200);
+    const out = body(res);
+    expect(String(out.op_id)).toMatch(/^b_[0-9a-z]{26}$/);
+    expect(out.facts).toBe(2);
+    expect(out.invalidated_by_cascade).toBe(0);
+    for (const id of [a, b]) {
+      expect(factRow(db, id)).toMatchObject({ valid_to: null, epistemic_status: 'archived' });
+    }
+    const strength = db.prepare('SELECT strength FROM fact WHERE id = ?').get(a) as { strength: number };
+    expect(strength.strength).toBeCloseTo(0.05, 5);
+    const edge = db.prepare('SELECT valid_to FROM edge WHERE id = ?').get(edgeId) as {
+      valid_to: string | null;
+    };
+    expect(edge.valid_to).toBeNull();
+
+    const undo = await post(app, '/api/facts/batch/undo', { op_id: String(out.op_id) });
+    expect(undo.statusCode).toBe(200);
+    expect(body(undo)).toEqual({ restored: 2 });
+    expect(factRow(db, a)).toMatchObject({ epistemic_status: 'active', valid_to: null });
+    expect(factRow(db, b)).toMatchObject({ epistemic_status: 'disputed', valid_to: null });
+  });
+
+  it('archive 不跑派生点对账（派生点仍 active）', async () => {
+    const db = freshDb();
+    const src = insertFact(db, {
+      ftype: 'episodic',
+      validAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const point = insertDerivedPoint(db, [src]);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch', { action: 'archive', ids: [src] });
+    expect(res.statusCode).toBe(200);
+    const row = db
+      .prepare('SELECT valid_to, epistemic_status FROM fact WHERE id = ?')
+      .get(point) as { valid_to: string | null; epistemic_status: string };
+    expect(row.valid_to).toBeNull();
+    expect(row.epistemic_status).toBe('active');
+  });
+
+  it('archive 也整批拒绝未知 id；二次撤销 404', async () => {
+    const db = freshDb();
+    const a = insertFact(db, { content: 'a' });
+    const app = await makeApp(db);
+    const bad = await post(app, '/api/facts/batch', { action: 'archive', ids: [a, 'f_missing'] });
+    expect(bad.statusCode).toBe(400);
+    expect((body(bad).detail as { reason: string }).reason).toBe('unknown_ids');
+    expect(factRow(db, a).epistemic_status).toBe('active');
+
+    const opId = String(body(await post(app, '/api/facts/batch', { action: 'archive', ids: [a] })).op_id);
+    expect((await post(app, '/api/facts/batch/undo', { op_id: opId })).statusCode).toBe(200);
+    expect((await post(app, '/api/facts/batch/undo', { op_id: opId })).statusCode).toBe(404);
   });
 });

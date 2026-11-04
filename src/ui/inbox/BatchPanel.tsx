@@ -9,12 +9,14 @@
  *    不能折进总数里；prune 不连锁（cascade 恒 0），所以不显示那一行；
  * ② 30 秒可撤销：确认后原地变成撤销条 + 倒计时，过期由页面处理（这里只显示剩余秒数）。
  *
- * P2-13 起同一面板支持两种动作（文案与撤销语义都不同）：
+ * P2-13 起同一面板支持两种批量动作（文案与撤销语义都不同）：
  * - `invalidate`：失效（清 valid_to，撤销 = 清回 valid_to）；
  * - `prune`：剪枝（软删 epistemic_status='pruned'，撤销 = 还原 epistemic_status）。
+ * P2-19-A 起撤销条还可能是单条 `alias_merge`（resolve 队列「并入」）：
+ * 它不是批量动作，只出现在撤销条文案里（撤销 = 还原 alias 的 source/confidence）。
  */
 import type { CSSProperties } from 'react';
-import type { BatchAction, PreviewResult } from './api.js';
+import type { BatchAction, PreviewResult, UndoAction } from './api.js';
 
 export interface BatchPanelProps {
   /** 当前选择对应的批量动作：由页面按选中集判定（全是淘汰候选 → prune，否则 invalidate） */
@@ -25,8 +27,8 @@ export interface BatchPanelProps {
   undoDeadlineMs: number | null;
   /** 距截止还剩多少毫秒（由页面每 250ms 重算，这里只显示） */
   remainingMs: number;
-  /** 待撤销 op 的动作：决定撤销条文案（不能拿当前 tab 猜） */
-  undoAction: BatchAction | null;
+  /** 待撤销 op 的动作：决定撤销条文案（不能拿当前 tab 猜；可能是单条并入） */
+  undoAction: UndoAction | null;
   busy: boolean;
   onPreview: () => void;
   onConfirm: () => void;
@@ -66,7 +68,7 @@ const warnStyle: CSSProperties = { color: '#f59e0b' };
 
 /** 动作 → 文案。集中一处，避免"剪枝按钮写着失效"这类错配 */
 const COPY: Record<
-  BatchAction,
+  UndoAction,
   { done: string; confirm: string; undoHint: string; previewVerb: string }
 > = {
   invalidate: {
@@ -80,6 +82,12 @@ const COPY: Record<
     confirm: '确认剪枝',
     undoHint: '超时后本次剪枝不可再撤销（撤销 = 还原 epistemic_status）',
     previewVerb: '剪枝',
+  },
+  alias_merge: {
+    done: '单条并入已执行',
+    confirm: '确认并入',
+    undoHint: '超时后本次并入不可再撤销（撤销 = 还原 alias 的 source / confidence）',
+    previewVerb: '并入',
   },
 };
 

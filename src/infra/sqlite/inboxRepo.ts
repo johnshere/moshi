@@ -40,40 +40,94 @@ export const PRUNE_IDLE_DAYS = 60;
 
 /** `valid_to IS NULL` 的活跃口径：三队列与影响面共用，避免各处 `valid_to IS NOT NULL` 写反 */
 const ACTIVE = "epistemic_status IN ('active','disputed')";
+/** 与 SQL 里的 ACTIVE 同口径的 TS 版（单条裁决前的前置校验用） */
+const ACTIVE_STATUS: ReadonlySet<string> = new Set(['active', 'disputed']);
 
-// ── 1. 三个队列（只读） ──
+// ── 1. 三个队列（只读，keyset 游标分页） ──
+
+/**
+ * 队列游标（P2-19-A）：**keyset 分页**的锚点，三种队列各一组稳定排序键。
+ * 不用 OFFSET 的原因：队列里的事实会被其它动作改状态，OFFSET 翻页会漏行/重行。
+ */
+export interface ResolveCursor {
+  confidence: number;
+  alias: string;
+  entityId: string;
+}
+
+export interface LowConfCursor {
+  importance: number;
+  id: string;
+}
+
+export interface PruneCursor {
+  strength: number;
+  id: string;
+}
 
 export interface ResolveQueueRow {
+  /** 不透明行标识（alias + entity_id 编码）：`POST /api/queues/resolve/decide` 用它定位行 */
+  id: string;
   alias: string;
   entityId: string;
   canonicalName: string;
   confidence: number;
 }
 
+/** alias 表的 PK 是 (alias, entity_id)，没有单列 id；给 REST/UI 一个不透明行标识 */
+export function resolveRowId(alias: string, entityId: string): string {
+  return Buffer.from(JSON.stringify([alias, entityId]), 'utf8').toString('base64url');
+}
+
+export function parseResolveRowId(id: string): { alias: string; entityId: string } | null {
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(id, 'base64url').toString('utf8'));
+    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
+    const [alias, entityId] = parsed as unknown[];
+    if (typeof alias !== 'string' || typeof entityId !== 'string') return null;
+    if (alias === '' || entityId === '') return null;
+    return { alias, entityId };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * 消解确认：`alias.source = 'vector'` 且相似度落在 0.60–0.92 的候选。
  * 区间是**闭区间**（SQL 用 BETWEEN，与详设原句一致）：0.60 与 0.92 本身都要进队列。
+ * 排序 `confidence DESC, alias ASC, entity_id ASC`——entity_id 兜底防止同别名多实体时分页抖动。
  */
 export function listResolveQueue(
   db: Db,
-  opts: { limit: number; minSim?: number; maxSim?: number },
+  opts: { limit: number; minSim?: number; maxSim?: number; cursor?: ResolveCursor },
 ): ResolveQueueRow[] {
   const minSim = opts.minSim ?? RESOLVE_MIN_SIM;
   const maxSim = opts.maxSim ?? RESOLVE_MAX_SIM;
+  const cursor = opts.cursor;
+  const keyset =
+    cursor === undefined
+      ? ''
+      : `AND (a.confidence < ? OR (a.confidence = ? AND (a.alias > ? OR (a.alias = ? AND a.entity_id > ?))))`;
+  const params: unknown[] = [minSim, maxSim];
+  if (cursor !== undefined) {
+    params.push(cursor.confidence, cursor.confidence, cursor.alias, cursor.alias, cursor.entityId);
+  }
+  params.push(opts.limit);
   const rows = db
     .prepare(
       `SELECT a.alias, a.entity_id, e.canonical_name, a.confidence
          FROM alias a JOIN entity e ON e.id = a.entity_id
-        WHERE a.source = 'vector' AND a.confidence BETWEEN ? AND ?
-        ORDER BY a.confidence DESC LIMIT ?`,
+        WHERE a.source = 'vector' AND a.confidence BETWEEN ? AND ? ${keyset}
+        ORDER BY a.confidence DESC, a.alias ASC, a.entity_id ASC LIMIT ?`,
     )
-    .all(minSim, maxSim, opts.limit) as {
+    .all(...params) as {
     alias: string;
     entity_id: string;
     canonical_name: string;
     confidence: number;
   }[];
   return rows.map((r) => ({
+    id: resolveRowId(r.alias, r.entity_id),
     alias: r.alias,
     entityId: r.entity_id,
     canonicalName: r.canonical_name,
@@ -89,14 +143,23 @@ export interface LowConfQueueRow {
 }
 
 /** 低置信裁决：约束在 `epistemic_status` 里（archived / invalidated / pruned 不该再冒出来） */
-export function listLowConfQueue(db: Db, opts: { limit: number }): LowConfQueueRow[] {
+export function listLowConfQueue(
+  db: Db,
+  opts: { limit: number; cursor?: LowConfCursor },
+): LowConfQueueRow[] {
+  const cursor = opts.cursor;
+  const keyset =
+    cursor === undefined ? '' : `AND (importance < ? OR (importance = ? AND id > ?))`;
+  const params: unknown[] = [LOW_CONF_THRESHOLD];
+  if (cursor !== undefined) params.push(cursor.importance, cursor.importance, cursor.id);
+  params.push(opts.limit);
   const rows = db
     .prepare(
       `SELECT id, content, confidence, importance FROM fact
-        WHERE ${ACTIVE} AND confidence < ?
-        ORDER BY importance DESC LIMIT ?`,
+        WHERE ${ACTIVE} AND confidence < ? ${keyset}
+        ORDER BY importance DESC, id ASC LIMIT ?`,
     )
-    .all(LOW_CONF_THRESHOLD, opts.limit) as {
+    .all(...params) as {
     id: string;
     content: string;
     confidence: number;
@@ -116,15 +179,23 @@ export interface PruneQueueRow {
  * 淘汰候选（详设 §8.3.4）：strength 低 **且** 60 天没被访问过（从未访问也算）。
  * 只出候选清单，绝不在这里删/改任何行——剪枝必须走用户显式动作。
  */
-export function listPruneQueue(db: Db, opts: { limit: number }): PruneQueueRow[] {
+export function listPruneQueue(
+  db: Db,
+  opts: { limit: number; cursor?: PruneCursor },
+): PruneQueueRow[] {
+  const cursor = opts.cursor;
+  const keyset = cursor === undefined ? '' : `AND (strength > ? OR (strength = ? AND id > ?))`;
+  const params: unknown[] = [PRUNE_STRENGTH_THRESHOLD, `-${String(PRUNE_IDLE_DAYS)} day`];
+  if (cursor !== undefined) params.push(cursor.strength, cursor.strength, cursor.id);
+  params.push(opts.limit);
   const rows = db
     .prepare(
       `SELECT id, content, strength, last_access_at FROM fact
         WHERE ${ACTIVE} AND valid_to IS NULL AND strength < ?
-          AND (last_access_at IS NULL OR last_access_at < date('now', ?))
-        ORDER BY strength ASC LIMIT ?`,
+          AND (last_access_at IS NULL OR last_access_at < date('now', ?)) ${keyset}
+        ORDER BY strength ASC, id ASC LIMIT ?`,
     )
-    .all(PRUNE_STRENGTH_THRESHOLD, `-${String(PRUNE_IDLE_DAYS)} day`, opts.limit) as {
+    .all(...params) as {
     id: string;
     content: string;
     strength: number;
@@ -486,4 +557,376 @@ function assertIds(ids: readonly string[]): void {
       reason: 'ids_invalid',
     });
   }
+}
+
+// ── 6. 批量归档（batch action=archive，P2-19-A） ──
+
+/** 归档快照：归档只改 epistemic_status，撤销时原样写回（不碰 valid_to / edge） */
+export interface ArchiveSnapshot {
+  id: string;
+  /** 归档前的认知状态（active / disputed） */
+  epistemicStatus: Epistemic;
+  /** 本批写进去的 updated_at：撤销 UPDATE 用它做 CAS */
+  archivedAt: string;
+}
+
+/**
+ * 归档影响面预览：口径与剪枝一致（只数真的会被改的行）。
+ * 归档同样**不连锁**：不跑 `reconcileDerivedForFacts`，依赖方在读侧 adjudicate 收口。
+ */
+export function previewArchive(db: Db, ids: readonly string[]): InvalidatePreview {
+  assertIds(ids);
+  const ph = placeholders(ids.length);
+  const archivable = `id IN (${ph}) AND valid_to IS NULL AND ${ACTIVE}`;
+  const count = (sql: string, params: readonly unknown[]): number => {
+    const row = db.prepare(sql).get(...params) as { n: number };
+    return row.n;
+  };
+  const facts = count(`SELECT COUNT(*) AS n FROM fact WHERE ${archivable}`, ids);
+  const edges = count(
+    `SELECT COUNT(*) AS n FROM edge
+      WHERE valid_to IS NULL
+        AND (src IN (SELECT id FROM fact WHERE ${archivable})
+             OR dst IN (SELECT id FROM fact WHERE ${archivable}))`,
+    [...ids, ...ids],
+  );
+  const topics = count(
+    `SELECT COUNT(DISTINCT community_id) AS n FROM fact
+      WHERE ${archivable} AND community_id IS NOT NULL`,
+    ids,
+  );
+  const sample = db
+    .prepare(
+      `SELECT id, content FROM fact WHERE ${archivable}
+        ORDER BY importance DESC, id ASC LIMIT 5`,
+    )
+    .all(...ids) as { id: string; content: string }[];
+  return {
+    facts,
+    edges,
+    topics,
+    invalidatedByCascade: 0,
+    previewSample: sample.map((r) => ({ id: r.id, content: r.content })),
+  };
+}
+
+/**
+ * 批量归档（单事务）：`epistemic_status='archived'`，**不删行、不删边、不动 valid_to**。
+ * 已失效（valid_to 非空）或已归档/剪枝的行跳过，不报错——UI 队列可能已经过期。
+ */
+export function archiveMany(
+  db: Db,
+  ids: readonly string[],
+  opts: { opId: string },
+): ArchiveSnapshot[] {
+  assertIds(ids);
+  const ph = placeholders(ids.length);
+  const rows = db
+    .prepare(
+      `SELECT id, epistemic_status FROM fact
+        WHERE id IN (${ph}) AND valid_to IS NULL AND ${ACTIVE}
+        ORDER BY id`,
+    )
+    .all(...ids) as { id: string; epistemic_status: string }[];
+  if (rows.length === 0) return [];
+
+  const archivedAt = nowIso();
+  return withTransaction(db, () => {
+    const stmt = db.prepare(
+      `UPDATE fact SET epistemic_status = 'archived', updated_at = ?
+        WHERE id = ? AND valid_to IS NULL AND epistemic_status IN ('active','disputed')`,
+    );
+    const snapshots: ArchiveSnapshot[] = [];
+    for (const row of rows) {
+      const info = stmt.run(archivedAt, row.id);
+      if (info.changes === 0) continue;
+      appendAudit(db, {
+        tbl: 'fact',
+        rowId: row.id,
+        field: 'epistemic_status',
+        before: { valid_to: null, epistemic_status: row.epistemic_status },
+        after: { valid_to: null, epistemic_status: 'archived' },
+        source: 'ui_batch_archive',
+        reason: opts.opId,
+      });
+      snapshots.push({
+        id: row.id,
+        epistemicStatus: row.epistemic_status as Epistemic,
+        archivedAt,
+      });
+    }
+    return snapshots;
+  });
+}
+
+/** 撤销批量归档：CAS `epistemic_status='archived' AND updated_at=archivedAt`，防止误复活 */
+export function restoreArchived(
+  db: Db,
+  snapshots: readonly ArchiveSnapshot[],
+  opts: { opId: string },
+): number {
+  if (snapshots.length === 0) return 0;
+  const ts = nowIso();
+  return withTransaction(db, () => {
+    const stmt = db.prepare(
+      `UPDATE fact SET epistemic_status = ?, updated_at = ?
+        WHERE id = ? AND epistemic_status = 'archived' AND updated_at = ?`,
+    );
+    let restored = 0;
+    for (const snap of snapshots) {
+      const info = stmt.run(snap.epistemicStatus, ts, snap.id, snap.archivedAt);
+      if (info.changes === 0) continue;
+      appendAudit(db, {
+        tbl: 'fact',
+        rowId: snap.id,
+        field: 'epistemic_status',
+        before: { valid_to: null, epistemic_status: 'archived' },
+        after: { valid_to: null, epistemic_status: snap.epistemicStatus },
+        source: 'ui_batch_undo',
+        reason: opts.opId,
+      });
+      restored++;
+    }
+    return restored;
+  });
+}
+
+// ── 7. 单条裁决（queues decide，P2-19-A） ──
+
+/** alias 行快照：撤销 `merge` 时把 source / confidence 原样写回（行本身不删） */
+export interface AliasSnapshot {
+  alias: string;
+  entityId: string;
+  source: 'rule' | 'vector' | 'human';
+  confidence: number;
+}
+
+export interface AliasRow {
+  alias: string;
+  entityId: string;
+  source: 'rule' | 'vector' | 'human';
+  confidence: number;
+}
+
+export function getAliasRow(db: Db, alias: string, entityId: string): AliasRow | null {
+  const row = db
+    .prepare('SELECT alias, entity_id, source, confidence FROM alias WHERE alias = ? AND entity_id = ?')
+    .get(alias, entityId) as
+    | { alias: string; entity_id: string; source: 'rule' | 'vector' | 'human'; confidence: number }
+    | undefined;
+  if (row === undefined) return null;
+  return { alias: row.alias, entityId: row.entity_id, source: row.source, confidence: row.confidence };
+}
+
+function auditAlias(
+  db: Db,
+  row: AliasRow,
+  after: { source: 'human'; confidence: number },
+  source: string,
+  reason: string | null,
+): void {
+  appendAudit(db, {
+    tbl: 'entity',
+    rowId: row.entityId,
+    field: 'alias',
+    before: { alias: row.alias, entity_id: row.entityId, source: row.source, confidence: row.confidence },
+    after: { alias: row.alias, entity_id: row.entityId, ...after },
+    source,
+    reason,
+  });
+}
+
+export interface AliasDecisionResult {
+  before: { alias: string; entity_id: string; source: string; confidence: number };
+  after: { alias: string; entity_id: string; source: string; confidence: number };
+  /** merge 的撤销快照（其它动作没有） */
+  snapshots?: AliasSnapshot[];
+}
+
+const aliasBefore = (row: AliasRow): AliasDecisionResult['before'] => ({
+  alias: row.alias,
+  entity_id: row.entityId,
+  source: row.source,
+  confidence: row.confidence,
+});
+
+/**
+ * `merge`：确认 alias 指向该实体。目标行 `source='human', confidence=1.0`；
+ * 同一 alias 的其它 vector 候选行保留但收口为 `source='human', confidence=0`
+ * （不删行——alias 表是复合主键，删除会丢审计线索，也和"软删"纪律一致）。
+ * 返回快照供 30 秒撤销。
+ */
+export function decideAliasMerge(
+  db: Db,
+  alias: string,
+  entityId: string,
+  opts: { opId: string },
+): AliasDecisionResult {
+  const target = getAliasRow(db, alias, entityId);
+  if (target === null) {
+    throw new MoshiError('E_NOT_FOUND', `alias 行不存在：${alias} → ${entityId}`, {
+      reason: 'alias_not_found',
+    });
+  }
+  return withTransaction(db, () => {
+    const rows = db
+      .prepare('SELECT alias, entity_id, source, confidence FROM alias WHERE alias = ? ORDER BY entity_id')
+      .all(alias) as { alias: string; entity_id: string; source: 'rule' | 'vector' | 'human'; confidence: number }[];
+    const snapshots: AliasSnapshot[] = [];
+    const stmt = db.prepare('UPDATE alias SET source = ?, confidence = ? WHERE alias = ? AND entity_id = ?');
+    for (const row of rows) {
+      const isTarget = row.entity_id === entityId;
+      // 目标行一律收为 human/1.0；其它行只收口 vector 候选（rule 是确定性的，不动）
+      if (!isTarget && row.source !== 'vector') continue;
+      const after = isTarget ? 1.0 : 0;
+      const info = stmt.run('human', after, alias, row.entity_id);
+      if (info.changes === 0) continue;
+      const before: AliasRow = {
+        alias: row.alias,
+        entityId: row.entity_id,
+        source: row.source,
+        confidence: row.confidence,
+      };
+      auditAlias(db, before, { source: 'human', confidence: after }, 'ui_alias_merge', opts.opId);
+      snapshots.push({ alias: before.alias, entityId: before.entityId, source: before.source, confidence: before.confidence });
+    }
+    return {
+      before: aliasBefore(target),
+      after: { alias, entity_id: entityId, source: 'human', confidence: 1.0 },
+      snapshots,
+    };
+  });
+}
+
+/** `keep`：保留该 alias 映射；只把来源标成人工确认，置信度至少抬到 0.95 */
+export function decideAliasKeep(db: Db, alias: string, entityId: string): AliasDecisionResult {
+  const target = getAliasRow(db, alias, entityId);
+  if (target === null) {
+    throw new MoshiError('E_NOT_FOUND', `alias 行不存在：${alias} → ${entityId}`, {
+      reason: 'alias_not_found',
+    });
+  }
+  const confidence = Math.max(target.confidence, 0.95);
+  withTransaction(db, () => {
+    db.prepare('UPDATE alias SET source = ?, confidence = ? WHERE alias = ? AND entity_id = ?').run(
+      'human',
+      confidence,
+      alias,
+      entityId,
+    );
+    auditAlias(db, target, { source: 'human', confidence }, 'ui_alias_keep', null);
+  });
+  return { before: aliasBefore(target), after: { alias, entity_id: entityId, source: 'human', confidence } };
+}
+
+/** `reject`：拒绝该 alias 映射（保留行、置信度归 0、来源标人工，避免再被规则覆盖） */
+export function decideAliasReject(db: Db, alias: string, entityId: string): AliasDecisionResult {
+  const target = getAliasRow(db, alias, entityId);
+  if (target === null) {
+    throw new MoshiError('E_NOT_FOUND', `alias 行不存在：${alias} → ${entityId}`, {
+      reason: 'alias_not_found',
+    });
+  }
+  withTransaction(db, () => {
+    db.prepare('UPDATE alias SET source = ?, confidence = ? WHERE alias = ? AND entity_id = ?').run(
+      'human',
+      0,
+      alias,
+      entityId,
+    );
+    auditAlias(db, target, { source: 'human', confidence: 0 }, 'ui_alias_reject', null);
+  });
+  return { before: aliasBefore(target), after: { alias, entity_id: entityId, source: 'human', confidence: 0 } };
+}
+
+/** 撤销 `merge`：把快照里的 source / confidence 写回（alias 行不删不增） */
+export function restoreAliases(
+  db: Db,
+  snapshots: readonly AliasSnapshot[],
+  opts: { opId: string },
+): number {
+  if (snapshots.length === 0) return 0;
+  return withTransaction(db, () => {
+    const stmt = db.prepare('UPDATE alias SET source = ?, confidence = ? WHERE alias = ? AND entity_id = ?');
+    let restored = 0;
+    for (const snap of snapshots) {
+      const info = stmt.run(snap.source, snap.confidence, snap.alias, snap.entityId);
+      if (info.changes === 0) continue;
+      appendAudit(db, {
+        tbl: 'entity',
+        rowId: snap.entityId,
+        field: 'alias',
+        before: { alias: snap.alias, entity_id: snap.entityId, source: 'human' },
+        after: { alias: snap.alias, entity_id: snap.entityId, source: snap.source, confidence: snap.confidence },
+        source: 'ui_batch_undo',
+        reason: opts.opId,
+      });
+      restored++;
+    }
+    return restored;
+  });
+}
+
+/** 单条 lowconf 决策的 before/after（给 REST 返回，不进快照） */
+export interface LowConfDecisionResult {
+  before: { confidence: number; epistemic_status: string; valid_to: string | null };
+  after: { confidence: number; epistemic_status: string; valid_to: string | null };
+  /** invalidate 的撤销快照（promote 没有） */
+  snapshot?: InvalidateSnapshot;
+}
+
+function requireActiveFact(db: Db, id: string): {
+  id: string;
+  confidence: number;
+  epistemic_status: string;
+  valid_to: string | null;
+} {
+  const row = db
+    .prepare('SELECT id, confidence, epistemic_status, valid_to FROM fact WHERE id = ?')
+    .get(id) as
+    | { id: string; confidence: number; epistemic_status: string; valid_to: string | null }
+    | undefined;
+  if (row === undefined) {
+    throw new MoshiError('E_NOT_FOUND', `事实不存在：${id}`, { reason: 'fact_not_found' });
+  }
+  if (row.valid_to !== null || !ACTIVE_STATUS.has(row.epistemic_status)) {
+    throw new MoshiError('E_INPUT', `事实当前不可裁决（${row.epistemic_status}）：${id}`, {
+      reason: 'fact_not_active',
+    });
+  }
+  return row;
+}
+
+/** lowconf `promote`：confidence 抬到至少 0.6，来源标人工（setConfidence 自带审计） */
+export function decideLowConfPromote(db: Db, id: string): LowConfDecisionResult {
+  const row = requireActiveFact(db, id);
+  const confidence = Math.max(row.confidence, 0.6);
+  factRepo.setConfidence(db, id, {
+    value: confidence,
+    source: 'human',
+    reason: 'queue_decide:lowconf:promote',
+  });
+  return {
+    before: { confidence: row.confidence, epistemic_status: row.epistemic_status, valid_to: row.valid_to },
+    after: { confidence, epistemic_status: row.epistemic_status, valid_to: row.valid_to },
+  };
+}
+
+/** lowconf `invalidate`：软删（invalidated），返回撤销快照 */
+export function decideLowConfInvalidate(
+  db: Db,
+  id: string,
+  opts: { opId: string },
+): LowConfDecisionResult {
+  const row = requireActiveFact(db, id);
+  const snapshots = invalidateMany(db, [id], { opId: opts.opId });
+  const snapshot = snapshots[0];
+  if (snapshot === undefined) {
+    throw new MoshiError('E_IMMUTABLE', `事实已被其它路径失效：${id}`, { reason: 'fact_not_active' });
+  }
+  return {
+    before: { confidence: row.confidence, epistemic_status: row.epistemic_status, valid_to: row.valid_to },
+    after: { confidence: row.confidence, epistemic_status: 'invalidated', valid_to: snapshot.validTo },
+    snapshot,
+  };
 }

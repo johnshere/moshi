@@ -13,6 +13,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   InboxApiError,
+  decideQueue,
   fetchLowConfQueue,
   fetchPruneQueue,
   fetchResolveQueue,
@@ -20,19 +21,22 @@ import {
   submitBatch,
   undoBatch,
   type BatchAction,
+  type DecideAction,
   type LowConfRow,
   type PreviewResult,
   type PruneRow,
   type PruneThresholds,
+  type QueueKind,
   type ResolveRow,
+  type UndoAction,
 } from './api.js';
 import { BatchPanel } from './BatchPanel.js';
 
 type Tab = 'resolve' | 'lowconf' | 'prune';
 
 const TABS: readonly { key: Tab; label: string; hint: string }[] = [
-  { key: 'resolve', label: '消解确认', hint: 'alias 相似度 0.60–0.92 · 只读展示' },
-  { key: 'lowconf', label: '低置信', hint: 'confidence < 0.45 · 可勾选失效' },
+  { key: 'resolve', label: '消解确认', hint: 'alias 相似度 0.60–0.92 · 每条可并入/保留/拒绝' },
+  { key: 'lowconf', label: '低置信', hint: 'confidence < 0.45 · 每条可抬升/失效，也可勾选批量失效' },
   { key: 'prune', label: '淘汰候选', hint: 'strength < 0.15 且 60 天未访问 · 可勾选剪枝' },
 ];
 
@@ -45,7 +49,7 @@ interface ActiveOp {
   opId: string;
   deadlineMs: number;
   /** 这笔 op 的动作：撤销条文案与"当前选中集动作"无关，必须记在 op 上 */
-  action: BatchAction;
+  action: UndoAction;
 }
 
 const pageStyle = {
@@ -82,6 +86,58 @@ function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** 单条决策成功后的提示：说清"改了什么"，而不是只弹「成功」 */
+function decideNotice(
+  action: DecideAction,
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+): string {
+  const val = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v));
+  switch (action) {
+    case 'merge':
+      return `已并入：${val(before['alias'])} → ${val(before['entity_id'])}（可撤销）`;
+    case 'keep':
+      return '已保留 alias 映射（来源标为人工确认）';
+    case 'reject':
+      return '已拒绝 alias 映射（置信度归 0，行保留）';
+    case 'promote':
+      return `已抬升置信度 → ${val(after['confidence'])}`;
+    default:
+      return '已失效该事实（可撤销）';
+  }
+}
+
+/** 行内小按钮：只做单条决策，样式与页面其它按钮同一套 inline 语言（P2-19-B 再统一） */
+function RowButton(props: {
+  label: string;
+  tone?: 'plain' | 'primary' | 'danger';
+  disabled: boolean;
+  onClick: () => void;
+}): JSX.Element {
+  const color =
+    props.tone === 'danger' ? '#fca5a5' : props.tone === 'primary' ? '#93c5fd' : '#94a3b8';
+  return (
+    <button
+      type="button"
+      disabled={props.disabled}
+      onClick={props.onClick}
+      style={{
+        background: '#0b1220',
+        border: '1px solid #1f2937',
+        borderRadius: 3,
+        color,
+        padding: '1px 8px',
+        font: 'inherit',
+        fontSize: 11,
+        cursor: props.disabled ? 'default' : 'pointer',
+        opacity: props.disabled ? 0.5 : 1,
+      }}
+    >
+      {props.label}
+    </button>
+  );
+}
+
 function FactCheckbox(props: {
   id: string;
   checked: boolean;
@@ -112,6 +168,8 @@ export function InboxPage(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** 正在处理的单条行 id（行内按钮只锁自己那一行，不锁整页） */
+  const [rowBusy, setRowBusy] = useState<string | null>(null);
 
   const loadAll = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -122,8 +180,8 @@ export function InboxPage(): JSX.Element {
         fetchLowConfQueue(QUEUE_LIMIT),
         fetchPruneQueue(QUEUE_LIMIT),
       ]);
-      setResolveRows(resolve);
-      setLowConfRows(lowconf);
+      setResolveRows(resolve.items);
+      setLowConfRows(lowconf.items);
       setPruneRows(prune.items);
       setPruneThresholds(prune.thresholds);
     } catch (e) {
@@ -227,10 +285,35 @@ export function InboxPage(): JSX.Element {
     }
   }, [op, loadAll]);
 
+  /** 单条决策（P2-19-A）：成功后刷新队列；merge / invalidate 会拿到 op_id，复用撤销条 */
+  const onDecide = useCallback(
+    async (kind: QueueKind, id: string, decideAction: DecideAction): Promise<void> => {
+      setRowBusy(id);
+      setError(null);
+      try {
+        const result = await decideQueue(kind, id, decideAction);
+        if (result.op_id !== undefined && result.undo_deadline !== undefined) {
+          setOp({
+            opId: result.op_id,
+            deadlineMs: Date.parse(result.undo_deadline),
+            action: kind === 'resolve' ? 'alias_merge' : 'invalidate',
+          });
+        }
+        setNotice(decideNotice(decideAction, result.before, result.after));
+        await loadAll();
+      } catch (e) {
+        setError(`处理失败：${errorText(e)}`);
+      } finally {
+        setRowBusy(null);
+      }
+    },
+    [loadAll],
+  );
+
   const rows: JSX.Element[] =
     tab === 'resolve'
       ? resolveRows.map((row) => (
-          <div key={`${row.alias}|${row.entity_id}`} style={rowStyle}>
+          <div key={row.id} style={rowStyle}>
             <span style={{ ...muted, width: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {row.alias}
             </span>
@@ -239,6 +322,25 @@ export function InboxPage(): JSX.Element {
             <span style={{ ...muted, fontFamily: 'monospace' }}>{row.entity_id}</span>
             <span style={{ color: '#60a5fa', width: 60, textAlign: 'right' }}>
               {row.confidence.toFixed(3)}
+            </span>
+            <span style={{ display: 'inline-flex', gap: 6 }}>
+              <RowButton
+                label="并入"
+                tone="primary"
+                disabled={rowBusy !== null}
+                onClick={() => void onDecide('resolve', row.id, 'merge')}
+              />
+              <RowButton
+                label="保留"
+                disabled={rowBusy !== null}
+                onClick={() => void onDecide('resolve', row.id, 'keep')}
+              />
+              <RowButton
+                label="拒绝"
+                tone="danger"
+                disabled={rowBusy !== null}
+                onClick={() => void onDecide('resolve', row.id, 'reject')}
+              />
             </span>
           </div>
         ))
@@ -250,6 +352,20 @@ export function InboxPage(): JSX.Element {
               <span style={{ ...muted, width: 110, textAlign: 'right' }}>conf {row.confidence.toFixed(2)}</span>
               <span style={{ color: '#60a5fa', width: 110, textAlign: 'right' }}>
                 imp {row.importance.toFixed(2)}
+              </span>
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                <RowButton
+                  label="抬升"
+                  tone="primary"
+                  disabled={rowBusy !== null}
+                  onClick={() => void onDecide('lowconf', row.id, 'promote')}
+                />
+                <RowButton
+                  label="失效"
+                  tone="danger"
+                  disabled={rowBusy !== null}
+                  onClick={() => void onDecide('lowconf', row.id, 'invalidate')}
+                />
               </span>
             </div>
           ))
