@@ -15,8 +15,18 @@ import type { GraphEdge, GraphNode, GraphPayload } from '../api.js';
 import { useActivity } from '../state/activity.js';
 import { useSelection } from '../state/selection.js';
 import { edgeKey, type ActivitySnapshot } from './pure/activity.js';
-import { ACTIVITY_TTL_MS, type VisualState } from './pure/encoding.js';
+import { ACTIVITY_TTL_MS, clamp01, type VisualState } from './pure/encoding.js';
 import { edge2DAttrs, focusAttrs, node2DAttrs } from './pure/graph2d.js';
+import {
+  brighterState,
+  edgeRefKey,
+  traceEdgeAttrsFor,
+  traceNodeHops,
+  traceNodeState,
+  type TraceEdgeAttr,
+  type TraceRecord,
+} from './pure/trace.js';
+import { useTrace } from '../state/trace.js';
 
 const BG_COLOR = '#05070d';
 
@@ -67,9 +77,14 @@ class SigmaScene {
 
   /** 原始数据：样式要按活跃态重算，所以不能只留 sigma 图属性 */
   private nodes: GraphNode[] = [];
+  private edges: GraphEdge[] = [];
   private readonly rawNodeById = new Map<string, GraphNode>();
   private readonly rawEdgeByKey = new Map<string, GraphEdge>();
   private activity: ActivitySnapshot | null = null;
+  /** 证据链（P2-25）：2D 没有流动动画，用 mass 抬边的不透明度/宽度表达"证据更重" */
+  private trace: TraceRecord | null = null;
+  private traceNodeHops = new Map<string, 0 | 1 | 2>();
+  private readonly traceEdgeByKey = new Map<string, TraceEdgeAttr | null>();
 
   private selectedId: string | null = null;
   private raf = 0;
@@ -78,6 +93,7 @@ class SigmaScene {
   private fpsAt = performance.now();
   private fps = 0;
   private publishAt = 0;
+  private readonly unsubTrace: () => void;
 
   constructor(host: HTMLElement, onStats?: (s: Graph2DStats) => void) {
     this.host = host;
@@ -94,6 +110,15 @@ class SigmaScene {
       this.activity = state.snapshot;
       this.applyVisuals();
     });
+    // 证据链（P2-25）：只读快照，换一次查询才变；与活跃集在样式上取较亮者
+    this.trace = useTrace.getState().trace;
+    this.recaptureTrace();
+    this.unsubTrace = useTrace.subscribe((state, prev) => {
+      if (state.trace === prev.trace) return;
+      this.trace = state.trace;
+      this.recaptureTrace();
+      this.applyVisuals();
+    });
     this.loop();
   }
 
@@ -102,6 +127,9 @@ class SigmaScene {
     this.rawNodeById.clear();
     this.rawEdgeByKey.clear();
     this.nodes = data.nodes;
+    this.edges = data.edges;
+    this.trace = useTrace.getState().trace;
+    this.recaptureTrace();
     for (const node of data.nodes) {
       // 去重靠接口保证，但重复 id 会直接抛，所以这里兜一层
       if (this.graph.hasNode(node.id)) continue;
@@ -165,18 +193,44 @@ class SigmaScene {
    * 亮度——否则点过的节点永远挂在活跃态，沉默态就无从谈起。
    */
   private stateOfNode(id: string): VisualState {
-    return this.activity?.states.get(id) ?? 'dormant';
+    // P2-25：证据链优先与活跃集取较亮者（hop0 = active，hop>0 = secondary）
+    const fromTrace = traceNodeState(this.traceNodeHops, id);
+    return brighterState(this.activity?.states.get(id) ?? 'dormant', fromTrace ?? 'dormant');
   }
 
-  /** 边此刻的状态：两端都在活跃集 = 活跃；只有一端 = 次级（那圈"边界"） */
-  private stateOfEdge(source: string, target: string): VisualState {
+  /** 证据边属性：先试正向 `(src,dst,etype)`，再试反向（库里边的几何方向不定） */
+  private traceAttrOf(edge: GraphEdge): TraceEdgeAttr | null | undefined {
+    const forward = this.traceEdgeByKey.get(edgeRefKey(edge.src, edge.dst, edge.etype));
+    if (forward !== undefined) return forward;
+    return this.traceEdgeByKey.get(edgeRefKey(edge.dst, edge.src, edge.etype));
+  }
+
+  /** 用当前 `this.trace` 重算逐边证据属性（换边表 / 换 trace 都走这里） */
+  private recaptureTrace(): void {
+    this.traceEdgeByKey.clear();
+    const attrs = traceEdgeAttrsFor(this.edges, this.trace);
+    this.traceNodeHops = traceNodeHops(this.trace);
+    for (let i = 0; i < this.edges.length; i += 1) {
+      const edge = this.edges[i]!;
+      this.traceEdgeByKey.set(edgeRefKey(edge.src, edge.dst, edge.etype), attrs[i] ?? null);
+    }
+  }
+
+  /** 边此刻的状态：活跃集 + 证据链取较亮者（hop1 = 活跃，hop2+ = 次级） */
+  private stateOfEdge(edge: GraphEdge): VisualState {
     const snapshot = this.activity;
-    if (snapshot === null) return 'dormant';
-    if (snapshot.edges.has(edgeKey(source, target))) return 'active';
-    const a = snapshot.states.get(source);
-    const b = snapshot.states.get(target);
-    if (a === undefined || b === undefined) return 'dormant';
-    return 'secondary';
+    let state: VisualState = 'dormant';
+    if (snapshot !== null) {
+      if (snapshot.edges.has(edgeKey(edge.src, edge.dst))) state = 'active';
+      else {
+        const a = snapshot.states.get(edge.src);
+        const b = snapshot.states.get(edge.dst);
+        if (a !== undefined || b !== undefined) state = 'secondary';
+      }
+    }
+    const traceAttr = this.traceAttrOf(edge) ?? null;
+    if (traceAttr !== null) state = brighterState(state, traceAttr.hop === 1 ? 'active' : 'secondary');
+    return state;
   }
 
   /**
@@ -202,13 +256,17 @@ class SigmaScene {
       // 活跃态与选中态都强制显示标签（sigma 的 forced label，不吃网格抽样）
       this.graph.setNodeAttribute(node.id, 'labelVisibility', patch.labelVisibility);
     }
-    this.graph.forEachEdge((key, _attrs, source, target) => {
+    this.graph.forEachEdge((key, _attrs, _source, _target) => {
       const edge = this.rawEdgeByKey.get(key);
       if (edge === undefined) return;
-      const attrs = edge2DAttrs(edge, this.stateOfEdge(source, target));
+      const attrs = edge2DAttrs(edge, this.stateOfEdge(edge));
+      // 2D 没有流动动画：证据质量换成"更不透明 + 略宽"的静态通道（与 3D 的 aMass 同义）
+      const traceAttr = this.traceAttrOf(edge) ?? null;
+      const opacity = traceAttr === null ? attrs.opacity : clamp01(attrs.opacity + 0.35 * traceAttr.mass);
+      const size = traceAttr === null ? attrs.size : attrs.size + 0.6 * traceAttr.mass;
       this.graph.setEdgeAttribute(key, 'color', attrs.color);
-      this.graph.setEdgeAttribute(key, 'size', attrs.size);
-      this.graph.setEdgeAttribute(key, 'opacity', attrs.opacity);
+      this.graph.setEdgeAttribute(key, 'size', size);
+      this.graph.setEdgeAttribute(key, 'opacity', opacity);
     });
     renderer.scheduleRefresh();
     this.publish(performance.now(), true);
@@ -285,6 +343,7 @@ class SigmaScene {
     cancelAnimationFrame(this.raf);
     this.unsubSelection();
     this.unsubActivity();
+    this.unsubTrace();
     this.renderer?.kill();
     this.renderer = null;
     delete window.__moshiGraph2d;

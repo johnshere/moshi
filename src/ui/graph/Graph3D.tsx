@@ -47,6 +47,20 @@ import {
 } from './pure/encoding.js';
 import { edgeKey, waveOffsetMs, type ActivitySnapshot } from './pure/activity.js';
 import { buildEdgeBuffers, communityBounds, type EdgeBuffers } from './pure/geometry.js';
+import {
+  brighterState,
+  hopBand,
+  traceEdgeAttrsFor,
+  traceEdgeReadout,
+  traceNodeHops,
+  traceNodeState,
+  traceSummary,
+  type TraceEdgeAttr,
+  type TraceEdgeReadout,
+  type TraceRecord,
+  type TraceSummary,
+} from './pure/trace.js';
+import { useTrace } from '../state/trace.js';
 
 const BG_COLOR = 0x05070d;
 const MAX_LABELS = 48;
@@ -85,18 +99,30 @@ const PLANES: readonly LayerPlane[] = [
   { y: LAYER_INVALID, color: 0xef4444, opacity: 0.08 },
 ];
 
-/** 边：顶点属性 `aType` 选色 + `aVis` 定透明度 + `uv.x` 流动；`aConf` 调亮端 */
+/**
+ * 边：顶点属性 `aType` 选色 + `aVis` 定透明度 + `uv.x` 流动 + `aConf` 调亮端；
+ * P2-25 起再叠三个证据链属性（详设 §10.3.2）：
+ * - `aFlow`：hop 分档流速（0 直击 / 0.6 一跳 / 0.3 两跳+），0 = 静止；
+ * - `aMass`：PPR 沿边扩散份额 0–1，驱动亮度；
+ * - `aHop`：原始跳数 0/1/2，只做相位滞后（hop 越大越晚到）；
+ * - `aDir`：0 = 沿边几何 src→dst 流，1 = 反向（trace 的 path 方向才是证据传播方向）。
+ */
 const EDGE_VERT = /* glsl */ `
   attribute float aType;
   attribute float aConf;
   attribute float aFlow;
   attribute float aVis;
+  attribute float aMass;
+  attribute float aHop;
+  attribute float aDir;
   uniform float uTime;
   uniform float uFlowScale;
   uniform vec3 uEtypeColors[6];
   varying vec3 vColor;
   varying float vAlpha;
   varying float vVis;
+  varying float vMass;
+  varying float vFlow;
   varying vec2 vUv;
   varying float vPhase;
 
@@ -113,10 +139,15 @@ const EDGE_VERT = /* glsl */ `
     vColor = pickEtype(aType);
     vAlpha = clamp(aConf, 0.0, 1.0);
     vVis = aVis;
-    vUv = uv;
-    // 流动点：uv.x 沿边参数 + 时间偏移，没有额外几何体。沉默态 aFlow = 0 → vPhase 恒 0，
-    // 片元里的 dot 通道自动熄灭（"边不流动"不需要额外的 uniform 开关）。
-    vPhase = uTime * aFlow * uFlowScale;
+    vMass = aMass;
+    vFlow = aFlow;
+    // 方向：trace 的 path 是「种子 → 1 跳 → 2 跳」的传播方向，库里边的几何方向不一定
+    // 与它一致（co_occur 两个方向都合法），所以按 aDir 翻转 uv，而不是按 etype 语义猜。
+    float u = mix(uv.x, 1.0 - uv.x, aDir);
+    vUv = vec2(u, uv.y);
+    // 流动点：uv.x 沿边参数 + 时间偏移 + hop×0.33 相位滞后。没有 trace 的边 aFlow=0、
+    // aHop=0 → vPhase 恒 0，片元里的 dot 通道自动熄灭（"边不流动"不需要额外开关）。
+    vPhase = uTime * aFlow * uFlowScale + aHop * 0.33;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
@@ -126,17 +157,19 @@ const EDGE_FRAG = /* glsl */ `
   varying vec3 vColor;
   varying float vAlpha;
   varying float vVis;
+  varying float vMass;
+  varying float vFlow;
   varying vec2 vUv;
   varying float vPhase;
 
   void main() {
     float x = fract(vUv.x * uDash - vPhase);
     float dot = smoothstep(0.72, 1.0, x);
-    float flowing = step(0.0001, vPhase);
-    // 亮度仍按 confidence，透明度全部交给 aVis（沉默 0.05 / 次级 0.25 / 活跃 0.55+0.35c）。
-    // 加法混合下 0.05 叠 6000 条正好是一层很淡的网，所以沉默态"看得见但不出声"。
-    float intensity = 0.5 + 0.5 * vAlpha + 1.6 * dot * flowing;
-    float alpha = vVis + 0.45 * dot * flowing;
+    float flowing = step(0.0001, vFlow);
+    // 亮度/透明度：状态表 + 流动点 + 证据质量（aMass 让证据边在沉默底上也亮得起来）。
+    // 加法混合下 aVis 仍是底，dot 是运动的高光，aMass 是「这条边确实参与了扩散」的读数。
+    float intensity = 0.5 + 0.5 * vAlpha + 1.6 * dot * flowing + 1.4 * vMass;
+    float alpha = vVis + 0.45 * dot * flowing + 0.55 * vMass;
     gl_FragColor = vec4(vColor * intensity, clamp(alpha, 0.0, 1.0));
   }
 `;
@@ -271,6 +304,21 @@ class GraphScene {
   private edgeVertex = new Int32Array(0);
   private edgeVisAttr: THREE.BufferAttribute | null = null;
   private edgeFlowAttr: THREE.BufferAttribute | null = null;
+  /** P2-25 证据链的逐边属性（都是已有 LineSegments 上的 attribute，不增 draw call） */
+  private edgeMassAttr: THREE.BufferAttribute | null = null;
+  private edgeHopAttr: THREE.BufferAttribute | null = null;
+  private edgeDirAttr: THREE.BufferAttribute | null = null;
+  /** 当前证据链（`useTrace` 的同一份快照；本类只读，不自己发起请求） */
+  private trace: TraceRecord | null = null;
+  /** 与 `edges` 逐条对齐；`null` = 这条边不在证据链里 */
+  private traceAttrs: (TraceEdgeAttr | null)[] = [];
+  private traceNodeHops = new Map<string, 0 | 1 | 2>();
+  private traceSummary: TraceSummary | null = null;
+  /** `window.__moshiGraph.edges` 的缓存：只在 trace 变化时重算，不每帧重建数组 */
+  private traceReadout: TraceEdgeReadout = { aFlow: [], aMass: [], aHop: [], count: 0 };
+  /** 已为哪一次查询播过入场脉冲：同一 trace 被重复发布时不重播 */
+  private pulsedQueryId: string | null = null;
+  private readonly unsubTrace: () => void;
   private haloMaterial: THREE.ShaderMaterial | null = null;
   /** 当前上屏的活跃节点下标（光晕只为它们存在；空数组 = `halos.count = 0`） */
   private activeIndices: number[] = [];
@@ -352,6 +400,14 @@ class GraphScene {
       this.restyleAll();
     });
 
+    // 证据链（P2-25）与活跃集分开订阅：trace 是只读快照、没有 TTL，换一次查询才变；
+    // 两者在节点状态上取较亮者（`stateOf`），互不覆盖。
+    this.trace = useTrace.getState().trace;
+    this.unsubTrace = useTrace.subscribe((state, prev) => {
+      if (state.trace === prev.trace) return;
+      this.applyTrace(state.trace);
+    });
+
     this.loop();
   }
 
@@ -426,6 +482,9 @@ class GraphScene {
     this.edges = data.edges;
     this.edgeVertex = new Int32Array(this.edges.length).fill(-1);
     this.stateScale = new Float32Array(n).fill(1);
+    // 证据链属性按新边表重算（trace 本身不变，边集合可能变）
+    this.trace = useTrace.getState().trace;
+    this.recaptureTrace();
 
     for (let i = 0; i < n; i += 1) {
       const node = this.nodes[i]!;
@@ -488,6 +547,12 @@ class GraphScene {
     this.buildEnvelopes();
     this.buildLabels();
 
+    // 初次装载 / 刷新：若已有 trace，补播一次入场脉冲（同一 query 不重播）
+    if (this.trace !== null && this.trace.query_id !== this.pulsedQueryId) {
+      this.pulsedQueryId = this.trace.query_id;
+      this.pulseTrace();
+    }
+
     // 刷新后选中可能指向已不在本页的节点：以 store 为准重算一次下标
     this.focusIndex = -1;
     this.setFocus(useSelection.getState().focusId);
@@ -509,8 +574,11 @@ class GraphScene {
    * 亮着，等于整张图没有沉默态"。
    */
   private stateOf(id: string): VisualState {
-    if (this.activity === null) return 'dormant';
-    return this.activity.states.get(id) ?? 'dormant';
+    // P2-25：证据链优先级与活跃集取较亮者。hop0 直击 = active（亮 + 光晕 + 标签），
+    // hop>0 = secondary（看得见但不抢直击的视觉中心）；点选/命中仍按原规则叠加。
+    const fromTrace = traceNodeState(this.traceNodeHops, id);
+    const fromActivity = this.activity?.states.get(id) ?? 'dormant';
+    return brighterState(fromActivity, fromTrace ?? 'dormant');
   }
 
   private stateOfEdge(source: string, target: string): VisualState {
@@ -562,7 +630,9 @@ class GraphScene {
         const hop = node.id === snapshot.hitId ? 0 : 1;
         this.pulseAt[i] = now + waveOffsetMs(hop, WAVE_STEP_MS);
       }
-      if (snapshot !== null && snapshot.states.get(node.id) === 'active') active.push(i);
+      // 光晕 / 标签的实例池按"视觉上活跃"（active）填：证据链 hop0 直击节点与点选命中
+      // 走同一条通道（直击态不能只靠颜色一个维度——详设 §10.3.2 的"直击态"要求）。
+      if (state === 'active') active.push(i);
     }
     this.activeIndices = active;
     if (this.nodesMesh !== null) {
@@ -570,39 +640,115 @@ class GraphScene {
       if (this.nodesMesh.instanceColor !== null) this.nodesMesh.instanceColor.needsUpdate = true;
     }
     this.writeEdgeVis();
+    this.writeTraceAttrs();
     this.writeEnvelopeAlpha();
     this.updateHaloInstances();
     if (this.haloMaterial !== null) this.haloMaterial.uniforms['uOpacity']!.value = this.haloOpacity();
-    if (this.edgeMaterial !== null) {
-      this.edgeMaterial.uniforms['uFlowScale']!.value = snapshot === null ? 0 : decayWeight(now - snapshot.hitAt);
-    }
+    // 流速只由证据链的 aFlow 决定（hop 分档，D-116）；点选活跃集 / access_count 不再
+    // 驱动边流动——它们只剩"节点背景热度"这一条通道（详设 §10.3.1 注脚）。
+    if (this.edgeMaterial !== null) this.edgeMaterial.uniforms['uFlowScale']!.value = 1;
     this.labelTickAt = 0;
   }
 
-  /** 沉默态光晕 0 个：`halos.count = 0` 是验收 ① 的硬指标 */
+  /**
+   * 光晕强度：活跃集衰减，或证据链直击节点的常亮底。
+   *
+   * 沉默态（无活动、无 trace）必须返回 0 且 `halos.count = 0`（验收 ①）；有 trace 时
+   * 直击节点靠常亮光晕 + 标签与 1/2 跳区分（直击态不能只靠颜色一个维度）。
+   */
   private haloOpacity(): number {
-    if (this.activity === null) return 0;
-    return HALO_OPACITY + 0.15 * decayWeight(performance.now() - this.activity.hitAt);
+    if (this.activity !== null) return HALO_OPACITY + 0.15 * decayWeight(performance.now() - this.activity.hitAt);
+    return this.activeIndices.length > 0 ? HALO_OPACITY : 0;
   }
 
-  /** 边：写 `aVis`（透明度）与 `aFlow`（是否流动），沉默态一律静默 */
+  /** 边透明度 `aVis`：活跃集决定基线，证据边再抬一道下限（见 `traceAttrs`） */
   private writeEdgeVis(): void {
     const vis = this.edgeVisAttr;
-    const flow = this.edgeFlowAttr;
-    if (vis === null || flow === null) return;
+    if (vis === null) return;
     const decay = this.activity === null ? 0 : decayWeight(performance.now() - this.activity.hitAt);
     for (let e = 0; e < this.edges.length; e += 1) {
       const v = this.edgeVertex[e]!;
       if (v < 0) continue;
       const edge = this.edges[e]!;
       const visual = edgeVisual(this.stateOfEdge(edge.src, edge.dst), edge.confidence, decay);
-      vis.array[v] = visual.opacity;
-      vis.array[v + 1] = visual.opacity;
-      flow.array[v] = visual.flow;
-      flow.array[v + 1] = visual.flow;
+      // 证据链的边在沉默底上也要看得见：0.16 底 + mass 抬升（上限交给 shader 的 clamp）。
+      // 这不会让"无 trace"的图变亮——traceAttrs 全 null 时还是原来的 0.05。
+      const traceAttr = this.traceAttrs[e] ?? null;
+      const opacity = traceAttr === null ? visual.opacity : Math.max(visual.opacity, 0.16 + 0.45 * traceAttr.mass);
+      vis.array[v] = opacity;
+      vis.array[v + 1] = opacity;
     }
     vis.needsUpdate = true;
+  }
+
+  /**
+   * 证据链逐边属性 → GPU buffer：`aFlow` / `aMass` / `aHop` / `aDir`。
+   *
+   * 只在换数据 / 换 trace 时写一次（不是每帧）：证据链不是动画，流动是 shader 里
+   * `uTime * aFlow` 的事。没有新增几何体或材质——这四个都是已有 `LineSegments` 的
+   * 顶点属性，`renderer.info.render.calls` 不变。
+   */
+  private writeTraceAttrs(): void {
+    const flow = this.edgeFlowAttr;
+    const mass = this.edgeMassAttr;
+    const hop = this.edgeHopAttr;
+    const dir = this.edgeDirAttr;
+    if (flow === null || mass === null || hop === null || dir === null) return;
+    for (let e = 0; e < this.edges.length; e += 1) {
+      const v = this.edgeVertex[e]!;
+      if (v < 0) continue;
+      const attr = this.traceAttrs[e] ?? null;
+      const f = attr === null ? 0 : attr.flow;
+      const m = attr === null ? 0 : attr.mass;
+      const h = attr === null ? 0 : attr.hop;
+      const d = attr === null ? 0 : attr.dir;
+      flow.array[v] = f;
+      flow.array[v + 1] = f;
+      mass.array[v] = m;
+      mass.array[v + 1] = m;
+      hop.array[v] = h;
+      hop.array[v + 1] = h;
+      dir.array[v] = d;
+      dir.array[v + 1] = d;
+    }
     flow.needsUpdate = true;
+    mass.needsUpdate = true;
+    hop.needsUpdate = true;
+    dir.needsUpdate = true;
+  }
+
+  /** 用当前 `this.trace` 重算逐边/逐节点证据属性（换数据或换 trace 都走这里） */
+  private recaptureTrace(): void {
+    this.traceAttrs = traceEdgeAttrsFor(this.edges, this.trace);
+    this.traceNodeHops = traceNodeHops(this.trace);
+    this.traceSummary = traceSummary(this.trace);
+    this.traceReadout = traceEdgeReadout(this.traceAttrs);
+  }
+
+  /** 换了一份 trace：重算逐边属性 / 节点跳数 / 读数，新 query 播一次入场脉冲 */
+  private applyTrace(trace: TraceRecord | null): void {
+    this.trace = trace;
+    this.recaptureTrace();
+    if (trace !== null && trace.query_id !== this.pulsedQueryId) {
+      this.pulsedQueryId = trace.query_id;
+      this.pulseTrace();
+    }
+    this.restyleAll();
+    this.publish(performance.now(), true);
+  }
+
+  /**
+   * 入场脉冲：直击节点立刻、1 跳隔 180ms、2 跳再隔 180ms（与活跃集同一节奏
+   * `waveOffsetMs`）。这是 hop=0「直击」在颜色之外的另一条通道（尺寸 + 光晕 + 标签），
+   * 方向也和 §10.3.2 的「从种子流出去」一致。
+   */
+  private pulseTrace(): void {
+    const now = performance.now();
+    for (const [id, hop] of this.traceNodeHops) {
+      const i = this.indexOfId.get(id);
+      if (i === undefined) continue;
+      this.pulseAt[i] = now + waveOffsetMs(hopBand(hop), WAVE_STEP_MS);
+    }
   }
 
   /** 包络：沉默 0.015；活跃节点所在社区 0.06（详设 §10.3.1 参数表） */
@@ -661,8 +807,16 @@ class GraphScene {
     const edgeCount = buffers.edgeCount;
     this.edgeVisAttr = new THREE.BufferAttribute(new Float32Array(edgeCount * 2).fill(0.05), 1);
     this.edgeFlowAttr = new THREE.BufferAttribute(new Float32Array(edgeCount * 2), 1);
+    // P2-25 证据链属性：默认全 0（= 无证据链、静止、mass 无、方向不翻转）。
+    // 与 aFlow/aVis 同属一个 LineSegments，ShaderMaterial 多读 4 个 attribute，不增 draw call。
+    this.edgeMassAttr = new THREE.BufferAttribute(new Float32Array(edgeCount * 2), 1);
+    this.edgeHopAttr = new THREE.BufferAttribute(new Float32Array(edgeCount * 2), 1);
+    this.edgeDirAttr = new THREE.BufferAttribute(new Float32Array(edgeCount * 2), 1);
     geometry.setAttribute('aVis', this.edgeVisAttr);
     geometry.setAttribute('aFlow', this.edgeFlowAttr);
+    geometry.setAttribute('aMass', this.edgeMassAttr);
+    geometry.setAttribute('aHop', this.edgeHopAttr);
+    geometry.setAttribute('aDir', this.edgeDirAttr);
 
     this.edgeMaterial = new THREE.ShaderMaterial({
       vertexShader: EDGE_VERT,
@@ -673,7 +827,8 @@ class GraphScene {
       uniforms: {
         uTime: { value: 0 },
         uDash: { value: 4 },
-        uFlowScale: { value: 0 },
+        // 1 = 流速完全由 aFlow（hop 分档）决定；活跃集衰减不再乘进来（D-116）
+        uFlowScale: { value: 1 },
         uEtypeColors: { value: etypeUniforms() },
       },
     });
@@ -948,7 +1103,14 @@ class GraphScene {
       activeEdges: this.activity?.activeEdges ?? 0,
       focusId: this.focusIndex >= 0 ? (this.nodes[this.focusIndex]?.id ?? null) : null,
     };
-    window.__moshiGraph = { ...stats };
+    // P2-25 验收钩子：`calls` 是 `renderCalls` 的别名（台账口述的是 calls）；
+    // `trace` / `edges` 让脚本不用截图也能证明"三态同图"（aFlow 0.6 与 0.3 并存）。
+    window.__moshiGraph = {
+      ...stats,
+      calls: stats.renderCalls,
+      trace: this.traceSummary,
+      edges: this.traceReadout,
+    };
     this.onStats?.(stats);
   }
 
@@ -966,11 +1128,11 @@ class GraphScene {
       this.activity = null;
       this.restyleAll();
     }
-    const decay = activity === null ? 0 : decayWeight(now - activity.hitAt);
     if (this.haloMaterial !== null) {
-      this.haloMaterial.uniforms['uOpacity']!.value = activity === null ? 0 : HALO_OPACITY + 0.15 * decay;
+      // 与 restyleAll 用同一个取值：活跃衰减 / 证据链直击节点的常亮底（`haloOpacity`）
+      this.haloMaterial.uniforms['uOpacity']!.value = this.haloOpacity();
     }
-    if (this.edgeMaterial !== null) this.edgeMaterial.uniforms['uFlowScale']!.value = decay;
+    if (this.edgeMaterial !== null) this.edgeMaterial.uniforms['uFlowScale']!.value = 1;
 
     const touched = this.animateNodes(now);
     if (touched) {
@@ -1013,7 +1175,14 @@ class GraphScene {
     this.nodeAlphaAttr = null;
     this.edgeVisAttr = null;
     this.edgeFlowAttr = null;
+    this.edgeMassAttr = null;
+    this.edgeHopAttr = null;
+    this.edgeDirAttr = null;
     this.envelopeAlphaAttr = null;
+    this.traceAttrs = [];
+    this.traceNodeHops = new Map();
+    this.traceSummary = null;
+    this.traceReadout = { aFlow: [], aMass: [], aHop: [], count: 0 };
     this.edges = [];
     this.edgeVertex = new Int32Array(0);
     this.activeIndices = [];
@@ -1027,6 +1196,7 @@ class GraphScene {
     cancelAnimationFrame(this.raf);
     this.unsubSelection();
     this.unsubActivity();
+    this.unsubTrace();
     this.resizeObserver.disconnect();
     this.renderer.domElement.removeEventListener('pointerdown', this.handlePointer);
     this.disposeData();

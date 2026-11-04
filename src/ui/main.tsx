@@ -12,8 +12,10 @@ import { Graph2D, type Graph2DStats } from './graph/Graph2D.js';
 import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
 import { ACTIVITY_TTL_MS } from './graph/pure/encoding.js';
+import { traceSummary } from './graph/pure/trace.js';
 import { InboxPage } from './inbox/InboxPage.js';
 import { useActivity } from './state/activity.js';
+import { refreshLatestTrace, useTrace } from './state/trace.js';
 import { useFilter } from './state/filter.js';
 import { FilterBar } from './filter/FilterBar.js';
 import { FactsTable } from './table/FactsTable.js';
@@ -138,6 +140,41 @@ function ActivityNote(): JSX.Element {
   );
 }
 
+/**
+ * 证据链图例（P2-25，详设 §10.3.2）。
+ *
+ * 三态必须能被文字读出来，不能只靠颜色：
+ * - 直击（hop0）：亮节点 + 光晕，**不画入射流动**（证据从这里出发）；
+ * - 1 跳：aFlow = 0.6 的快流（种子 → 一跳邻居）；
+ * - 2+ 跳：aFlow = 0.3 的慢流 + 相位更滞后（更远、更弱、更晚到）。
+ *
+ * 无 trace 时明确写「无」：留白会被当成"渲染坏了"，而"还没查询"本是正常状态。
+ */
+function TraceNote(): JSX.Element {
+  const trace = useTrace((s) => s.trace);
+  const error = useTrace((s) => s.error);
+  const summary = traceSummary(trace);
+  if (summary === null) {
+    return (
+      <div style={{ color: '#475569' }}>
+        证据链：无{error === null ? '' : '（接口不可用）'} · 查询一次后自动显示「直击 / 1 跳 / 2+ 跳」
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#94a3b8' }}>
+      <span style={{ color: '#cbd5e1' }}>证据链 {summary.query_id.slice(-8)}</span>
+      <span>
+        {summary.route} · {summary.source}/{summary.model_mode}
+      </span>
+      <span style={{ color: '#f8fafc' }}>● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）</span>
+      <span style={{ color: '#7dd3fc' }}>→ 1 跳 {summary.hop1}（快流）</span>
+      <span style={{ color: '#64748b' }}>→ 2+ 跳 {summary.hop2}（慢流）</span>
+      <span>证据边 {summary.edges}</span>
+    </div>
+  );
+}
+
 function App(): JSX.Element {
   const [data, setData] = useState<GraphPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -195,6 +232,18 @@ function App(): JSX.Element {
     if (dataRef.current !== null) return;
     void load(initialLimit());
   }, [view, load]);
+
+  // P2-25：每 3s 拉一次「最近查询」的 trace（daemon 内存 ring buffer，无落库）。
+  // 外部查询没有推送通道（D-118 不加 SSE/WebSocket），轮询是唯一能让"刚查完"立刻
+  // 出现在图上的办法；`query_id` 没变时 `refreshLatestTrace` 原地不动，渲染器不会被
+  // 每 3 秒重建一次 trace 对象。后台标签页跳过，避免无意义的请求。
+  useEffect(() => {
+    void refreshLatestTrace();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void refreshLatestTrace();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(
     () => () => {
@@ -327,6 +376,7 @@ function App(): JSX.Element {
         )}
         {!isTable && error !== null && <div style={{ color: '#ef4444' }}>取数失败：{error}</div>}
         {!isTable && <ActivityNote />}
+        {!isTable && <TraceNote />}
       </div>
 
       {/* 表格态的操作提示由表格自己的底栏承担（那边还有行数/请求数），这里不再叠一层 */}
