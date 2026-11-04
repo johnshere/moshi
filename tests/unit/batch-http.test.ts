@@ -13,7 +13,7 @@ import { loadConfig } from '../../src/app/config.js';
 import { buildHttpApp } from '../../src/app/http/server.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
-import { insertEdge, insertFact, makeEntity } from '../fixtures/factories.js';
+import { insertDerivedPoint, insertEdge, insertFact, makeEntity } from '../fixtures/factories.js';
 
 const opened: Db[] = [];
 const dirs: string[] = [];
@@ -237,6 +237,24 @@ describe('POST /api/facts/batch 与 undo', () => {
       expect(factRow(db, id)).toMatchObject({ epistemic_status: 'invalidated' });
       expect(factRow(db, id).valid_to).not.toBeNull();
     }
+  });
+
+  it('批量失效源事实后立即收口其派生要点', async () => {
+    const db = freshDb();
+    const src = insertFact(db, {
+      ftype: 'episodic',
+      validAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const point = insertDerivedPoint(db, [src]);
+    const app = await makeApp(db);
+
+    const res = await post(app, '/api/facts/batch', { action: 'invalidate', ids: [src] });
+    expect(res.statusCode).toBe(200);
+    const row = db
+      .prepare('SELECT valid_to, epistemic_status FROM fact WHERE id = ?')
+      .get(point) as { valid_to: string | null; epistemic_status: string };
+    expect(row.valid_to).not.toBeNull();
+    expect(row.epistemic_status).toBe('invalidated');
   });
 
   it('撤销返回 restored 并清回 valid_to；同一 op 二次撤销 404', async () => {

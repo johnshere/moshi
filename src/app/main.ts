@@ -74,7 +74,11 @@ export async function main(argv: readonly string[]): Promise<number> {
         // P1-22 写入闭环：annotation 入队后由这个 runner 消费成事实。
         // 先起 runner 再建 app——/mcp 上线时 wake 必须已经可用，否则第一批
         // "记住"要等 15s 兜底扫描才生效。
-        runner = startHarvestRunner({ db, log });
+        runner = startHarvestRunner({
+          db,
+          log,
+          consolidate: { maxContentBytes: booted.ingest.max_fact_bytes },
+        });
         // P1-24 互斥裁决的前置：ontology 里得有谓词基数性。启动即算一次，
         // 之后按 schema_rev 脏检查兜底重算（见 schemaInferRunner）。
         schemaRunner = startSchemaInferRunner({ db, log });

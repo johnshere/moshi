@@ -7,13 +7,23 @@
  * 回传里带 `threadId`：主线程是 0，worker 线程非 0。集成测试拿它当"坐标确实是
  * 在别的线程算出来的"的证据，而不是只看"函数被调过"。
  */
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parentPort, threadId } from 'node:worker_threads';
-import {
-  computeLayout,
-  type LayoutComputation,
-  type LayoutInput,
-  type LayoutParams,
-} from '../../domain/layout.js';
+import type { LayoutComputation, LayoutInput, LayoutParams } from '../../domain/layout.js';
+
+// Node 22 的 worker 线程不认 `execArgv: ['--import','tsx']`（execArgv 与
+// NODE_OPTIONS 都试过），而原生 type-stripping 又把 `.js` 说明符当成字面文件。
+// 源码态在 worker 内显式注册 tsx 的 ESM loader，再按当前扩展名动态导入；
+// dist 态 ext 为 `.js`，不触碰 tsx（生产依赖里也没有它）。
+const ext = path.extname(fileURLToPath(import.meta.url));
+if (ext === '.ts') {
+  const { register } = await import('tsx/esm/api');
+  register();
+}
+const { computeLayout } = (await import(
+  new URL(`../../domain/layout${ext}`, import.meta.url).href
+)) as typeof import('../../domain/layout.js');
 
 export interface LayoutWorkerRequest {
   input: LayoutInput;

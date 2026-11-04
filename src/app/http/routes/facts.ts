@@ -9,6 +9,7 @@
  * （台账 §4 P2-04 的坑）。
  */
 import type { FastifyInstance } from 'fastify';
+import { reconcileDerivedForFacts } from '../../../core/lifecycle/consolidate.js';
 import { MoshiError } from '../../../domain/errors.js';
 import { nowIso } from '../../../domain/time.js';
 import type { Db } from '../../../infra/sqlite/db.js';
@@ -303,6 +304,7 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
 
     const ts = nowIso();
     const changed: string[] = [];
+    let invalidated = false;
 
     withTransaction(db, () => {
       if (typeof body.confidence === 'number' && body.confidence !== fact.confidence) {
@@ -325,6 +327,7 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
       if (typeof body.epistemic_status === 'string' && body.epistemic_status !== fact.epistemicStatus) {
         if (body.epistemic_status === 'invalidated') {
           factRepo.invalidate(db, id, { validTo: ts, status: 'invalidated' });
+          invalidated = true;
           changed.push('epistemic_status');
         } else {
           if (fact.validTo !== null) {
@@ -339,6 +342,17 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
         }
       }
     });
+
+    if (invalidated) {
+      try {
+        reconcileDerivedForFacts(db, [id]);
+      } catch (err) {
+        req.log.warn(
+          { event: 'consolidate.reconcile_failed', err: (err as Error).message },
+          'reconcile after fact invalidate failed',
+        );
+      }
+    }
 
     return { fact_id: id, changed };
   });

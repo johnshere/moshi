@@ -12,6 +12,7 @@
  * 3. **每次调用写一条汇总 audit**。`setConfidence` 自己会写一条字段级审计（I10），
  *    但"这次纠正是一个事件"这件事只能由汇总行表达——`reason` 就挂在它上面。
  */
+import { reconcileDerivedForFacts } from '../../core/lifecycle/consolidate.js';
 import { MoshiError } from '../../domain/errors.js';
 import { nowIso } from '../../domain/time.js';
 import * as auditRepo from '../../infra/sqlite/auditRepo.js';
@@ -110,6 +111,15 @@ export function runMemoryCorrect(deps: McpDeps, input: CorrectInput): CorrectRes
       ts,
     });
   });
+
+  if (changed.includes('valid_to')) {
+    // 源事实撤回后立刻对账；失败不影响已提交的纠正，下一轮 consolidate 会补
+    try {
+      reconcileDerivedForFacts(deps.db, [before.id]);
+    } catch {
+      /* 反向对账是维护动作，不让它把纠正结果变成错误 */
+    }
+  }
 
   return { audit_id: auditId, fact_id: before.id, changed };
 }

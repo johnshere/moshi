@@ -16,13 +16,17 @@ import {
   consolidate,
   consolidatedConfidence,
   CONSOLIDATE_PROVENANCE,
+  CONSOLIDATE_RECONCILE_SOURCE,
   derivedFromOf,
+  reconcileDerivedForFacts,
   renderConsolidatedContent,
 } from '../../src/core/lifecycle/consolidate.js';
 import type { Fact } from '../../src/domain/types.js';
+import * as auditRepo from '../../src/infra/sqlite/auditRepo.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import * as edgeRepo from '../../src/infra/sqlite/edgeRepo.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
+import * as inboxRepo from '../../src/infra/sqlite/inboxRepo.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { insertFact as seedFact, makeEntity, type FactSeed } from '../fixtures/factories.js';
 
@@ -113,10 +117,10 @@ describe('纯函数口径', () => {
 
   it('正文按详设模板渲染：字符串原样、结构化取值走 canonicalJson', () => {
     expect(renderConsolidatedContent('node', 'runtime_state', ['idle', 'listening'])).toBe(
-      'node 的 runtime_state 为 idle、listening（由 2 次观测归纳）',
+      'node 的 runtime_state 为 idle、listening（由 2 个不同取值归纳）',
     );
     expect(renderConsolidatedContent('node', 'port', [{ port: 7001 }])).toBe(
-      'node 的 port 为 {"port":7001}（由 1 次观测归纳）',
+      'node 的 port 为 {"port":7001}（由 1 个不同取值归纳）',
     );
   });
 });
@@ -148,7 +152,7 @@ describe('情景 → 语义（P2-09）', () => {
       observations: 3,
       values: ['crashed', 'idle', 'listening'],
     });
-    expect(point.content).toBe('node 的 runtime_state 为 crashed、idle、listening（由 3 次观测归纳）');
+    expect(point.content).toBe('node 的 runtime_state 为 crashed、idle、listening（由 3 个不同取值归纳）');
 
     // 置信：源均值 0.7 → 0.7；按 4 位小数为精度比较（与 strength 同一舍入口径）
     expect(point.confidence).toBe(0.7);
@@ -200,10 +204,117 @@ describe('情景 → 语义（P2-09）', () => {
     expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({ groups: 0, created: 0 });
   });
 
-  it('disputed 观测参与提炼（与详设 SQL 的 status 口径一致）', async () => {
+  it('disputed 观测不参与提炼（概设风险表：≥3 条已验证观测）', async () => {
     const db = freshDb();
     seedObservations(db, ['listening', 'idle', 'crashed'], { status: 'disputed' });
-    expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({ groups: 1, created: 1 });
+    expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({ groups: 0, created: 0 });
+
+    // 2 active + 1 disputed 也不够：active 只有 2 条
+    const mixedEntity = makeEntity(db, 'svc-mixed');
+    seedObservations(db, ['a', 'b'], { entityId: mixedEntity });
+    seedObservations(db, ['c'], { entityId: mixedEntity, status: 'disputed' });
+    expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({ groups: 0, created: 0 });
+  });
+
+  it('人工失效派生点后不重建（墓碑）', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+
+    factRepo.invalidate(db, point.id, {
+      validTo: new Date(Date.parse(point.validAt) + 1).toISOString(),
+      status: 'invalidated',
+    });
+    const res = await consolidate(db, { ratePerSec: 0 });
+
+    expect(res).toMatchObject({ groups: 1, created: 0, skipped: 1, reconciled: 0 });
+    expect(derivedPoints(db, ck)).toHaveLength(1);
+  });
+
+  it('批量失效同样是墓碑（audit 来源不参与判定）', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+
+    inboxRepo.invalidateMany(db, [point.id], { opId: 'batch:tombstone' });
+    expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({
+      created: 0,
+      skipped: 1,
+    });
+    expect(derivedPoints(db, ck)).toHaveLength(1);
+  });
+
+  it('archived/pruned 派生点不算人工墓碑', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+    // 模拟将来的 archive/prune：写 valid_to 但状态不是 invalidated，也没有 reconcile audit
+    db.prepare("UPDATE fact SET valid_to = ?, epistemic_status = 'pruned' WHERE id = ?").run(
+      new Date(Date.parse(point.validAt) + 1).toISOString(),
+      point.id,
+    );
+
+    const res = await consolidate(db, { ratePerSec: 0 });
+    expect(res).toMatchObject({ created: 1, skipped: 0 });
+    expect(derivedPoints(db, ck).filter((f) => f.validTo === null)).toHaveLength(1);
+  });
+
+  it('源撤回后旧结论收口；撤销撤回后可重新产出（reconcile 不算墓碑）', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+
+    const snapshots = inboxRepo.invalidateMany(db, [ids[0] as string], { opId: 'batch:source' });
+    const res = await consolidate(db, { ratePerSec: 0 });
+    expect(res).toMatchObject({ groups: 0, created: 0, reconciled: 1 });
+
+    const closed = factRepo.getFact(db, point.id) as Fact;
+    expect(closed.validTo).not.toBeNull();
+    expect(closed.supersededBy).toBeNull();
+    expect(closed.epistemicStatus).toBe('invalidated');
+    expect(
+      auditRepo.auditByRow(db, 'fact', point.id).some((a) => a.source === CONSOLIDATE_RECONCILE_SOURCE),
+    ).toBe(true);
+
+    // 30s undo：源恢复 → 下一轮允许重新产出同指纹结论
+    expect(inboxRepo.restoreMany(db, snapshots, { opId: 'batch:source' })).toBe(1);
+    const again = await consolidate(db, { ratePerSec: 0 });
+    expect(again).toMatchObject({ groups: 1, created: 1, reconciled: 0 });
+    expect(derivedPoints(db, ck).filter((f) => f.validTo === null)).toHaveLength(1);
+  });
+
+  it('失效入口可定向对账，不必等下一轮 consolidate', async () => {
+    const db = freshDb();
+    const ids = seedObservations(db, ['listening', 'idle', 'crashed']);
+    await consolidate(db, { ratePerSec: 0 });
+    const ck = canonicalKeyOf(db, ids[0] as string);
+    const point = derivedPoints(db, ck)[0] as Fact;
+
+    inboxRepo.invalidateMany(db, [ids[0] as string], { opId: 'batch:targeted' });
+    expect(reconcileDerivedForFacts(db, [ids[0] as string])).toBe(1);
+    expect((factRepo.getFact(db, point.id) as Fact).validTo).not.toBeNull();
+  });
+
+  it('派生 content 超 2 KB 时截断，聚合取值保留全量', async () => {
+    const db = freshDb();
+    const big = 'x'.repeat(1000);
+    const ids = seedObservations(db, [`${big}a`, `${big}b`, `${big}c`]);
+    expect(await consolidate(db, { ratePerSec: 0 })).toMatchObject({ created: 1 });
+
+    const point = derivedPoints(db, canonicalKeyOf(db, ids[0] as string))[0] as Fact;
+    expect(Buffer.byteLength(point.content, 'utf8')).toBeLessThanOrEqual(2048);
+    expect(point.content.endsWith('…')).toBe(true);
+    const value = point.attrs.frozen.value as { values: string[] };
+    expect(value.values).toHaveLength(3);
+    for (const v of value.values) expect(v).toHaveLength(1001);
   });
 
   it('第 4 条观测到达 → 新要点产出、旧要点收口（源事实仍全部活跃）', async () => {

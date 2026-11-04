@@ -13,6 +13,7 @@
  * 测试会起多个 app 实例，模块级会串味；过期项懒清理即可（签发时顺手扫一遍）。
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { reconcileDerivedForFacts } from '../../../core/lifecycle/consolidate.js';
 import { MoshiError, isMoshiError } from '../../../domain/errors.js';
 import { newId } from '../../../domain/ids.js';
 import type { Db } from '../../../infra/sqlite/db.js';
@@ -138,6 +139,15 @@ export async function batchRoutes(app: FastifyInstance, opts: BatchRoutesOpts): 
       const preview = inboxRepo.previewInvalidate(db, ids);
       const opId = newId('batch');
       const snapshots = inboxRepo.invalidateMany(db, ids, { opId });
+      // 源事实撤回后立刻对账：没有新 annotation 时 consolidate 不会自己跑
+      try {
+        reconcileDerivedForFacts(db, ids);
+      } catch (err) {
+        app.log.warn(
+          { event: 'consolidate.reconcile_failed', err: (err as Error).message },
+          'reconcile after batch invalidate failed',
+        );
+      }
       const expiresAt = Date.now() + ttlMs;
       // 懒清理：签发新 op 时顺手丢掉过期项，避免 Map 无界增长
       for (const [id, rec] of ops) {

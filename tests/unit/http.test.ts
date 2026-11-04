@@ -11,7 +11,7 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { loadConfig } from '../../src/app/config.js';
 import { buildHttpApp } from '../../src/app/http/server.js';
-import { insertEdge, insertFact } from '../fixtures/factories.js';
+import { insertDerivedPoint, insertEdge, insertFact } from '../fixtures/factories.js';
 
 const opened: Db[] = [];
 const dirs: string[] = [];
@@ -452,5 +452,33 @@ describe('PATCH /api/facts/:id', () => {
     });
     expect(res.statusCode).toBe(400);
     expect(JSON.parse(res.body).error).toBe('E_IMMUTABLE');
+  });
+
+  it('失效源事实后立即收口其派生要点', async () => {
+    const db = freshDb();
+    const src = insertFact(db, {
+      ftype: 'episodic',
+      value: '22.0.0',
+      validAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    const point = insertDerivedPoint(db, [src]);
+    const { app, token } = await makeApp(db);
+    const res = await app.inject({
+      method: 'PATCH',
+      url: `/api/facts/${src}`,
+      headers: {
+        'X-Moshi-Token': token,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ epistemic_status: 'invalidated' }),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body).changed).toContain('epistemic_status');
+
+    const row = db
+      .prepare('SELECT valid_to, epistemic_status FROM fact WHERE id = ?')
+      .get(point) as { valid_to: string | null; epistemic_status: string };
+    expect(row.valid_to).not.toBeNull();
+    expect(row.epistemic_status).toBe('invalidated');
   });
 });

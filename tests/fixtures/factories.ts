@@ -106,6 +106,46 @@ export function insertEdge(
   return id;
 }
 
+export interface DerivedPointSeed {
+  id?: string;
+  fingerprint?: string;
+  validTo?: string | null;
+  epistemicStatus?: string;
+  supersededBy?: string | null;
+}
+
+/**
+ * 造一条「已提炼要点」：semantic + `confidence_source='derived'` + 到源的
+ * `derived_from` 边。只给测试用；真实产出走 `core/lifecycle/consolidate.ts`。
+ */
+export function insertDerivedPoint(
+  db: Db,
+  sourceIds: readonly string[],
+  seed: DerivedPointSeed = {},
+): string {
+  const firstId = sourceIds[0];
+  if (firstId === undefined) throw new Error('insertDerivedPoint: sourceIds 不能为空');
+  const src = db
+    .prepare('SELECT canonical_key, scope FROM fact WHERE id = ?')
+    .get(firstId) as { canonical_key: string; scope: string };
+  const id = seed.id ?? newId('fact');
+  const fingerprint = seed.fingerprint ?? `fp_${id}`;
+  insertFact(db, {
+    id,
+    ftype: 'semantic',
+    confidenceSource: 'derived',
+    canonicalKey: src.canonical_key,
+    scope: src.scope,
+    valueHash: valueHash(`derived:${id}`),
+    ext: { derived_from: fingerprint },
+    validTo: seed.validTo ?? null,
+    epistemicStatus: seed.epistemicStatus ?? 'active',
+    supersededBy: seed.supersededBy ?? null,
+  });
+  for (const sourceId of sourceIds) insertEdge(db, id, sourceId, 'derived_from');
+  return id;
+}
+
 export function degreeOf(db: Db, factId: string): number {
   const row = db.prepare('SELECT degree FROM fact WHERE id = ?').get(factId) as
     | { degree: number }
