@@ -57,6 +57,21 @@ function userVersion(db: Db): number {
   return db.pragma('user_version', { simple: true }) as number;
 }
 
+/** 当前库的 `user_version`（`moshi db migrate` / 诊断展示用；只读） */
+export function currentUserVersion(db: Db): number {
+  return userVersion(db);
+}
+
+/**
+ * 把 WAL 截断回主库（`moshi db vacuum` 收尾用）。
+ *
+ * 放在这里是因为 `moshi db` 的写权限收口在 infra：app 层禁止 `db.pragma`（见
+ * `tools/check-lifecycle.ts`），而本文件已是迁移/版本号这件事的 owner。
+ */
+export function checkpointWal(db: Db): void {
+  db.pragma('wal_checkpoint(TRUNCATE)');
+}
+
 function hasTables(db: Db): boolean {
   const row = db
     .prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type IN ('table','view')")

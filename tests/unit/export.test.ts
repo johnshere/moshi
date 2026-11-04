@@ -204,8 +204,36 @@ describe('moshi export 导出前快照（P2-19-A 项 2）', () => {
     expect(await runCli(['export', '--all'], { home })).toBe(0);
     const meta = db.prepare('SELECT slug FROM archive_meta WHERE topic_id = ?').get('7') as { slug: string };
 
-    // 改一条事实内容 → 渲染 hash 变化，--slug 会真正写盘
-    db.prepare("UPDATE fact SET content = content || '（更新）'").run();
+    // 追加一条同社区事实 → 渲染 hash 变化，--slug 会真正写盘（fact.content 是 append-only，不能改旧行）
+    const extraId = 'f_topic7_extra';
+    insertFact(db, {
+      id: extraId,
+      content: '主题 7 追加事实：moshi 的归档导出走 safeWriteFile',
+      ftype: 'semantic',
+      confidence: 0.9,
+      confidenceSource: 'tool_obs',
+      strength: 0.6,
+      importance: 0.5,
+      pool: 'utility',
+      epistemicStatus: 'active',
+      attrs: { frozen: { subject: { entity_id: `en_${extraId}`, name: extraId }, predicate: 'state', value: extraId }, ext: {} },
+      canonicalKey: `ck_${extraId}`,
+      valueHash: `vh_${extraId}`,
+      scope: 'global',
+      supersededBy: null,
+      validAt: '2026-10-20T00:00:00.000Z',
+      validTo: null,
+      recordedAt: '2026-10-01T00:00:00.000Z',
+      communityId: 7,
+      degree: 0,
+      accessCount: 0,
+      lastAccessAt: null,
+      lastDecayAt: '2026-10-01T00:00:00.000Z',
+      sourceEpisode: null,
+      span: null,
+      createdAt: '2026-10-01T00:00:00.000Z',
+      updatedAt: '2026-10-01T00:00:00.000Z',
+    });
     const out: string[] = [];
     expect(await runCli(['export', '--slug', meta.slug], { home, stdout: (s) => out.push(s) })).toBe(0);
     expect(out.join('')).toContain('写盘 1');

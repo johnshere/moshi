@@ -10,7 +10,16 @@
  *
  * 另含 P2-09 `moshi db consolidate [--dry-run] [--rate n]`：幂等、dry-run 不写库、参数校验。
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -18,8 +27,8 @@ import { COMMANDS, runCli } from '../../src/app/cli/index.js';
 import { ingestEvent } from '../../src/core/write/ingest.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
-import { migrate } from '../../src/infra/sqlite/migrate.js';
-import { insertFact, makeEntity } from '../fixtures/factories.js';
+import { migrate, TARGET_VERSION } from '../../src/infra/sqlite/migrate.js';
+import { insertEdge, insertFact, makeEntity } from '../fixtures/factories.js';
 
 const DAY = 864e5;
 
@@ -182,7 +191,7 @@ describe('db rebuild-strength', () => {
     expect(missing.code).toBe(2);
     expect(missing.err).toContain('rebuild-strength');
 
-    const unknown = await cli(home, ['db', 'vacuum']);
+    const unknown = await cli(home, ['db', 'no-such-sub']);
     expect(unknown.code).toBe(2);
     expect(unknown.err).toContain('rebuild-strength');
 
@@ -316,5 +325,162 @@ describe('db consolidate（P2-09）', () => {
       expect(db.prepare('SELECT COUNT(*) AS n FROM entity').get()).toEqual({ n: 0 });
       expect(db.prepare('SELECT COUNT(*) AS n FROM edge').get()).toEqual({ n: 0 });
     });
+  });
+});
+
+describe('db migrate（P2-19A-03）', () => {
+  it('已最新：dry-run 与实跑都打印 已是最新 (vN)', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => insertFact(db, {}));
+
+    const dry = await cli(home, ['db', 'migrate', '--dry-run']);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain(`已是最新 (v${TARGET_VERSION})`);
+
+    const real = await cli(home, ['db', 'migrate']);
+    expect(real.code).toBe(0);
+    expect(real.out).toContain(`已是最新 (v${TARGET_VERSION})`);
+  });
+
+  it('v4 库：dry-run 列出 005 且不写库，实跑迁到 v5 并留迁移前备份', async () => {
+    const { home, dbFile } = fakeHome();
+    const backups = path.join(path.dirname(dbFile), 'backups');
+    const { db } = openDb({ file: dbFile });
+    try {
+      migrate(db, { backupsDir: backups, target: 4 });
+    } finally {
+      closeDb(db);
+    }
+
+    const dry = await cli(home, ['db', 'migrate', '--dry-run']);
+    expect(dry.code).toBe(0);
+    expect(dry.out).toContain('待执行 1 个迁移（v4 → v5）');
+    expect(dry.out).toContain('005_');
+    expect(dry.out).toContain('--dry-run：未写库');
+
+    const before = openDb({ file: dbFile });
+    try {
+      const row = before.db.prepare('PRAGMA user_version').get() as { user_version: number };
+      expect(row.user_version).toBe(4);
+    } finally {
+      closeDb(before.db);
+    }
+
+    const real = await cli(home, ['db', 'migrate']);
+    expect(real.code).toBe(0);
+    expect(real.out).toContain('迁移完成：v4 → v5（1 个文件）');
+    expect(real.out).toContain('迁移前备份：');
+
+    const after = openDb({ file: dbFile });
+    try {
+      const row = after.db.prepare('PRAGMA user_version').get() as { user_version: number };
+      expect(row.user_version).toBe(TARGET_VERSION);
+    } finally {
+      closeDb(after.db);
+    }
+  });
+
+  it('库版本高于程序支持 → 退出码 1，不降级', async () => {
+    const { home, dbFile } = fakeHome();
+    const { db } = openDb({ file: dbFile });
+    try {
+      migrate(db, { backupsDir: path.join(path.dirname(dbFile), 'backups') });
+      db.pragma('user_version = 6');
+    } finally {
+      closeDb(db);
+    }
+
+    const run = await cli(home, ['db', 'migrate']);
+    expect(run.code).toBe(1);
+    expect(run.err).toContain('不允许降级');
+  });
+});
+
+describe('db backup（P2-19A-03）', () => {
+  it('打印 备份 -> 路径 (1 个文件, X MB) 且文件存在', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => insertFact(db, {}));
+
+    const run = await cli(home, ['db', 'backup']);
+    expect(run.code).toBe(0);
+    const match = /备份 -> (.+?) \(1 个文件, (\d+\.\d{2}) MB\)/.exec(run.out);
+    expect(match).not.toBeNull();
+    expect(existsSync(match![1]!)).toBe(true);
+    expect(statSync(match![1]!).size).toBeGreaterThan(0);
+  });
+
+  it('--keep 裁掉最旧的备份（保留最近 keep 份）', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => insertFact(db, {}));
+    const backups = path.join(path.dirname(dbFile), 'backups');
+    mkdirSync(backups, { recursive: true });
+    const old = new Date(2000, 0, 1);
+    for (const name of ['moshi-20000101-000000.db', 'moshi-20000102-000000.db', 'moshi-20000103-000000.db']) {
+      const file = path.join(backups, name);
+      writeFileSync(file, 'old');
+      utimesSync(file, old, old);
+    }
+
+    const run = await cli(home, ['db', 'backup', '--keep', '2']);
+    expect(run.code).toBe(0);
+    const dbs = readdirSync(backups).filter((f) => f.endsWith('.db'));
+    expect(dbs.length).toBe(2);
+  });
+
+  it('--keep 非正整数 / 非本子命令参数 → 退出码 2', async () => {
+    const { home } = fakeHome();
+    const badKeep = await cli(home, ['db', 'backup', '--keep', '0']);
+    expect(badKeep.code).toBe(2);
+    expect(badKeep.err).toContain('--keep');
+
+    const badFlag = await cli(home, ['db', 'vacuum', '--dry-run']);
+    expect(badFlag.code).toBe(2);
+  });
+});
+
+describe('db vacuum / rebuild-degree（P2-19A-03）', () => {
+  it('vacuum 打印前后 DB 与 WAL 大小', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => {
+      insertFact(db, {});
+      insertFact(db, { predicate: 'install' });
+    });
+
+    const run = await cli(home, ['db', 'vacuum']);
+    expect(run.code).toBe(0);
+    expect(run.out).toMatch(/DB .+ → .+（WAL .+ → .+）/);
+  });
+
+  it('rebuild-degree 打印修正行数与 degree_mismatch 前后值', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, (db) => {
+      const a = insertFact(db, {});
+      const b = insertFact(db, { predicate: 'install' });
+      insertEdge(db, a, b);
+      // 人为打坏存储列，制造对账差值
+      db.prepare('UPDATE fact SET degree = 9').run();
+    });
+
+    const first = await cli(home, ['db', 'rebuild-degree']);
+    expect(first.code).toBe(0);
+    expect(first.out).toContain('degree 重建完成：2 行；degree_mismatch 2 → 0');
+
+    const second = await cli(home, ['db', 'rebuild-degree']);
+    expect(second.code).toBe(0);
+    expect(second.out).toContain('degree_mismatch 0 → 0');
+  });
+});
+
+describe('db --help', () => {
+  it('db --help / db backup --help 打印用法并退出 0', async () => {
+    const { home } = fakeHome();
+
+    const top = await cli(home, ['db', '--help']);
+    expect(top.code).toBe(0);
+    expect(top.out).toContain('backup [--keep <n>]');
+
+    const sub = await cli(home, ['db', 'backup', '--help']);
+    expect(sub.code).toBe(0);
+    expect(sub.out).toContain('用法：moshi db');
   });
 });
