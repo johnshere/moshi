@@ -13,6 +13,7 @@ import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
 import { ACTIVITY_TTL_MS } from './graph/pure/encoding.js';
 import { traceSummary } from './graph/pure/trace.js';
+import { HistoryPanel } from './history/HistoryPanel.js';
 import { InboxPage } from './inbox/InboxPage.js';
 import { useActivity } from './state/activity.js';
 import { refreshLatestTrace, useTrace } from './state/trace.js';
@@ -153,16 +154,21 @@ function ActivityNote(): JSX.Element {
 function TraceNote(): JSX.Element {
   const trace = useTrace((s) => s.trace);
   const error = useTrace((s) => s.error);
+  const mode = useTrace((s) => s.mode);
+  const replayId = useTrace((s) => s.queryId);
   const summary = traceSummary(trace);
   if (summary === null) {
     return (
       <div style={{ color: '#475569' }}>
-        证据链：无{error === null ? '' : '（接口不可用）'} · 查询一次后自动显示「直击 / 1 跳 / 2+ 跳」
+        证据链：无{error === null ? '' : `（${error}）`} · 查询一次后自动显示「直击 / 1 跳 / 2+ 跳」
       </div>
     );
   }
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#94a3b8' }}>
+      <span style={{ color: mode === 'replay' ? '#f59e0b' : '#475569' }}>
+        {mode === 'replay' ? `回放 ${replayId === null ? '' : replayId.slice(-8)}` : '实时'}
+      </span>
       <span style={{ color: '#cbd5e1' }}>证据链 {summary.query_id.slice(-8)}</span>
       <span>
         {summary.route} · {summary.source}/{summary.model_mode}
@@ -294,6 +300,9 @@ function App(): JSX.Element {
 
       {/* 检查器（P2-06）：右侧抽屉，三视图共用 focusId（表格行 / 3D / 2D 点选都写同一个 store） */}
       <Inspector />
+
+      {/* 历史查询（P2-26）：点一条回放；回放期间实时轮询静默，不把回放顶掉 */}
+      {!isTable && <HistoryPanel />}
 
       <div
         style={{

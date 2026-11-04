@@ -725,11 +725,13 @@ class GraphScene {
     this.traceReadout = traceEdgeReadout(this.traceAttrs);
   }
 
-  /** 换了一份 trace：重算逐边属性 / 节点跳数 / 读数，新 query 播一次入场脉冲 */
+  /** 换了一份 trace：重算逐边属性 / 节点跳数 / 读数，新 query 或回放时播一次入场脉冲 */
   private applyTrace(trace: TraceRecord | null): void {
     this.trace = trace;
     this.recaptureTrace();
-    if (trace !== null && trace.query_id !== this.pulsedQueryId) {
+    // P2-26：回放同一条 query 也要重播（用户点了回放就该看到流动重新走一遍）；
+    // 实时轮询拿到同一个 query_id 时不重播（`refreshLatestTrace` 本身也会跳过同 id）。
+    if (trace !== null && (trace.query_id !== this.pulsedQueryId || useTrace.getState().mode === 'replay')) {
       this.pulsedQueryId = trace.query_id;
       this.pulseTrace();
     }
@@ -1105,9 +1107,14 @@ class GraphScene {
     };
     // P2-25 验收钩子：`calls` 是 `renderCalls` 的别名（台账口述的是 calls）；
     // `trace` / `edges` 让脚本不用截图也能证明"三态同图"（aFlow 0.6 与 0.3 并存）。
+    // P2-26：`mode` / `query_id` 区分「实时」与「历史回放」——回放成功后脚本可直接读
+    // `mode === 'replay' && query_id === <选中的 id>`，不用猜图上是哪条 trace。
+    const traceState = useTrace.getState();
     window.__moshiGraph = {
       ...stats,
       calls: stats.renderCalls,
+      mode: traceState.mode,
+      query_id: traceState.mode === 'replay' ? traceState.queryId : (this.traceSummary?.query_id ?? null),
       trace: this.traceSummary,
       edges: this.traceReadout,
     };

@@ -64,6 +64,13 @@ declare global {
       focusId: string | null;
       /** P2-25：`renderCalls` 的别名（台账验收口述的是 `calls`，两个都发布，脚本任选） */
       calls: number;
+      /**
+       * P2-26：`live` = 跟随最近一次查询；`replay` = 用户在历史面板里选中的回放。
+       * 脚本据此区分「回放成功」与「实时跟着跑」。
+       */
+      mode: 'live' | 'replay';
+      /** P2-26：回放时为回放的 query_id；实时时为图上 trace 的 query_id（无 trace 为 null） */
+      query_id: string | null;
       /** P2-25 证据链摘要：`null` = 无证据链（还没查询 / trace 已被 ring buffer 淘汰） */
       trace: TraceSummary | null;
       /**
