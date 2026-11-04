@@ -19,10 +19,10 @@ import {
 } from './first-run.js';
 
 const TONE_STYLE: Record<BannerSpec['tone'], CSSProperties> = {
-  error: { background: '#450a0a', border: '1px solid #7f1d1d', color: '#fecaca' },
-  info: { background: '#0c1a33', border: '1px solid #1e3a8a', color: '#bfdbfe' },
-  muted: { background: '#111827', border: '1px solid #334155', color: '#cbd5e1' },
-  warn: { background: '#2a1a05', border: '1px solid #78350f', color: '#fde68a' },
+  error: { background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', color: 'var(--color-danger-soft)' },
+  info: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-info-bg)', color: 'var(--color-info-soft)' },
+  muted: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' },
+  warn: { background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', color: 'var(--color-warning-soft)' },
 };
 
 const bannerStyle = (tone: BannerSpec['tone']): CSSProperties => ({
@@ -38,7 +38,7 @@ const bannerStyle = (tone: BannerSpec['tone']): CSSProperties => ({
   flexWrap: 'wrap',
   padding: '8px 14px',
   borderRadius: 8,
-  boxShadow: '0 8px 24px rgba(0,0,0,0.45)',
+  boxShadow: 'var(--shadow-menu)',
   fontSize: 12,
   lineHeight: 1.5,
   ...TONE_STYLE[tone],

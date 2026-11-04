@@ -27,11 +27,11 @@ const panelStyle: CSSProperties = {
   maxHeight: '42vh',
   display: 'flex',
   flexDirection: 'column',
-  background: 'rgba(5, 7, 13, 0.92)',
-  border: '1px solid #1f2937',
+  background: 'color-mix(in srgb, var(--color-bg-base) 92%, transparent)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 6,
   fontSize: 11,
-  color: '#94a3b8',
+  color: 'var(--color-text-secondary)',
   pointerEvents: 'auto',
   overflow: 'hidden',
 };
@@ -41,22 +41,22 @@ const headStyle: CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '5px 8px',
-  borderBottom: '1px solid #1f2937',
-  background: 'rgba(17, 24, 39, 0.85)',
+  borderBottom: '1px solid var(--color-border-subtle)',
+  background: 'color-mix(in srgb, var(--color-bg-overlay) 85%, transparent)',
 };
 
 const smallButtonStyle: CSSProperties = {
   marginLeft: 'auto',
-  background: '#111827',
-  color: '#f59e0b',
-  border: '1px solid #78350f',
+  background: 'var(--color-bg-overlay)',
+  color: 'var(--color-warning)',
+  border: '1px solid var(--color-warning-dim)',
   borderRadius: 4,
   padding: '1px 8px',
   cursor: 'pointer',
   font: 'inherit',
 };
 
-const MISS_STYLE: CSSProperties = { padding: '6px 8px', color: '#f59e0b' };
+const MISS_STYLE: CSSProperties = { padding: '6px 8px', color: 'var(--color-warning)' };
 
 export function HistoryPanel(): JSX.Element {
   const [entries, setEntries] = useState<TraceListEntry[] | null>(null);
@@ -95,8 +95,8 @@ export function HistoryPanel(): JSX.Element {
   return (
     <section style={panelStyle} aria-label="历史查询">
       <div style={headStyle}>
-        <span style={{ color: '#cbd5e1' }}>历史查询</span>
-        <span style={{ color: '#475569' }}>最近 {HISTORY_LIMIT} 次</span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>历史查询</span>
+        <span style={{ color: 'var(--color-text-faint)' }}>最近 {HISTORY_LIMIT} 次</span>
         {mode === 'replay' && (
           <button type="button" onClick={() => void backToLiveTrace()} style={smallButtonStyle}>
             回到实时
@@ -111,7 +111,7 @@ export function HistoryPanel(): JSX.Element {
       )}
       <div style={{ overflowY: 'auto', padding: '3px 6px 6px' }}>
         {rows.length === 0 ? (
-          <div style={{ padding: '3px 2px', color: '#475569' }}>{historyEmptyText(rows, error)}</div>
+          <div style={{ padding: '3px 2px', color: 'var(--color-text-faint)' }}>{historyEmptyText(rows, error)}</div>
         ) : (
           <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
             {rows.map((row) => {
@@ -129,18 +129,18 @@ export function HistoryPanel(): JSX.Element {
                       gap: 8,
                       width: '100%',
                       textAlign: 'left',
-                      background: active ? '#1e293b' : 'transparent',
+                      background: active ? 'var(--color-bg-hover)' : 'transparent',
                       border: 'none',
                       borderRadius: 4,
                       padding: '3px 4px',
                       cursor: 'pointer',
-                      color: active ? '#f8fafc' : '#94a3b8',
+                      color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
                       font: 'inherit',
                     }}
                   >
-                    <span style={{ color: '#64748b', fontVariantNumeric: 'tabular-nums' }}>{row.clock}</span>
-                    <span style={{ color: '#7dd3fc' }}>{row.shortId}</span>
-                    <span style={{ marginLeft: 'auto', color: '#475569' }}>{row.meta}</span>
+                    <span style={{ color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums' }}>{row.clock}</span>
+                    <span style={{ color: 'var(--color-accent-soft)' }}>{row.shortId}</span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--color-text-faint)' }}>{row.meta}</span>
                   </button>
                 </li>
               );
@@ -148,7 +148,7 @@ export function HistoryPanel(): JSX.Element {
           </ul>
         )}
       </div>
-      <div style={{ padding: '0 8px 5px', color: '#334155' }}>
+      <div style={{ padding: '0 8px 5px', color: 'var(--color-text-faint)' }}>
         {mode === 'live' ? '实时：跟随最近一次查询 · 点一条回放' : '回放：显示选中的历史 trace'}
       </div>
     </section>

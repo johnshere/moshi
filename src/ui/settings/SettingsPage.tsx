@@ -14,12 +14,12 @@ export function SettingsPage(): ReactElement {
   return (
     <div
       data-testid="settings-page"
-      style={{ position: 'absolute', inset: 0, overflow: 'auto', background: '#070c16' }}
+      style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
     >
-      <div style={{ padding: '14px 18px 0', color: '#e2e8f0', fontSize: 15, fontWeight: 600 }}>
+      <div style={{ padding: '14px 18px 0', color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>
         设置与诊断
       </div>
-      <div style={{ color: '#64748b', fontSize: 12, padding: '4px 18px 10px' }}>
+      <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '4px 18px 10px' }}>
         配置（白名单键，原子写回 TOML）、索引维护、隐私与全库导出，以及只读自检（I1–I10 / 图质量 / 模型归档）。
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 18px 18px' }}>

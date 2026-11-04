@@ -22,8 +22,8 @@ const shellStyle: CSSProperties = {
   width: '100vw',
   height: '100vh',
   overflow: 'hidden',
-  background: '#070c16',
-  color: '#cbd5e1',
+  background: 'var(--color-bg-base)',
+  color: 'var(--color-text-secondary)',
   fontFamily: 'ui-sans-serif, system-ui, "Segoe UI", sans-serif',
 };
 
@@ -32,15 +32,15 @@ const navStyle: CSSProperties = {
   flex: '0 0 172px',
   display: 'flex',
   flexDirection: 'column',
-  background: '#0b1220',
-  borderRight: '1px solid #1e293b',
+  background: 'var(--color-bg-raised)',
+  borderRight: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
   padding: '10px 8px',
   gap: 2,
 };
 
 const brandStyle: CSSProperties = {
-  color: '#e2e8f0',
+  color: 'var(--color-text-primary)',
   fontSize: 15,
   fontWeight: 600,
   letterSpacing: 1,
@@ -54,8 +54,8 @@ const topbarStyle: CSSProperties = {
   alignItems: 'center',
   gap: 12,
   padding: '0 12px',
-  background: '#0b1220',
-  borderBottom: '1px solid #1e293b',
+  background: 'var(--color-bg-raised)',
+  borderBottom: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
 };
 
@@ -66,8 +66,8 @@ function navItemStyle(active: boolean): CSSProperties {
     gap: 8,
     padding: '7px 10px',
     borderRadius: 5,
-    color: active ? '#f8fafc' : '#94a3b8',
-    background: active ? '#1e293b' : 'transparent',
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    background: active ? 'var(--color-bg-hover)' : 'transparent',
     textDecoration: 'none',
     fontSize: 13,
     cursor: 'pointer',
@@ -195,7 +195,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
           );
         })}
         <div style={{ flex: 1 }} />
-        <div style={{ color: '#475569', fontSize: 11, padding: '0 10px' }}>本地知识图谱</div>
+        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>本地知识图谱</div>
       </aside>
 
       <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -209,7 +209,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
                 data-testid={`light-${light.key}`}
                 data-state={light.state}
                 title={light.text}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-text-secondary)' }}
               >
                 <span
                   style={{
@@ -229,11 +229,11 @@ export function Shell({ route, children }: ShellProps): ReactElement {
             data-testid="inbox-badge"
             title="待办：消解确认 / 低置信 / 淘汰候选（按单页 200 条估算）"
             style={{
-              color: '#fbbf24',
+              color: 'var(--color-warning-soft)',
               textDecoration: 'none',
               fontSize: 12,
-              border: '1px solid #78350f',
-              background: '#1c1205',
+              border: '1px solid var(--color-warning-dim)',
+              background: 'var(--color-warning-bg)',
               borderRadius: 999,
               padding: '2px 10px',
             }}

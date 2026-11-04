@@ -39,18 +39,18 @@ const SEARCH_DEBOUNCE_MS = 300;
 const GRID = '132px 88px minmax(240px, 1fr) 64px 64px 96px 64px';
 
 const STATUS_COLOR: Record<string, string> = {
-  active: '#34d399',
-  disputed: '#f59e0b',
-  invalidated: '#ef4444',
-  quarantined: '#a78bfa',
-  superseded: '#64748b',
+  active: 'var(--color-success)',
+  disputed: 'var(--color-warning)',
+  invalidated: 'var(--color-danger)',
+  quarantined: 'var(--color-accent-alt)',
+  superseded: 'var(--color-text-muted)',
 };
 
 function chip(active: boolean): CSSProperties {
   return {
-    background: active ? '#1e293b' : '#0b1220',
-    color: active ? '#f8fafc' : '#94a3b8',
-    border: `1px solid ${active ? '#334155' : '#1f2937'}`,
+    background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
     borderRadius: 4,
     padding: '2px 10px',
     cursor: active ? 'default' : 'pointer',
@@ -285,8 +285,8 @@ export function FactsTable(): JSX.Element {
         inset: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: '#05070d',
-        color: '#cbd5e1',
+        background: 'var(--color-bg-base)',
+        color: 'var(--color-text-secondary)',
         fontSize: 12,
         // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + P2-05 筛选条）
         paddingTop: 92,
@@ -299,7 +299,7 @@ export function FactsTable(): JSX.Element {
           gap: 8,
           alignItems: 'center',
           padding: '6px 12px',
-          borderBottom: '1px solid #1f2937',
+          borderBottom: '1px solid var(--color-border-subtle)',
           flexWrap: 'wrap',
         }}
       >
@@ -324,9 +324,9 @@ export function FactsTable(): JSX.Element {
             }
           }}
           style={{
-            background: '#0b1220',
-            color: '#e2e8f0',
-            border: '1px solid #1f2937',
+            background: 'var(--color-bg-raised)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--color-border-subtle)',
             borderRadius: 4,
             padding: '3px 8px',
             font: 'inherit',
@@ -346,7 +346,7 @@ export function FactsTable(): JSX.Element {
             清除
           </button>
         )}
-        <span style={{ color: '#475569', marginLeft: 4 }}>排序</span>
+        <span style={{ color: 'var(--color-text-faint)', marginLeft: 4 }}>排序</span>
         {(['time', 'importance'] as const).map((k) => (
           <button
             key={k}
@@ -360,12 +360,12 @@ export function FactsTable(): JSX.Element {
             {k === 'time' ? '时间' : '重要性'}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto', color: '#475569' }}>
+        <span style={{ marginLeft: 'auto', color: 'var(--color-text-faint)' }}>
           {sort === 'time' ? 'valid_at DESC' : 'importance DESC'} · keyset 游标（SQL 层分页）
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '4px 12px', borderBottom: '1px solid #1f2937', color: '#64748b', background: '#0b1220' }} role="row">
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '4px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', background: 'var(--color-bg-raised)' }} role="row">
         <span role="columnheader">时间</span>
         <span role="columnheader">类型</span>
         <span role="columnheader">内容</span>
@@ -383,7 +383,7 @@ export function FactsTable(): JSX.Element {
         style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}
       >
         {rows.length === 0 && (
-          <div style={{ padding: '20px 16px', color: '#64748b' }}>
+          <div style={{ padding: '20px 16px', color: 'var(--color-text-muted)' }}>
             {loading
               ? '正在取第一页…'
               : error !== null
@@ -418,33 +418,33 @@ export function FactsTable(): JSX.Element {
                   alignItems: 'center',
                   padding: '0 12px',
                   boxSizing: 'border-box',
-                  borderBottom: '1px solid #111827',
-                  background: selected ? '#132033' : item.index % 2 === 0 ? 'transparent' : 'rgba(148,163,184,0.03)',
-                  boxShadow: selected ? 'inset 2px 0 0 #38bdf8' : 'none',
+                  borderBottom: '1px solid var(--color-bg-overlay)',
+                  background: selected ? 'var(--color-bg-active)' : item.index % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--color-text-secondary) 3%, transparent)',
+                  boxShadow: selected ? 'inset 2px 0 0 var(--color-accent)' : 'none',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                 }}
               >
-                <span role="gridcell" style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                   {formatLocalMinute(row.valid_at)}
                 </span>
-                <span role="gridcell" style={{ color: '#7dd3fc', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                <span role="gridcell" style={{ color: 'var(--color-accent-soft)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {row.ftype}
                 </span>
-                <span role="gridcell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: '#e2e8f0' }}>
+                <span role="gridcell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-primary)' }}>
                   {oneLine(row.content)}
                 </span>
-                <span role="gridcell" style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                   {formatScore(row.confidence)}
                 </span>
-                <span role="gridcell" style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                   {formatScore(row.strength)}
                 </span>
-                <span role="gridcell" style={{ color: STATUS_COLOR[row.epistemic_status] ?? '#94a3b8' }}>
+                <span role="gridcell" style={{ color: STATUS_COLOR[row.epistemic_status] ?? 'var(--color-text-secondary)' }}>
                   {row.epistemic_status}
                 </span>
-                <span role="gridcell" style={{ color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                   {formatScore(row.importance)}
                 </span>
               </div>
@@ -458,9 +458,9 @@ export function FactsTable(): JSX.Element {
           display: 'flex',
           gap: 14,
           padding: '4px 12px',
-          borderTop: '1px solid #1f2937',
-          color: '#475569',
-          background: '#0b1220',
+          borderTop: '1px solid var(--color-border-subtle)',
+          color: 'var(--color-text-faint)',
+          background: 'var(--color-bg-raised)',
         }}
       >
         <span>
@@ -470,7 +470,7 @@ export function FactsTable(): JSX.Element {
           请求 {requests.length} 次 · 单次 limit ≤ {PAGE_LIMIT}
         </span>
         <span>{done ? '已到底（next_cursor=null）' : loading ? '加载中…' : '滚动到底部前 20 行自动续拉'}</span>
-        {error !== null && <span style={{ color: '#ef4444' }}>取数失败：{error}</span>}
+        {error !== null && <span style={{ color: 'var(--color-danger)' }}>取数失败：{error}</span>}
         <span style={{ marginLeft: 'auto' }}>点行 = 选中（与 2D/3D 共用 useSelection）</span>
       </div>
     </div>

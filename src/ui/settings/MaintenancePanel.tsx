@@ -61,21 +61,21 @@ async function postRebuild(target: string, dryRun: boolean): Promise<RebuildResu
 }
 
 const panelStyle: CSSProperties = {
-  background: '#0b1220',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 6,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
   gap: 10,
-  color: '#cbd5e1',
+  color: 'var(--color-text-secondary)',
   fontSize: 13,
 };
 
 const buttonStyle: CSSProperties = {
-  background: '#1e293b',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-hover)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 4,
   padding: '6px 12px',
   fontSize: 12,
@@ -104,11 +104,11 @@ export function MaintenancePanel(): ReactElement {
 
   return (
     <section data-testid="maintenance-panel" style={panelStyle}>
-      <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>维护 / 索引重建</div>
-      <div style={{ color: '#64748b', fontSize: 11 }}>
+      <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>维护 / 索引重建</div>
+      <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
         重建会扫描全库；默认先勾选「只统计」看差异，再取消勾选执行。执行期间 API 可能短暂变慢。
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#94a3b8', fontSize: 12 }}>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-secondary)', fontSize: 12 }}>
         <input
           type="checkbox"
           data-testid="maintenance-dry-run"
@@ -137,7 +137,7 @@ export function MaintenancePanel(): ReactElement {
       {error !== null && (
         <div
           data-testid="maintenance-error"
-          style={{ color: '#fca5a5', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 4, padding: '6px 8px' }}
         >
           {error}
         </div>
@@ -145,7 +145,7 @@ export function MaintenancePanel(): ReactElement {
 
       {result !== null && (
         <div data-testid="maintenance-result" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: '#94a3b8', fontSize: 12 }}>
+          <div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
             {result.target} · {result.dry_run ? 'dry_run' : '已执行'} · {String(result.elapsed_ms)}ms
             {result.skipped !== undefined && result.skipped.length > 0
               ? ` · 跳过 ${result.skipped.join(', ')}`
@@ -153,7 +153,7 @@ export function MaintenancePanel(): ReactElement {
           </div>
           <table style={{ borderCollapse: 'collapse', fontSize: 12, width: 'min(520px, 100%)' }}>
             <thead>
-              <tr style={{ color: '#64748b', textAlign: 'left' }}>
+              <tr style={{ color: 'var(--color-text-muted)', textAlign: 'left' }}>
                 <th style={{ padding: '2px 8px 2px 0', fontWeight: 500 }}>指标</th>
                 <th style={{ padding: '2px 8px', fontWeight: 500 }}>before</th>
                 <th style={{ padding: '2px 0', fontWeight: 500 }}>after</th>
@@ -161,10 +161,10 @@ export function MaintenancePanel(): ReactElement {
             </thead>
             <tbody>
               {COUNT_LABELS.map((c) => (
-                <tr key={c.key} style={{ color: '#cbd5e1' }}>
+                <tr key={c.key} style={{ color: 'var(--color-text-secondary)' }}>
                   <td style={{ padding: '2px 8px 2px 0' }}>{c.label}</td>
                   <td style={{ padding: '2px 8px' }}>{result.before[c.key]}</td>
-                  <td style={{ padding: '2px 0', color: result.after[c.key] < result.before[c.key] ? '#86efac' : '#e2e8f0' }}>
+                  <td style={{ padding: '2px 0', color: result.after[c.key] < result.before[c.key] ? 'var(--color-success-soft)' : 'var(--color-text-primary)' }}>
                     {result.after[c.key]}
                   </td>
                 </tr>
@@ -175,10 +175,10 @@ export function MaintenancePanel(): ReactElement {
             <pre
               style={{
                 margin: 0,
-                color: '#94a3b8',
+                color: 'var(--color-text-secondary)',
                 fontSize: 11,
-                background: '#0f172a',
-                border: '1px solid #1f2937',
+                background: 'var(--color-bg-overlay)',
+                border: '1px solid var(--color-border-subtle)',
                 borderRadius: 4,
                 padding: '6px 8px',
                 overflow: 'auto',

@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/vite';
 
 /**
  * `src/ui` 是独立 Vite 工程（详设 §3.1）：产物落 `src/app/ui/dist`，由
@@ -14,7 +15,7 @@ import react from '@vitejs/plugin-react';
 const daemon = process.env['MOSHI_DAEMON'] ?? 'http://127.0.0.1:53000';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   base: '/ui/graph/',
   build: {
     outDir: '../app/ui/dist',

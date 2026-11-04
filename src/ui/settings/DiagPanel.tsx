@@ -68,15 +68,15 @@ const panelStyle: CSSProperties = {
   flexDirection: 'column',
   gap: 10,
   padding: '14px 18px',
-  color: '#cbd5e1',
+  color: 'var(--color-text-secondary)',
   fontSize: 13,
-  background: '#0b1220',
+  background: 'var(--color-bg-raised)',
   boxSizing: 'border-box',
 };
 
 const cardStyle: CSSProperties = {
-  background: '#111827',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-overlay)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 6,
   padding: '10px 12px',
   display: 'flex',
@@ -85,7 +85,7 @@ const cardStyle: CSSProperties = {
 };
 
 const sectionTitleStyle: CSSProperties = {
-  color: '#94a3b8',
+  color: 'var(--color-text-secondary)',
   fontSize: 12,
   letterSpacing: 0.5,
   textTransform: 'uppercase',
@@ -99,8 +99,8 @@ const rowStyle: CSSProperties = {
 };
 
 const chipStyle: CSSProperties = {
-  background: '#0b1220',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 4,
   padding: '2px 8px',
   fontFamily: 'monospace',
@@ -123,7 +123,7 @@ function formatSize(value: number | null): string {
 }
 
 function invariantColor(ok: boolean): string {
-  return ok ? '#4ade80' : '#f87171';
+  return ok ? 'var(--color-success)' : 'var(--color-danger)';
 }
 
 export function DiagPanel(): JSX.Element {
@@ -197,9 +197,9 @@ export function DiagPanel(): JSX.Element {
   if (error !== null) {
     return (
       <div style={panelStyle}>
-        <div style={{ ...cardStyle, borderColor: '#7f1d1d' }}>
+        <div style={{ ...cardStyle, borderColor: 'var(--color-danger-dim)' }}>
           <span style={sectionTitleStyle}>自检数据加载失败</span>
-          <span style={{ color: '#fca5a5' }}>{error}</span>
+          <span style={{ color: 'var(--color-danger-soft)' }}>{error}</span>
           <button type="button" onClick={() => void load()} disabled={busy}>
             重试
           </button>
@@ -222,7 +222,7 @@ export function DiagPanel(): JSX.Element {
     <div style={panelStyle}>
       <div style={rowStyle}>
         <span style={sectionTitleStyle}>自检</span>
-        <span style={{ color: failures.length === 0 ? '#4ade80' : '#f87171' }}>
+        <span style={{ color: failures.length === 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
           {failures.length === 0 ? 'I1–I10 全绿' : `不变量失败：${failures.join(', ')}`}
         </span>
         <button type="button" onClick={() => void load()} disabled={busy}>
@@ -233,7 +233,7 @@ export function DiagPanel(): JSX.Element {
       <div style={cardStyle}>
         <span style={sectionTitleStyle}>数据库</span>
         <div style={rowStyle}>
-          {chip(`完整性 ${report.db.integrity}`, report.db.integrity === 'ok' ? '#4ade80' : '#f87171')}
+          {chip(`完整性 ${report.db.integrity}`, report.db.integrity === 'ok' ? 'var(--color-success)' : 'var(--color-danger)')}
           {chip(`user_version ${String(report.db.user_version)}`)}
           {chip(`大小 ${formatSize(report.db.size_mb)}`)}
           {chip(`WAL ${formatSize(report.db.wal_mb)}`)}
@@ -243,11 +243,11 @@ export function DiagPanel(): JSX.Element {
       <div style={cardStyle}>
         <span style={sectionTitleStyle}>索引</span>
         <div style={rowStyle}>
-          {chip(`FTS ${report.indexes.fts}`, report.indexes.fts === 'ok' ? '#4ade80' : '#fbbf24')}
-          {chip(`向量 ${report.indexes.vec}`, report.indexes.vec === 'ok' ? '#4ade80' : '#fbbf24')}
+          {chip(`FTS ${report.indexes.fts}`, report.indexes.fts === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
+          {chip(`向量 ${report.indexes.vec}`, report.indexes.vec === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
           {chip(
             `degree 不一致 ${String(report.indexes.degree_mismatch)}`,
-            report.indexes.degree_mismatch === 0 ? '#4ade80' : '#f87171',
+            report.indexes.degree_mismatch === 0 ? 'var(--color-success)' : 'var(--color-danger)',
           )}
         </div>
       </div>
@@ -279,11 +279,11 @@ export function DiagPanel(): JSX.Element {
         <div style={rowStyle}>
           {chip(
             `实体消解待办 ${String(report.resolve.pending)}`,
-            report.resolve.pending === 0 ? '#4ade80' : '#fbbf24',
+            report.resolve.pending === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
           )}
           {chip(
             `结构待晋升 ${String(report.schema.pending_promotions)}`,
-            report.schema.pending_promotions === 0 ? '#4ade80' : '#fbbf24',
+            report.schema.pending_promotions === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
           )}
         </div>
       </div>
@@ -322,7 +322,7 @@ export function DiagPanel(): JSX.Element {
           </button>
         </div>
         {evalMessage !== null && (
-          <div data-testid="diag-eval-message" style={{ color: '#fbbf24', fontSize: 12 }}>
+          <div data-testid="diag-eval-message" style={{ color: 'var(--color-warning-soft)', fontSize: 12 }}>
             {evalMessage}
           </div>
         )}

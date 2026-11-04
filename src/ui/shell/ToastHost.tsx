@@ -20,10 +20,10 @@ const stackStyle: CSSProperties = {
 };
 
 const KIND_STYLE: Record<ToastKind, CSSProperties> = {
-  info: { background: '#0f172a', border: '1px solid #334155', color: '#cbd5e1' },
-  success: { background: '#052e16', border: '1px solid #166534', color: '#bbf7d0' },
-  error: { background: '#450a0a', border: '1px solid #991b1b', color: '#fecaca' },
-  undo: { background: '#1c1205', border: '1px solid #b45309', color: '#fde68a' },
+  info: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' },
+  success: { background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', color: 'var(--color-success-soft)' },
+  error: { background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', color: 'var(--color-danger-soft)' },
+  undo: { background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', color: 'var(--color-warning-soft)' },
 };
 
 const toastStyle: CSSProperties = {
@@ -33,7 +33,7 @@ const toastStyle: CSSProperties = {
   gap: 12,
   padding: '8px 12px',
   borderRadius: 5,
-  boxShadow: '0 8px 24px rgba(0,0,0,.45)',
+  boxShadow: 'var(--shadow-menu)',
   fontSize: 12,
   lineHeight: 1.4,
 };
@@ -48,15 +48,15 @@ function ToastRow({ toast, now }: { toast: Toast; now: number }): ReactElement {
   return (
     <div style={{ ...toastStyle, ...KIND_STYLE[toast.kind] }} role="status" aria-live="polite">
       <span style={{ flex: 1, minWidth: 0 }}>{toast.text}</span>
-      {seconds === null ? null : <span style={{ color: '#f59e0b', fontVariantNumeric: 'tabular-nums' }}>{seconds}s</span>}
+      {seconds === null ? null : <span style={{ color: 'var(--color-warning)', fontVariantNumeric: 'tabular-nums' }}>{seconds}s</span>}
       {toast.actionLabel === undefined ? null : (
         <button
           type="button"
           onClick={() => useToast.getState().runAction(toast.id)}
           style={{
-            background: '#0b1220',
-            color: '#f8fafc',
-            border: '1px solid #475569',
+            background: 'var(--color-bg-raised)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--color-text-faint)',
             borderRadius: 4,
             padding: '2px 10px',
             font: 'inherit',

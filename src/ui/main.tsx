@@ -5,6 +5,7 @@
  * 页面，`/ui` 与未知路径回落到图谱（服务端已把 `/ui` 302 到 `/ui/graph`）。仍不引路由库
  * （概设 §8.9），URL 是唯一真相源；`Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
  */
+import './styles/app.css';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { fetchGraph, resolveToken, type GraphPayload } from './api.js';
@@ -74,16 +75,16 @@ function viewHref(view: View): string {
 function Badge({ label, value }: { label: string; value: string }): JSX.Element {
   return (
     <span style={{ marginRight: 14, whiteSpace: 'nowrap' }}>
-      <span style={{ color: '#64748b' }}>{label}</span> <span style={{ color: '#e2e8f0' }}>{value}</span>
+      <span style={{ color: 'var(--color-text-muted)' }}>{label}</span> <span style={{ color: 'var(--color-text-primary)' }}>{value}</span>
     </span>
   );
 }
 
 function switchStyle(active: boolean): CSSProperties {
   return {
-    background: active ? '#1e293b' : '#0b1220',
-    color: active ? '#f8fafc' : '#94a3b8',
-    border: `1px solid ${active ? '#334155' : '#1f2937'}`,
+    background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
     borderRadius: 4,
     padding: '2px 10px',
     cursor: active ? 'default' : 'pointer',
@@ -92,9 +93,9 @@ function switchStyle(active: boolean): CSSProperties {
 }
 
 const buttonStyle: CSSProperties = {
-  background: '#111827',
-  color: '#cbd5e1',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-overlay)',
+  color: 'var(--color-text-secondary)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 4,
   padding: '2px 10px',
   cursor: 'pointer',
@@ -126,7 +127,7 @@ function ActivityNote(): JSX.Element {
   const now = useNow(live);
   if (snapshot === null || hitId === null) {
     return (
-      <div style={{ color: '#475569' }}>
+      <div style={{ color: 'var(--color-text-faint)' }}>
         当前无活跃调用 · 画布默认沉默（点一个节点 = 一次命中，亮 4–6 秒）
       </div>
     );
@@ -139,7 +140,7 @@ function ActivityNote(): JSX.Element {
       ? `（已截断 ${snapshot.truncatedNodes} 节点 / ${snapshot.truncatedEdges} 边，上限 64 / 256）`
       : '';
   return (
-    <div style={{ color: expired ? '#475569' : '#94a3b8' }}>
+    <div style={{ color: expired ? 'var(--color-text-faint)' : 'var(--color-text-secondary)' }}>
       最近调用：命中 {snapshot.activeNodes} 条（1 跳）+ {snapshot.activeEdges} 条边 ·{' '}
       {expired ? `已回落（${seconds} 秒前）` : `${seconds} 秒前`}
       {truncated}
@@ -165,23 +166,23 @@ function TraceNote(): JSX.Element {
   const summary = traceSummary(trace);
   if (summary === null) {
     return (
-      <div style={{ color: '#475569' }}>
+      <div style={{ color: 'var(--color-text-faint)' }}>
         证据链：无{error === null ? '' : `（${error}）`} · 查询一次后自动显示「直击 / 1 跳 / 2+ 跳」
       </div>
     );
   }
   return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: '#94a3b8' }}>
-      <span style={{ color: mode === 'replay' ? '#f59e0b' : '#475569' }}>
+    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--color-text-secondary)' }}>
+      <span style={{ color: mode === 'replay' ? 'var(--color-warning)' : 'var(--color-text-faint)' }}>
         {mode === 'replay' ? `回放 ${replayId === null ? '' : replayId.slice(-8)}` : '实时'}
       </span>
-      <span style={{ color: '#cbd5e1' }}>证据链 {summary.query_id.slice(-8)}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>证据链 {summary.query_id.slice(-8)}</span>
       <span>
         {summary.route} · {summary.source}/{summary.model_mode}
       </span>
-      <span style={{ color: '#f8fafc' }}>● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）</span>
-      <span style={{ color: '#7dd3fc' }}>→ 1 跳 {summary.hop1}（快流）</span>
-      <span style={{ color: '#64748b' }}>→ 2+ 跳 {summary.hop2}（慢流）</span>
+      <span style={{ color: 'var(--color-text-primary)' }}>● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）</span>
+      <span style={{ color: 'var(--color-accent-soft)' }}>→ 1 跳 {summary.hop1}（快流）</span>
+      <span style={{ color: 'var(--color-text-muted)' }}>→ 2+ 跳 {summary.hop2}（慢流）</span>
       <span>证据边 {summary.edges}</span>
     </div>
   );
@@ -242,12 +243,12 @@ function ImpactPreview({ ids }: { ids: readonly string[] }): JSX.Element {
         {busy ? '预览中…' : '预览影响'}
       </button>
       {counts !== null && (
-        <span style={{ marginLeft: 8, color: '#cbd5e1' }}>
+        <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)' }}>
           事实 {counts.facts} · 边 {counts.edges} · 主题 {counts.topics} · 级联失效{' '}
           {counts.invalidated_by_cascade}
         </span>
       )}
-      {error !== null && <span style={{ marginLeft: 8, color: '#ef4444' }}>预览失败：{error}</span>}
+      {error !== null && <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>预览失败：{error}</span>}
     </span>
   );
 }
@@ -433,16 +434,16 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           left: 0,
           right: 0,
           padding: '10px 14px',
-          background: isTable ? 'transparent' : 'linear-gradient(180deg, rgba(5,7,13,0.92), rgba(5,7,13,0))',
+          background: isTable ? 'transparent' : 'linear-gradient(180deg, color-mix(in srgb, var(--color-bg-base) 92%, transparent), transparent)',
           pointerEvents: 'none',
           fontSize: 12,
           lineHeight: 1.7,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 14, color: '#f8fafc', letterSpacing: 1 }}>
+          <div style={{ fontSize: 14, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
             默识 · 记忆图谱{' '}
-            <span style={{ color: '#475569', fontSize: 12 }}>{tag}</span>
+            <span style={{ color: 'var(--color-text-faint)', fontSize: 12 }}>{tag}</span>
           </div>
           <span style={{ pointerEvents: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
             {VIEWS.map((item) => (
@@ -486,7 +487,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                 <button
                   type="button"
                   onClick={() => void load(FULL_LIMIT)}
-                  style={{ ...buttonStyle, background: '#0b1220', color: '#f59e0b', border: '1px solid #78350f', marginLeft: 6 }}
+                  style={{ ...buttonStyle, background: 'var(--color-bg-raised)', color: 'var(--color-warning)', border: '1px solid var(--color-warning-dim)', marginLeft: 6 }}
                 >
                   加载全量（{FULL_LIMIT}）
                 </button>
@@ -496,19 +497,19 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           </div>
         )}
         {!isTable && meta !== undefined && meta.truncated && (
-          <div style={{ color: '#f59e0b' }}>
+          <div style={{ color: 'var(--color-warning)' }}>
             结果被截断：只返回了 {meta.returned_nodes} / {meta.total_nodes} 个节点（limit={meta.limit}）。
             点「加载全量」一次取满（{FULL_LIMIT}），或用 `?limit=` / cursor 分批取。
           </div>
         )}
         {!isTable && meta !== undefined && meta.nodes_without_layout > 0 && (
-          <div style={{ color: '#64748b' }}>
+          <div style={{ color: 'var(--color-text-muted)' }}>
             另有 {meta.nodes_without_layout} 个活跃事实还没有 layout 坐标，未参与绘制。
           </div>
         )}
-        {!isTable && error !== null && <div style={{ color: '#ef4444' }}>取数失败：{error}</div>}
+        {!isTable && error !== null && <div style={{ color: 'var(--color-danger)' }}>取数失败：{error}</div>}
         {!isTable && focusNote !== null && (
-          <div style={{ color: '#f59e0b' }} data-testid="focus-miss">
+          <div style={{ color: 'var(--color-warning)' }} data-testid="focus-miss">
             {focusNote}
           </div>
         )}
@@ -523,7 +524,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
             position: 'absolute',
             bottom: 8,
             left: 14,
-            color: '#475569',
+            color: 'var(--color-text-faint)',
             fontSize: 11,
             pointerEvents: 'none',
           }}

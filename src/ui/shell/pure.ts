@@ -249,8 +249,8 @@ export function statusLights(status: DaemonStatus | null): StatusLight[] {
 
 /** 灯色（inline 风格沿用现状，P2-19-B 再统一 token）。 */
 export function lightColor(state: LightState): string {
-  if (state === 'ok') return '#34d399';
-  if (state === 'warn') return '#f59e0b';
-  if (state === 'error') return '#ef4444';
-  return '#475569';
+  if (state === 'ok') return 'var(--color-success)';
+  if (state === 'warn') return 'var(--color-warning)';
+  if (state === 'error') return 'var(--color-danger)';
+  return 'var(--color-text-faint)';
 }

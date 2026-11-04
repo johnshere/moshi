@@ -60,9 +60,9 @@ const pageStyle = {
 } as const;
 
 const tabStyle = (active: boolean): CSSProperties => ({
-  background: active ? '#1e293b' : '#0b1220',
-  color: active ? '#f8fafc' : '#94a3b8',
-  border: `1px solid ${active ? '#334155' : '#1f2937'}`,
+  background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
+  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+  border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
   borderRadius: 4,
   padding: '4px 12px',
   cursor: active ? 'default' : 'pointer',
@@ -74,10 +74,10 @@ const rowStyle: CSSProperties = {
   gap: 10,
   alignItems: 'flex-start',
   padding: '7px 4px',
-  borderBottom: '1px solid #111827',
+  borderBottom: '1px solid var(--color-bg-overlay)',
 };
 
-const muted: CSSProperties = { color: '#64748b' };
+const muted: CSSProperties = { color: 'var(--color-text-muted)' };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -112,15 +112,15 @@ function RowButton(props: {
   onClick: () => void;
 }): JSX.Element {
   const color =
-    props.tone === 'danger' ? '#fca5a5' : props.tone === 'primary' ? '#93c5fd' : '#94a3b8';
+    props.tone === 'danger' ? 'var(--color-danger-soft)' : props.tone === 'primary' ? 'var(--color-info-soft)' : 'var(--color-text-secondary)';
   return (
     <button
       type="button"
       disabled={props.disabled}
       onClick={props.onClick}
       style={{
-        background: '#0b1220',
-        border: '1px solid #1f2937',
+        background: 'var(--color-bg-raised)',
+        border: '1px solid var(--color-border-subtle)',
         borderRadius: 3,
         color,
         padding: '1px 8px',
@@ -146,7 +146,7 @@ function FactCheckbox(props: {
       checked={props.checked}
       onChange={() => props.onToggle(props.id)}
       aria-label={`选择 ${props.id}`}
-      style={{ marginTop: 3, accentColor: '#3b82f6' }}
+      style={{ marginTop: 3, accentColor: 'var(--color-info-strong)' }}
     />
   );
 }
@@ -327,15 +327,15 @@ export function InboxPage(): JSX.Element {
           <div
             key={row.id}
             data-fact-id={row.id}
-            style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+            style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
           >
             <span style={{ ...muted, width: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {row.alias}
             </span>
-            <span style={{ color: '#94a3b8' }}>→</span>
-            <span style={{ color: '#e2e8f0', flex: 1 }}>{row.canonical_name}</span>
+            <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
+            <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.canonical_name}</span>
             <span style={{ ...muted, fontFamily: 'monospace' }}>{row.entity_id}</span>
-            <span style={{ color: '#60a5fa', width: 60, textAlign: 'right' }}>
+            <span style={{ color: 'var(--color-info)', width: 60, textAlign: 'right' }}>
               {row.confidence.toFixed(3)}
             </span>
             <span style={{ display: 'inline-flex', gap: 6 }}>
@@ -364,12 +364,12 @@ export function InboxPage(): JSX.Element {
             <div
               key={row.id}
               data-fact-id={row.id}
-              style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+              style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
             >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
-              <span style={{ color: '#e2e8f0', flex: 1 }}>{row.content}</span>
+              <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.content}</span>
               <span style={{ ...muted, width: 110, textAlign: 'right' }}>conf {row.confidence.toFixed(2)}</span>
-              <span style={{ color: '#60a5fa', width: 110, textAlign: 'right' }}>
+              <span style={{ color: 'var(--color-info)', width: 110, textAlign: 'right' }}>
                 imp {row.importance.toFixed(2)}
               </span>
               <span style={{ display: 'inline-flex', gap: 6 }}>
@@ -392,11 +392,11 @@ export function InboxPage(): JSX.Element {
             <div
               key={row.id}
               data-fact-id={row.id}
-              style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+              style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
             >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
-              <span style={{ color: '#e2e8f0', flex: 1 }}>{row.content}</span>
-              <span style={{ color: '#f59e0b', width: 110, textAlign: 'right' }}>
+              <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.content}</span>
+              <span style={{ color: 'var(--color-warning)', width: 110, textAlign: 'right' }}>
                 str {row.strength.toFixed(2)}
               </span>
               <span style={{ ...muted, width: 170, textAlign: 'right' }}>
@@ -415,7 +415,7 @@ export function InboxPage(): JSX.Element {
   return (
     <div style={pageStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 15, color: '#f8fafc', letterSpacing: 1 }}>
+        <div style={{ fontSize: 15, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
           默识 · 待办 <span style={{ ...muted, fontSize: 12 }}>三队列 / §10.6</span>
         </div>
         <span style={{ display: 'inline-flex', gap: 6 }}>
@@ -451,7 +451,7 @@ export function InboxPage(): JSX.Element {
         {tab === 'resolve' && ' · 单条确认/合并属 P2-19-A，本页先只展示候选'}
       </div>
 
-      {error !== null && <div style={{ color: '#ef4444', marginTop: 8 }}>出错了：{error}</div>}
+      {error !== null && <div style={{ color: 'var(--color-danger)', marginTop: 8 }}>出错了：{error}</div>}
 
       <div style={{ marginTop: 10, overflowY: 'auto', flex: 1 }}>
         {rows.length === 0 ? (

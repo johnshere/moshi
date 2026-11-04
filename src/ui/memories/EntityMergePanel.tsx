@@ -59,11 +59,11 @@ const panelStyle: CSSProperties = {
   maxHeight: '78vh',
   overflow: 'auto',
   zIndex: 40,
-  background: '#0b1220',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 8,
-  boxShadow: '0 18px 60px rgba(0,0,0,.55)',
-  color: '#cbd5e1',
+  boxShadow: 'var(--shadow-float)',
+  color: 'var(--color-text-secondary)',
   fontSize: 12,
   padding: 14,
   boxSizing: 'border-box',
@@ -74,13 +74,13 @@ const rowStyle: CSSProperties = {
   alignItems: 'center',
   gap: 8,
   padding: '4px 6px',
-  borderBottom: '1px solid #1e293b',
+  borderBottom: '1px solid var(--color-border-subtle)',
 };
 
 const buttonStyle: CSSProperties = {
-  background: '#1e293b',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-hover)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 4,
   fontSize: 11,
   padding: '3px 8px',
@@ -89,9 +89,9 @@ const buttonStyle: CSSProperties = {
 
 const inputStyle: CSSProperties = {
   flex: 1,
-  background: '#020617',
-  border: '1px solid #334155',
-  color: '#e2e8f0',
+  background: 'var(--color-bg-base)',
+  border: '1px solid var(--color-border-strong)',
+  color: 'var(--color-text-primary)',
   borderRadius: 4,
   padding: '5px 8px',
   fontSize: 12,
@@ -201,8 +201,8 @@ export function EntityMergePanel(): ReactElement {
   return (
     <div data-testid="entity-merge-panel" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <strong style={{ color: '#e2e8f0', fontSize: 13 }}>实体合并</strong>
-        <span style={{ color: '#64748b' }}>合并后源实体标记 merged_into，不物理删除；不可撤销</span>
+        <strong style={{ color: 'var(--color-text-primary)', fontSize: 13 }}>实体合并</strong>
+        <span style={{ color: 'var(--color-text-muted)' }}>合并后源实体标记 merged_into，不物理删除；不可撤销</span>
         <span style={{ flex: 1 }} />
         <button
           type="button"
@@ -237,13 +237,13 @@ export function EntityMergePanel(): ReactElement {
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ color: '#64748b', padding: '8px 2px' }}>没有结果</div>
+        <div style={{ color: 'var(--color-text-muted)', padding: '8px 2px' }}>没有结果</div>
       ) : (
-        <div style={{ marginTop: 8, border: '1px solid #1e293b', borderRadius: 4 }}>
+        <div style={{ marginTop: 8, border: '1px solid var(--color-border-subtle)', borderRadius: 4 }}>
           {rows.map((row) => (
             <div key={row.entity_id} data-testid="entity-merge-row" style={rowStyle}>
-              <span style={{ color: '#e2e8f0' }}>{row.canonical_name}</span>
-              <span style={{ color: '#64748b' }}>
+              <span style={{ color: 'var(--color-text-primary)' }}>{row.canonical_name}</span>
+              <span style={{ color: 'var(--color-text-muted)' }}>
                 {row.etype} · 事实 {row.fact_count} · 别名 {row.alias_count}
               </span>
               <span style={{ flex: 1 }} />
@@ -253,8 +253,8 @@ export function EntityMergePanel(): ReactElement {
                 onClick={() => setFromId(row.entity_id)}
                 style={{
                   ...buttonStyle,
-                  borderColor: fromId === row.entity_id ? '#f59e0b' : '#334155',
-                  color: fromId === row.entity_id ? '#fbbf24' : '#e2e8f0',
+                  borderColor: fromId === row.entity_id ? 'var(--color-warning)' : 'var(--color-border-strong)',
+                  color: fromId === row.entity_id ? 'var(--color-warning-soft)' : 'var(--color-text-primary)',
                 }}
               >
                 设为源
@@ -265,8 +265,8 @@ export function EntityMergePanel(): ReactElement {
                 onClick={() => setToId(row.entity_id)}
                 style={{
                   ...buttonStyle,
-                  borderColor: toId === row.entity_id ? '#22c55e' : '#334155',
-                  color: toId === row.entity_id ? '#4ade80' : '#e2e8f0',
+                  borderColor: toId === row.entity_id ? 'var(--color-success)' : 'var(--color-border-strong)',
+                  color: toId === row.entity_id ? 'var(--color-success)' : 'var(--color-text-primary)',
                 }}
               >
                 设为目标
@@ -277,7 +277,7 @@ export function EntityMergePanel(): ReactElement {
       )}
 
       <div style={{ display: 'flex', gap: 12, marginTop: 10, alignItems: 'center' }}>
-        <span data-testid="entity-merge-selection" style={{ color: '#94a3b8' }}>
+        <span data-testid="entity-merge-selection" style={{ color: 'var(--color-text-secondary)' }}>
           源：{fromId === null ? '—' : (rows.find((r) => r.entity_id === fromId)?.canonical_name ?? fromId)}
           {'  '}目标：
           {toId === null ? '—' : (rows.find((r) => r.entity_id === toId)?.canonical_name ?? toId)}
@@ -297,23 +297,23 @@ export function EntityMergePanel(): ReactElement {
           data-testid="entity-merge-confirm"
           disabled={busy || fromId === null || toId === null || preview === null || !preview.can_merge}
           onClick={() => void doMerge()}
-          style={{ ...buttonStyle, borderColor: '#7f1d1d', color: '#fca5a5' }}
+          style={{ ...buttonStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger-soft)' }}
         >
           确认合并
         </button>
       </div>
 
       {preview === null ? null : (
-        <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: '#020617', padding: 8, borderRadius: 4 }}>
+        <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: 'var(--color-bg-base)', padding: 8, borderRadius: 4 }}>
           <div>
             可合并：{preview.can_merge ? '是' : `否（${preview.blocking_reason ?? '未知原因'}）`} · 将移动事实{' '}
             {preview.will_move.facts} · 边 {preview.will_move.edges} · 别名 {preview.will_move.aliases} · 冲突{' '}
-            <span data-testid="entity-merge-conflict-count" style={{ color: preview.conflicts.length > 0 ? '#fbbf24' : '#4ade80' }}>
+            <span data-testid="entity-merge-conflict-count" style={{ color: preview.conflicts.length > 0 ? 'var(--color-warning-soft)' : 'var(--color-success)' }}>
               {preview.conflicts.length}
             </span>
           </div>
           {preview.conflicts.length === 0 ? null : (
-            <ul style={{ margin: '6px 0 0 16px', padding: 0, color: '#fbbf24' }}>
+            <ul style={{ margin: '6px 0 0 16px', padding: 0, color: 'var(--color-warning-soft)' }}>
               {preview.conflicts.slice(0, 5).map((c, i) => (
                 <li key={`${c.predicate}-${i}`}>
                   {c.predicate}: {JSON.stringify(c.from.value)} → {JSON.stringify(c.to.value)}
@@ -325,14 +325,14 @@ export function EntityMergePanel(): ReactElement {
       )}
 
       {result === null ? null : (
-        <div data-testid="entity-merge-result" style={{ marginTop: 10, color: '#4ade80' }}>
+        <div data-testid="entity-merge-result" style={{ marginTop: 10, color: 'var(--color-success)' }}>
           已合并：移动事实 {result.moved_facts}、去重 {result.deduped_facts}、别名 {result.merged_aliases}；
           冲突未自动裁决 {result.conflicts_resolved}；可撤销：{result.undoable ? '是' : '否'}
         </div>
       )}
 
       {error === null ? null : (
-        <div data-testid="entity-merge-error" style={{ marginTop: 10, color: '#fca5a5' }}>
+        <div data-testid="entity-merge-error" style={{ marginTop: 10, color: 'var(--color-danger-soft)' }}>
           {error}
         </div>
       )}

@@ -131,14 +131,14 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 const panelStyle: CSSProperties = {
-  background: '#0b1220',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 6,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
-  color: '#cbd5e1',
+  color: 'var(--color-text-secondary)',
   fontSize: 13,
 };
 
@@ -150,11 +150,11 @@ const rowStyle: CSSProperties = {
   alignItems: 'center',
   minHeight: 26,
 };
-const labelStyle: CSSProperties = { color: '#94a3b8', fontSize: 12 };
+const labelStyle: CSSProperties = { color: 'var(--color-text-secondary)', fontSize: 12 };
 const inputStyle: CSSProperties = {
-  background: '#0f172a',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-overlay)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 4,
   padding: '4px 8px',
   fontSize: 12,
@@ -162,8 +162,8 @@ const inputStyle: CSSProperties = {
   boxSizing: 'border-box',
 };
 const buttonStyle: CSSProperties = {
-  background: '#1d4ed8',
-  color: '#fff',
+  background: 'var(--color-info-dim)',
+  color: 'var(--color-text-primary)',
   border: 'none',
   borderRadius: 4,
   padding: '6px 14px',
@@ -249,15 +249,15 @@ export function ConfigForm(): ReactElement {
   return (
     <section data-testid="config-form" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>配置</div>
-        <div style={{ color: '#64748b', fontSize: 11 }}>{configPath}</div>
+        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>配置</div>
+        <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{configPath}</div>
       </div>
 
-      {loading && <div style={{ color: '#94a3b8' }}>加载配置…</div>}
+      {loading && <div style={{ color: 'var(--color-text-secondary)' }}>加载配置…</div>}
       {error !== null && (
         <div
           data-testid="config-error"
-          style={{ color: '#fca5a5', background: '#450a0a', border: '1px solid #7f1d1d', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 4, padding: '6px 8px' }}
         >
           {error}
         </div>
@@ -265,7 +265,7 @@ export function ConfigForm(): ReactElement {
       {toast !== null && (
         <div
           data-testid="config-toast"
-          style={{ color: '#86efac', background: '#052e16', border: '1px solid #166534', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-success-soft)', background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', borderRadius: 4, padding: '6px 8px' }}
         >
           {toast}
         </div>
@@ -273,7 +273,7 @@ export function ConfigForm(): ReactElement {
       {restart.length > 0 && (
         <div
           data-testid="config-restart-hint"
-          style={{ color: '#fde68a', background: '#422006', border: '1px solid #a16207', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px' }}
         >
           需重启 moshi daemon 后生效：{restart.join('、')}
         </div>
@@ -281,8 +281,8 @@ export function ConfigForm(): ReactElement {
 
       {loaded !== null && FIELD_GROUPS.map((group) => (
         <div key={group.title} style={groupStyle}>
-          <div style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>{group.title}</div>
-          {group.hint !== undefined && <div style={{ color: '#64748b', fontSize: 11 }}>{group.hint}</div>}
+          <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>{group.title}</div>
+          {group.hint !== undefined && <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{group.hint}</div>}
           {group.fields.map((field) => {
             const value = draft[field.path];
             const readOnly = STARTUP_PATHS.has(field.path);
@@ -301,7 +301,7 @@ export function ConfigForm(): ReactElement {
                   <input
                     type={field.kind}
                     data-testid={`config-field-${field.path}`}
-                    style={{ ...inputStyle, ...(readOnly ? { color: '#64748b', cursor: 'not-allowed' } : {}) }}
+                    style={{ ...inputStyle, ...(readOnly ? { color: 'var(--color-text-muted)', cursor: 'not-allowed' } : {}) }}
                     value={String(value ?? '')}
                     readOnly={readOnly}
                     step={field.path.endsWith('confidence') ? 0.05 : 1}
@@ -331,7 +331,7 @@ export function ConfigForm(): ReactElement {
           <button
             type="button"
             data-testid="config-reset"
-            style={{ ...buttonStyle, background: '#334155' }}
+            style={{ ...buttonStyle, background: 'var(--color-bg-hover)' }}
             onClick={() => { setDraft(baseline); setToast(null); }}
           >
             撤销改动

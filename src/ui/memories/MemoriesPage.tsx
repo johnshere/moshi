@@ -25,8 +25,8 @@ const overlayStyle: CSSProperties = {
   alignItems: 'flex-start',
   gap: 12,
   padding: '7px 12px',
-  background: 'linear-gradient(rgba(7,12,22,.96), rgba(7,12,22,.72))',
-  borderBottom: '1px solid #1e293b',
+  background: 'linear-gradient(color-mix(in srgb, var(--color-bg-base) 96%, transparent), color-mix(in srgb, var(--color-bg-base) 72%, transparent))',
+  borderBottom: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
 };
 
@@ -95,7 +95,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
       <FactsTable key={route.query} />
       <Inspector />
       <div style={overlayStyle}>
-        <div style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600, padding: '4px 2px', whiteSpace: 'nowrap' }}>
+        <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, padding: '4px 2px', whiteSpace: 'nowrap' }}>
           记忆
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -109,10 +109,10 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
             left: 12,
             bottom: 12,
             zIndex: 9,
-            background: '#111827',
-            border: '1px solid #334155',
+            background: 'var(--color-bg-overlay)',
+            border: '1px solid var(--color-border-strong)',
             borderRadius: 5,
-            color: '#94a3b8',
+            color: 'var(--color-text-secondary)',
             fontSize: 11,
             padding: '5px 9px',
             maxWidth: '50vw',

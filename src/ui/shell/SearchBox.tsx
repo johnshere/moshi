@@ -18,9 +18,9 @@ const boxStyle: CSSProperties = {
 const inputStyle: CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
-  background: '#0b1220',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-raised)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 5,
   padding: '5px 9px 5px 26px',
   fontSize: 12,
@@ -32,10 +32,10 @@ const listStyle: CSSProperties = {
   top: 'calc(100% + 4px)',
   left: 0,
   right: 0,
-  background: '#111827',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-overlay)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 6,
-  boxShadow: '0 10px 30px rgba(0,0,0,.45)',
+  boxShadow: 'var(--shadow-menu)',
   zIndex: 60,
   overflow: 'hidden',
 };
@@ -46,8 +46,8 @@ const itemStyle: CSSProperties = {
   textAlign: 'left',
   background: 'transparent',
   border: 0,
-  borderBottom: '1px solid #1e293b',
-  color: '#cbd5e1',
+  borderBottom: '1px solid var(--color-border-subtle)',
+  color: 'var(--color-text-secondary)',
   padding: '7px 9px',
   fontSize: 12,
   cursor: 'pointer',
@@ -109,7 +109,7 @@ export function SearchBox(): ReactElement {
 
   return (
     <div style={boxStyle}>
-      <span style={{ position: 'absolute', left: 9, top: 5, color: '#64748b', fontSize: 12 }}>⌕</span>
+      <span style={{ position: 'absolute', left: 9, top: 5, color: 'var(--color-text-muted)', fontSize: 12 }}>⌕</span>
       <input
         ref={inputRef}
         data-testid="global-search"
@@ -140,7 +140,7 @@ export function SearchBox(): ReactElement {
             position: 'absolute',
             right: 8,
             top: 5,
-            color: '#475569',
+            color: 'var(--color-text-faint)',
             fontSize: 11,
             pointerEvents: 'none',
           }}
@@ -162,7 +162,7 @@ export function SearchBox(): ReactElement {
               }}
               title={item.id}
             >
-              <span style={{ color: '#64748b', marginRight: 6 }}>{item.ftype}</span>
+              <span style={{ color: 'var(--color-text-muted)', marginRight: 6 }}>{item.ftype}</span>
               {item.content}
             </button>
           ))}

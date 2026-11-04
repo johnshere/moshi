@@ -36,21 +36,21 @@ const panelStyle: CSSProperties = {
   right: 0,
   bottom: 0,
   zIndex: 20,
-  background: 'rgba(8, 12, 22, 0.97)',
-  borderTop: '1px solid #1f2937',
+  background: 'color-mix(in srgb, var(--color-bg-raised) 97%, transparent)',
+  borderTop: '1px solid var(--color-border-subtle)',
   padding: '10px 16px',
   display: 'flex',
   flexDirection: 'column',
   gap: 8,
   fontSize: 13,
-  color: '#cbd5e1',
+  color: 'var(--color-text-secondary)',
 };
 
 function btn(primary = false): CSSProperties {
   return {
-    background: primary ? '#1e3a8a' : '#111827',
-    color: primary ? '#e0e7ff' : '#cbd5e1',
-    border: `1px solid ${primary ? '#3b82f6' : '#1f2937'}`,
+    background: primary ? 'var(--color-info-bg)' : 'var(--color-bg-overlay)',
+    color: primary ? 'var(--color-info-text)' : 'var(--color-text-secondary)',
+    border: `1px solid ${primary ? 'var(--color-info-strong)' : 'var(--color-border-subtle)'}`,
     borderRadius: 4,
     padding: '4px 14px',
     cursor: 'pointer',
@@ -58,7 +58,7 @@ function btn(primary = false): CSSProperties {
   };
 }
 
-const warnStyle: CSSProperties = { color: '#f59e0b' };
+const warnStyle: CSSProperties = { color: 'var(--color-warning)' };
 
 /** 动作 → 文案。集中一处，避免"剪枝按钮写着失效"这类错配 */
 const COPY: Record<
@@ -93,7 +93,7 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
     return (
       <div style={panelStyle} role="dialog" aria-label="影响面预览">
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap' }}>
-          <span style={{ color: '#f8fafc' }}>
+          <span style={{ color: 'var(--color-text-primary)' }}>
             将{copy.previewVerb} {preview.facts} 条事实、{preview.edges} 条边、{preview.topics} 个主题
           </span>
           {/* invalidate 必须单独显示连带失效：不显示 = 让人盲签（台账 §4 P2-07 坑）。
@@ -103,13 +103,13 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
               连带失效 {preview.invalidated_by_cascade} 条依赖事实（它们依赖这批事实，会一起变 stale）
             </span>
           ) : (
-            <span style={{ color: '#64748b' }}>
+            <span style={{ color: 'var(--color-text-muted)' }}>
               软删：事实行与有效区间都保留，仅标注为 pruned（可撤销）
             </span>
           )}
         </div>
         {preview.preview_sample.length > 0 && (
-          <div style={{ color: '#64748b', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <div style={{ color: 'var(--color-text-muted)', display: 'flex', flexDirection: 'column', gap: 2 }}>
             {preview.preview_sample.map((item) => (
               <span key={item.id} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 · {item.content || item.id}
@@ -135,8 +135,8 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
   return (
     <div style={panelStyle} role="status">
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <span style={{ color: '#f8fafc' }}>已选 {selectedCount} 条事实</span>
-        <span style={{ color: '#475569' }}>
+        <span style={{ color: 'var(--color-text-primary)' }}>已选 {selectedCount} 条事实</span>
+        <span style={{ color: 'var(--color-text-faint)' }}>
           将执行「{action === 'prune' ? '剪枝（软删）' : '失效'}」，先看影响面，确认后才执行
         </span>
         <span style={{ marginLeft: 'auto' }}>
@@ -146,12 +146,12 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
         </span>
       </div>
       {action === 'prune' && (
-        <div style={{ color: '#64748b' }}>
+        <div style={{ color: 'var(--color-text-muted)' }}>
           剪枝只标注不删除；依赖它的下游由读侧收口（不会连带改写其它事实）
         </div>
       )}
       {action === 'invalidate' && (
-        <div style={{ color: '#64748b' }}>{copy.undoHint}</div>
+        <div style={{ color: 'var(--color-text-muted)' }}>{copy.undoHint}</div>
       )}
     </div>
   );

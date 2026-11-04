@@ -30,12 +30,12 @@ const MAX_WIDTH = 720;
 const KV_CELL: CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 11,
-  color: '#e2e8f0',
+  color: 'var(--color-text-primary)',
   wordBreak: 'break-all',
 };
 
 const LABEL: CSSProperties = {
-  color: '#64748b',
+  color: 'var(--color-text-muted)',
   fontSize: 11,
   minWidth: 96,
   paddingRight: 10,
@@ -106,9 +106,9 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
           disabled={busy}
           aria-label={`${label} 可写`}
           style={{
-            background: '#0b1220',
-            color: '#e2e8f0',
-            border: '1px solid #1f2937',
+            background: 'var(--color-bg-raised)',
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--color-border-subtle)',
             borderRadius: 4,
             padding: '2px 6px',
             width: 72,
@@ -120,9 +120,9 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
           onClick={() => void commit()}
           disabled={busy}
           style={{
-            background: '#1e293b',
-            color: '#cbd5e1',
-            border: '1px solid #334155',
+            background: 'var(--color-bg-hover)',
+            color: 'var(--color-text-secondary)',
+            border: '1px solid var(--color-border-strong)',
             borderRadius: 4,
             padding: '2px 8px',
             cursor: 'pointer',
@@ -133,10 +133,10 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
         </button>
       </div>
       {/* 详设 §10.5：每个可写项旁必须有"上次是谁、什么时候改的" */}
-      <div style={{ fontSize: 10, color: '#64748b', marginLeft: 106 }}>
+      <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginLeft: 106 }}>
         {lastModifiedLine(audit) ?? '从未被人工修改'}
       </div>
-      {error !== null && <div style={{ fontSize: 10, color: '#ef4444', marginLeft: 106 }}>{error}</div>}
+      {error !== null && <div style={{ fontSize: 10, color: 'var(--color-danger)', marginLeft: 106 }}>{error}</div>}
     </div>
   );
 }
@@ -159,8 +159,8 @@ function ExtRow({ value }: { value: unknown }): JSX.Element {
     : '[KV] ';
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', padding: '3px 0' }}>
-      <span style={{ ...KV_CELL, color: '#475569' }}>{glyph}</span>
-      <span style={{ ...KV_CELL, color: guess.kind === 'kv' ? '#f59e0b' : '#e2e8f0' }}>{text}</span>
+      <span style={{ ...KV_CELL, color: 'var(--color-text-faint)' }}>{glyph}</span>
+      <span style={{ ...KV_CELL, color: guess.kind === 'kv' ? 'var(--color-warning)' : 'var(--color-text-primary)' }}>{text}</span>
     </div>
   );
 }
@@ -178,7 +178,7 @@ function SectionCard({
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ border: '1px solid #1f2937', borderRadius: 6, marginBottom: 8, background: '#0d1424' }}>
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 6, marginBottom: 8, background: 'var(--color-bg-overlay)' }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -191,16 +191,16 @@ function SectionCard({
           background: 'transparent',
           border: 'none',
           padding: '7px 10px',
-          color: '#e2e8f0',
+          color: 'var(--color-text-primary)',
           fontSize: 12,
           cursor: 'pointer',
           font: 'inherit',
           textAlign: 'left',
         }}
       >
-        <span style={{ color: '#94a3b8', fontSize: 10 }}>{open ? '▾' : '▸'}</span>
+        <span style={{ color: 'var(--color-text-secondary)', fontSize: 10 }}>{open ? '▾' : '▸'}</span>
         <span style={{ fontWeight: 600 }}>{title}</span>
-        <span style={{ color: '#475569', fontSize: 10 }}>{tag}</span>
+        <span style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{tag}</span>
       </button>
       {open && <div style={{ padding: '4px 10px 10px' }}>{children}</div>}
     </div>
@@ -220,9 +220,9 @@ function DigestLink({ d }: { d: { id: string; content: string; valid_to: string 
         textAlign: 'left',
         background: 'transparent',
         border: 'none',
-        borderBottom: '1px solid #111827',
+        borderBottom: '1px solid var(--color-bg-overlay)',
         padding: '3px 0',
-        color: d.valid_to === null ? '#cbd5e1' : '#64748b',
+        color: d.valid_to === null ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
         fontSize: 11,
         cursor: 'pointer',
         font: 'inherit',
@@ -334,13 +334,13 @@ export function Inspector(): JSX.Element {
         right: 0,
         bottom: 0,
         width,
-        background: 'rgba(8,12,22,0.97)',
-        borderLeft: '1px solid #1f2937',
+        background: 'color-mix(in srgb, var(--color-bg-raised) 97%, transparent)',
+        borderLeft: '1px solid var(--color-border-subtle)',
         display: 'flex',
         flexDirection: 'column',
         zIndex: 20,
         fontSize: 12,
-        color: '#e2e8f0',
+        color: 'var(--color-text-primary)',
       }}
     >
       {/* 拖动条 */}
@@ -359,9 +359,9 @@ export function Inspector(): JSX.Element {
           zIndex: 1,
         }}
       />
-      <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #1f2937' }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: '#f8fafc' }}>检查器</span>
-        <span style={{ color: '#475569', fontSize: 10, marginLeft: 8, fontFamily: 'ui-monospace, monospace' }}>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--color-border-subtle)' }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>检查器</span>
+        <span style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 8, fontFamily: 'ui-monospace, monospace' }}>
           {detail === null ? focusId : detail.id}
         </span>
         <span style={{ marginLeft: 'auto' }}>
@@ -373,7 +373,7 @@ export function Inspector(): JSX.Element {
             style={{
               background: 'transparent',
               border: 'none',
-              color: '#94a3b8',
+              color: 'var(--color-text-secondary)',
               cursor: 'pointer',
               fontSize: 14,
             }}
@@ -383,17 +383,17 @@ export function Inspector(): JSX.Element {
         </span>
       </div>
 
-      {loading && <div style={{ padding: 12, color: '#64748b' }}>加载中…</div>}
+      {loading && <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>加载中…</div>}
       {error !== null && (
-        <div style={{ padding: 12, color: '#ef4444' }}>
+        <div style={{ padding: 12, color: 'var(--color-danger)' }}>
           加载失败：{error}
-          <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: '#94a3b8', background: 'transparent', border: '1px solid #1f2937', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
+          <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: 'var(--color-text-secondary)', background: 'transparent', border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
             关闭
           </button>
         </div>
       )}
       {!loading && error === null && detail === null && (
-        <div style={{ padding: 12, color: '#64748b' }}>未加载</div>
+        <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>未加载</div>
       )}
 
       {!loading && error === null && detail !== null && (
@@ -438,7 +438,7 @@ export function Inspector(): JSX.Element {
               </div>
             ))}
             {Object.keys(detail.attrs.ext).length === 0 && (
-              <div style={{ color: '#475569', fontSize: 10 }}>attrs.ext 为空（扩展槽未启用）</div>
+              <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>attrs.ext 为空（扩展槽未启用）</div>
             )}
           </SectionCard>
 
@@ -450,10 +450,10 @@ export function Inspector(): JSX.Element {
                   <span style={LABEL}>source_episode</span>
                   <span style={KV_CELL}>{detail.source_episode.id}</span>
                 </div>
-                <div style={{ color: '#64748b', fontSize: 10, marginLeft: 106 }}>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 10, marginLeft: 106 }}>
                   {detail.source_episode.summary ?? '无摘要'} · {detail.source_episode.ts}
                 </div>
-                <div style={{ color: '#475569', fontSize: 10, marginLeft: 106 }}>
+                <div style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 106 }}>
                   span：{detail.span === null ? '—' : `[${detail.span[0]}, ${detail.span[1]}]`}
                 </div>
               </div>
@@ -461,7 +461,7 @@ export function Inspector(): JSX.Element {
             {detail.superseded_by !== null && <ReadonlyRow label="被取代" value={detail.superseded_by} />}
             {detail.superseded.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: '#94a3b8', fontSize: 10, paddingBottom: 2 }}>取代了（supersedes 链反向）</div>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>取代了（supersedes 链反向）</div>
                 {detail.superseded.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
@@ -469,7 +469,7 @@ export function Inspector(): JSX.Element {
             )}
             {detail.depends.upstream.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: '#94a3b8', fontSize: 10, paddingBottom: 2 }}>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
                   依赖链上游（我依赖，各 3 跳）
                 </div>
                 {detail.depends.upstream.map((d) => (
@@ -479,7 +479,7 @@ export function Inspector(): JSX.Element {
             )}
             {detail.depends.downstream.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: '#94a3b8', fontSize: 10, paddingBottom: 2 }}>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
                   依赖链下游（依赖我，各 3 跳）
                 </div>
                 {detail.depends.downstream.map((d) => (
@@ -489,7 +489,7 @@ export function Inspector(): JSX.Element {
             )}
             {detail.conflicts.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: '#f59e0b', fontSize: 10, paddingBottom: 2 }}>冲突对（互斥）</div>
+                <div style={{ color: 'var(--color-warning)', fontSize: 10, paddingBottom: 2 }}>冲突对（互斥）</div>
                 {detail.conflicts.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
@@ -497,9 +497,9 @@ export function Inspector(): JSX.Element {
             )}
             {detail.audits.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: '#94a3b8', fontSize: 10, paddingBottom: 2 }}>audit 历史</div>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>audit 历史</div>
                 {detail.audits.map((a) => (
-                  <div key={`${a.field}-${a.ts}-${a.source}`} style={{ fontSize: 10, color: '#64748b', padding: '2px 0' }}>
+                  <div key={`${a.field}-${a.ts}-${a.source}`} style={{ fontSize: 10, color: 'var(--color-text-muted)', padding: '2px 0' }}>
                     {a.field}: {a.before ?? '∅'} → {a.after ?? '∅'} · {a.source ?? 'unknown'} @ {a.ts}
                   </div>
                 ))}
@@ -512,7 +512,7 @@ export function Inspector(): JSX.Element {
               detail.depends.downstream.length === 0 &&
               detail.conflicts.length === 0 &&
               detail.audits.length === 0 && (
-                <div style={{ color: '#475569', fontSize: 10 }}>无溯源信息</div>
+                <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>无溯源信息</div>
               )}
           </SectionCard>
         </div>

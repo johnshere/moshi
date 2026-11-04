@@ -41,12 +41,12 @@ const containerStyle: CSSProperties = {
   pointerEvents: 'auto',
 };
 
-const labelStyle: CSSProperties = { color: '#64748b', whiteSpace: 'nowrap' };
+const labelStyle: CSSProperties = { color: 'var(--color-text-muted)', whiteSpace: 'nowrap' };
 
 const chipBase: CSSProperties = {
-  background: '#0b1220',
-  color: '#94a3b8',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  color: 'var(--color-text-secondary)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 3,
   padding: '0 8px',
   cursor: 'pointer',
@@ -55,15 +55,15 @@ const chipBase: CSSProperties = {
 
 const chipOn: CSSProperties = {
   ...chipBase,
-  background: '#1e293b',
-  color: '#f8fafc',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-hover)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
 };
 
 const textInputStyle: CSSProperties = {
-  background: '#0b1220',
-  color: '#e2e8f0',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 3,
   padding: '1px 6px',
   font: 'inherit',
@@ -137,7 +137,7 @@ export function FilterBar(): JSX.Element {
     <div
       style={{
         ...containerStyle,
-        ...(active ? { border: '1px solid #334155', background: '#0f172a', borderRadius: 4, padding: '4px 8px' } : {}),
+        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 4, padding: '4px 8px' } : {}),
       }}
     >
       <span style={labelStyle}>
@@ -185,11 +185,11 @@ export function FilterBar(): JSX.Element {
 
       <span style={labelStyle}>时间</span>
       <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} onBlur={commitFrom} style={dateInputStyle} />
-      <span style={{ color: '#475569' }}>~</span>
+      <span style={{ color: 'var(--color-text-faint)' }}>~</span>
       <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} onBlur={commitTo} style={dateInputStyle} />
 
       {active && (
-        <button type="button" onClick={reset} style={{ ...chipBase, color: '#f59e0b', borderColor: '#78350f' }}>
+        <button type="button" onClick={reset} style={{ ...chipBase, color: 'var(--color-warning)', borderColor: 'var(--color-warning-dim)' }}>
           重置
         </button>
       )}

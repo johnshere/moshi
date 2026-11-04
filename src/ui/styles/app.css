@@ -1,0 +1,83 @@
+/**
+ * P2-19-B 视觉地基：深空蓝紫底 + 青蓝霓虹强调（D-133）。
+ *
+ * 所有颜色必须从这里以 `var(--color-*)` 消费；组件里禁止裸 hex/rgba。
+ * token 名是契约：后续视觉卡按这里的名字取色，不要另造同义 token。
+ */
+@import "tailwindcss";
+
+@theme {
+  /* 背景：由深到浅三层。base=整页，raised=面板/卡片，overlay=浮层/HUD/输入框 */
+  --color-bg-base: #05070d;
+  --color-bg-raised: #0b1220;
+  --color-bg-overlay: #0f172a;
+  --color-bg-hover: #1e293b;
+  --color-bg-active: #16233a;
+
+  /* 描边：subtle 分隔线，strong 控件/面板边界 */
+  --color-border-subtle: #1f2937;
+  --color-border-strong: #334155;
+
+  /* 文字：primary 标题，secondary 正文，muted 说明，faint 极弱提示 */
+  --color-text-primary: #f8fafc;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #64748b;
+  --color-text-faint: #475569;
+
+  /* 强调：accent=青蓝霓虹（主），accent-alt=蓝紫（辅），accent-soft=高亮文字 */
+  --color-accent: #22d3ee;
+  --color-accent-soft: #7dd3fc;
+  --color-accent-dim: #0e7490;
+  --color-accent-alt: #8b5cf6;
+  --color-glow: rgb(34 211 238 / 0.55);
+
+  /* 语义色：状态/提示；*-soft 文字、*-dim 描边、*-bg 底色 */
+  --color-success: #34d399;
+  --color-success-soft: #86efac;
+  --color-success-dim: #166534;
+  --color-success-bg: #052e1b;
+
+  --color-warning: #f59e0b;
+  --color-warning-soft: #fbbf24;
+  --color-warning-dim: #a16207;
+  --color-warning-bg: #422006;
+
+  --color-danger: #f87171;
+  --color-danger-soft: #fca5a5;
+  --color-danger-dim: #7f1d1d;
+  --color-danger-bg: #2a0f12;
+
+  /* 链接/信息类蓝色（既有交互色，收敛为一组） */
+  --color-info: #60a5fa;
+  --color-info-strong: #3b82f6;
+  --color-info-soft: #93c5fd;
+  --color-info-dim: #1d4ed8;
+  --color-info-bg: #1e3a8a;
+  --color-info-text: #e0e7ff;
+
+  /* 非颜色 token */
+  --radius-panel: 12px;
+  --radius-control: 4px;
+  --shadow-panel: 0 18px 50px rgb(0 0 0 / 0.5);
+  --shadow-float: 0 18px 60px rgb(0 0 0 / 0.55);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

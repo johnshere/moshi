@@ -94,21 +94,21 @@ async function downloadAllExport(): Promise<string> {
 }
 
 const panelStyle: CSSProperties = {
-  background: '#0b1220',
-  border: '1px solid #1f2937',
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-subtle)',
   borderRadius: 6,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
   gap: 10,
-  color: '#cbd5e1',
+  color: 'var(--color-text-secondary)',
   fontSize: 13,
 };
 
 const buttonStyle: CSSProperties = {
-  background: '#1e293b',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-hover)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 4,
   padding: '6px 12px',
   fontSize: 12,
@@ -117,15 +117,15 @@ const buttonStyle: CSSProperties = {
 
 const dangerButtonStyle: CSSProperties = {
   ...buttonStyle,
-  background: '#450a0a',
-  borderColor: '#7f1d1d',
-  color: '#fecaca',
+  background: 'var(--color-danger-bg)',
+  borderColor: 'var(--color-danger-dim)',
+  color: 'var(--color-danger-soft)',
 };
 
 const inputStyle: CSSProperties = {
-  background: '#0f172a',
-  color: '#e2e8f0',
-  border: '1px solid #334155',
+  background: 'var(--color-bg-overlay)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
   borderRadius: 4,
   padding: '5px 8px',
   fontSize: 12,
@@ -140,17 +140,17 @@ const rowStyle: CSSProperties = {
 };
 
 const noticeStyle: CSSProperties = {
-  color: '#86efac',
-  background: '#052e16',
-  border: '1px solid #14532d',
+  color: 'var(--color-success-soft)',
+  background: 'var(--color-success-bg)',
+  border: '1px solid var(--color-success-dim)',
   borderRadius: 4,
   padding: '6px 8px',
 };
 
 const errorStyle: CSSProperties = {
-  color: '#fca5a5',
-  background: '#450a0a',
-  border: '1px solid #7f1d1d',
+  color: 'var(--color-danger-soft)',
+  background: 'var(--color-danger-bg)',
+  border: '1px solid var(--color-danger-dim)',
   borderRadius: 4,
   padding: '6px 8px',
 };
@@ -256,7 +256,7 @@ export function PrivacyPanel(): ReactElement {
   return (
     <section data-testid="privacy-panel" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ color: '#e2e8f0', fontSize: 14, fontWeight: 600 }}>隐私 / 全库导出</div>
+        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>隐私 / 全库导出</div>
         <button
           type="button"
           data-testid="privacy-refresh"
@@ -285,7 +285,7 @@ export function PrivacyPanel(): ReactElement {
         </button>
       </div>
 
-      <div style={{ color: '#64748b', fontSize: 11 }}>
+      <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
         物理删除不可恢复；这是唯一删除入口（先审计后删，归档只删白名单文件）。
       </div>
 
@@ -307,7 +307,7 @@ export function PrivacyPanel(): ReactElement {
             : '隐私总览未加载'
           : overviewRows(overview).map((row) => (
               <div key={row.label} data-testid="privacy-row" style={rowStyle}>
-                <span style={{ color: '#64748b' }}>{row.label}</span>
+                <span style={{ color: 'var(--color-text-muted)' }}>{row.label}</span>
                 <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{row.value}</span>
               </div>
             ))}
@@ -317,8 +317,8 @@ export function PrivacyPanel(): ReactElement {
         <div
           data-testid="privacy-dialog"
           style={{
-            background: '#0f172a',
-            border: '1px solid #7f1d1d',
+            background: 'var(--color-bg-overlay)',
+            border: '1px solid var(--color-danger-dim)',
             borderRadius: 6,
             padding: '10px 12px',
             display: 'flex',
@@ -326,9 +326,9 @@ export function PrivacyPanel(): ReactElement {
             gap: 8,
           }}
         >
-          <div style={{ color: '#fecaca', fontWeight: 600 }}>清理数据（不可恢复）</div>
+          <div style={{ color: 'var(--color-danger-soft)', fontWeight: 600 }}>清理数据（不可恢复）</div>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: '#94a3b8', width: 48 }}>范围</span>
+            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>范围</span>
             <select
               data-testid="privacy-scope"
               value={scope}
@@ -346,7 +346,7 @@ export function PrivacyPanel(): ReactElement {
             </select>
           </label>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: '#94a3b8', width: 48 }}>确认</span>
+            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>确认</span>
             <input
               data-testid="privacy-confirm"
               value={confirmText}
@@ -393,11 +393,11 @@ export function PrivacyPanel(): ReactElement {
             </button>
           </div>
           {preview !== null && (
-            <div data-testid="privacy-preview" style={{ fontSize: 12, color: '#fbbf24' }}>
+            <div data-testid="privacy-preview" style={{ fontSize: 12, color: 'var(--color-warning-soft)' }}>
               将删除：{purgeSummary(preview)}
             </div>
           )}
-          <div style={{ color: '#64748b', fontSize: 11 }}>
+          <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
             实跑会写 audit（privacy.purge）后删除；归档只删 archive_dir 内 topics/**/*.md 与 _history/**。
           </div>
         </div>

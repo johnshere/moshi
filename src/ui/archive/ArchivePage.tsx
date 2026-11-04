@@ -53,9 +53,9 @@ const STATUS_LABEL: Record<ArchiveStatus, string> = {
 };
 
 const STATUS_COLOR: Record<ArchiveStatus, string> = {
-  active: '#34d399',
-  merged: '#f59e0b',
-  split: '#a78bfa',
+  active: 'var(--color-success)',
+  merged: 'var(--color-warning)',
+  split: 'var(--color-accent-alt)',
 };
 
 const HUMAN_LABEL: Record<HumanEdited, string> = {
@@ -68,8 +68,8 @@ const rootStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
   display: 'flex',
-  background: '#070c16',
-  color: '#cbd5e1',
+  background: 'var(--color-bg-base)',
+  color: 'var(--color-text-secondary)',
   fontSize: 13,
 };
 
@@ -78,32 +78,32 @@ const rowStyle = (active: boolean): CSSProperties => ({
   width: '100%',
   textAlign: 'left',
   border: 0,
-  borderBottom: '1px solid #162032',
-  background: active ? '#162032' : 'transparent',
-  color: active ? '#f8fafc' : '#cbd5e1',
+  borderBottom: '1px solid var(--color-bg-active)',
+  background: active ? 'var(--color-bg-active)' : 'transparent',
+  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
   padding: '9px 12px',
   cursor: 'pointer',
   font: 'inherit',
 });
 
-const metaLabelStyle: CSSProperties = { color: '#64748b', fontSize: 11, minWidth: 92 };
+const metaLabelStyle: CSSProperties = { color: 'var(--color-text-muted)', fontSize: 11, minWidth: 92 };
 
 const noticeStyle: CSSProperties = {
-  border: '1px solid #334155',
-  background: '#0b1220',
-  color: '#94a3b8',
+  border: '1px solid var(--color-border-strong)',
+  background: 'var(--color-bg-raised)',
+  color: 'var(--color-text-secondary)',
   borderRadius: 6,
   padding: '10px 12px',
   maxWidth: 720,
   lineHeight: 1.6,
 };
 
-const linkStyle: CSSProperties = { color: '#60a5fa', textDecoration: 'underline', cursor: 'pointer' };
+const linkStyle: CSSProperties = { color: 'var(--color-info)', textDecoration: 'underline', cursor: 'pointer' };
 
 const buttonStyle = (disabled: boolean): CSSProperties => ({
-  border: '1px solid #334155',
-  background: disabled ? '#1e293b' : '#0f172a',
-  color: disabled ? '#64748b' : '#e2e8f0',
+  border: '1px solid var(--color-border-strong)',
+  background: disabled ? 'var(--color-bg-hover)' : 'var(--color-bg-overlay)',
+  color: disabled ? 'var(--color-text-muted)' : 'var(--color-text-primary)',
   borderRadius: 6,
   padding: '5px 10px',
   cursor: disabled ? 'not-allowed' : 'pointer',
@@ -306,7 +306,7 @@ export function ArchivePage(): ReactElement {
         style={{
           width: 360,
           flex: '0 0 360px',
-          borderRight: '1px solid #1e293b',
+          borderRight: '1px solid var(--color-border-subtle)',
           display: 'flex',
           flexDirection: 'column',
           minHeight: 0,
@@ -315,8 +315,8 @@ export function ArchivePage(): ReactElement {
         <div
           style={{
             padding: '10px 12px',
-            borderBottom: '1px solid #1e293b',
-            color: '#e2e8f0',
+            borderBottom: '1px solid var(--color-border-subtle)',
+            color: 'var(--color-text-primary)',
             fontWeight: 600,
             display: 'flex',
             alignItems: 'baseline',
@@ -324,19 +324,19 @@ export function ArchivePage(): ReactElement {
           }}
         >
           <span style={{ flex: 1 }}>归档主题</span>
-          <span style={{ color: '#64748b', fontWeight: 400 }}>{topics.length}</span>
+          <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>{topics.length}</span>
         </div>
         <div style={{ overflow: 'auto', flex: 1 }} data-testid="archive-topic-list">
-          {listState === 'loading' ? <div style={{ padding: 12, color: '#64748b' }}>加载中…</div> : null}
+          {listState === 'loading' ? <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>加载中…</div> : null}
           {listState === 'error' ? (
-            <div style={{ padding: 12, color: '#f87171' }} data-testid="archive-topics-error">
+            <div style={{ padding: 12, color: 'var(--color-danger)' }} data-testid="archive-topics-error">
               读取归档列表失败：{listError}
             </div>
           ) : null}
           {listState === 'empty' ? (
-            <div style={{ padding: 12, color: '#94a3b8', lineHeight: 1.7 }} data-testid="archive-empty">
+            <div style={{ padding: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }} data-testid="archive-empty">
               <div style={{ marginBottom: 6 }}>{EMPTY_TOPICS_HINT}</div>
-              <div style={{ color: '#64748b' }}>
+              <div style={{ color: 'var(--color-text-muted)' }}>
                 {EMPTY_ARCHIVE_DIR_HINT}？
                 <a
                   href={pageHref('settings', window.location.search)}
@@ -372,8 +372,8 @@ export function ArchivePage(): ReactElement {
                     <span
                       data-testid="archive-proposed-badge"
                       style={{
-                        border: '1px solid #78350f',
-                        color: '#fbbf24',
+                        border: '1px solid var(--color-warning-dim)',
+                        color: 'var(--color-warning-soft)',
                         borderRadius: 4,
                         padding: '0 4px',
                         fontSize: 10,
@@ -384,7 +384,7 @@ export function ArchivePage(): ReactElement {
                   ) : null}
                   <span style={{ color: STATUS_COLOR[topic.status], fontSize: 11 }}>{STATUS_LABEL[topic.status]}</span>
                 </div>
-                <div style={{ color: '#64748b', fontSize: 11, marginTop: 2, display: 'flex', gap: 6 }}>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 2, display: 'flex', gap: 6 }}>
                   <span style={{ flex: 1 }}>
                     {topic.slug} · rev {topic.revision}
                     {topic.human_edited === 0 ? '' : ` · ${HUMAN_LABEL[topic.human_edited]}`}
@@ -394,7 +394,7 @@ export function ArchivePage(): ReactElement {
                       role="button"
                       tabIndex={0}
                       data-testid="archive-handle-proposal"
-                      style={{ color: '#fbbf24', textDecoration: 'underline', cursor: 'pointer' }}
+                      style={{ color: 'var(--color-warning-soft)', textDecoration: 'underline', cursor: 'pointer' }}
                       onClick={(e) => {
                         e.stopPropagation();
                         setDialogError(null);
@@ -420,7 +420,7 @@ export function ArchivePage(): ReactElement {
 
       <section style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '12px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span style={{ color: '#94a3b8', fontSize: 12 }}>
+          <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
             上次导出：{formatTimestamp(lastExport)}
           </span>
           <span style={{ flex: 1 }} />
@@ -436,11 +436,11 @@ export function ArchivePage(): ReactElement {
         </div>
 
         {shown === null ? (
-          <div style={{ color: '#64748b' }}>选择左侧任一主题查看正文。</div>
+          <div style={{ color: 'var(--color-text-muted)' }}>选择左侧任一主题查看正文。</div>
         ) : (
           <div>
-            <h2 style={{ margin: '0 0 4px', color: '#e2e8f0', fontSize: 16 }}>{shown.title ?? shown.slug}</h2>
-            <div style={{ color: '#64748b', marginBottom: 10 }}>
+            <h2 style={{ margin: '0 0 4px', color: 'var(--color-text-primary)', fontSize: 16 }}>{shown.title ?? shown.slug}</h2>
+            <div style={{ color: 'var(--color-text-muted)', marginBottom: 10 }}>
               {shown.slug} · rev {shown.revision} · {STATUS_LABEL[shown.status]} · hash{' '}
               {shortHash(shown.content_hash)} · derived_at {shown.derived_at ?? '—'}
             </div>
@@ -488,17 +488,17 @@ export function ArchivePage(): ReactElement {
               ) : null}
               {detailState === 'file_missing' ? (
                 <div
-                  style={{ ...noticeStyle, borderColor: '#78350f', color: '#fbbf24' }}
+                  style={{ ...noticeStyle, borderColor: 'var(--color-warning-dim)', color: 'var(--color-warning-soft)' }}
                   data-testid="archive-file-missing"
                 >
                   正文文件缺失（可能在归档目录外被移动）。
-                  <div style={{ color: '#d97706', fontSize: 12, marginTop: 4 }}>
+                  <div style={{ color: 'var(--color-warning)', fontSize: 12, marginTop: 4 }}>
                     期望路径：{detail?.path ?? current?.path ?? '—'}
                   </div>
                 </div>
               ) : null}
               {detailState === 'error' ? (
-                <div style={{ ...noticeStyle, borderColor: '#7f1d1d', color: '#f87171' }}>
+                <div style={{ ...noticeStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger)' }}>
                   读取正文失败：{detailError}
                 </div>
               ) : null}
@@ -509,11 +509,11 @@ export function ArchivePage(): ReactElement {
                     maxWidth: 900,
                     whiteSpace: 'pre-wrap',
                     wordBreak: 'break-word',
-                    background: '#0b1220',
-                    border: '1px solid #1e293b',
+                    background: 'var(--color-bg-raised)',
+                    border: '1px solid var(--color-border-subtle)',
                     borderRadius: 6,
                     padding: '12px 14px',
-                    color: '#cbd5e1',
+                    color: 'var(--color-text-secondary)',
                     lineHeight: 1.7,
                   }}
                 >
@@ -522,21 +522,21 @@ export function ArchivePage(): ReactElement {
                     if (line.kind === 'blank') return <div key={key} style={{ height: 8 }} />;
                     if (line.kind === 'h1') {
                       return (
-                        <div key={key} style={{ fontWeight: 700, fontSize: 16, color: '#f8fafc', margin: '2px 0' }}>
+                        <div key={key} style={{ fontWeight: 700, fontSize: 16, color: 'var(--color-text-primary)', margin: '2px 0' }}>
                           {line.text}
                         </div>
                       );
                     }
                     if (line.kind === 'h2') {
                       return (
-                        <div key={key} style={{ fontWeight: 600, fontSize: 14, color: '#e2e8f0', margin: '2px 0' }}>
+                        <div key={key} style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text-primary)', margin: '2px 0' }}>
                           {line.text}
                         </div>
                       );
                     }
                     if (line.kind === 'h3') {
                       return (
-                        <div key={key} style={{ fontWeight: 600, fontSize: 13, color: '#cbd5e1', margin: '2px 0' }}>
+                        <div key={key} style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)', margin: '2px 0' }}>
                           {line.text}
                         </div>
                       );
@@ -581,9 +581,9 @@ export function ArchivePage(): ReactElement {
             left: '50%',
             bottom: 26,
             transform: 'translateX(-50%)',
-            background: toast.kind === 'ok' ? '#052e1b' : '#2a0f12',
-            border: `1px solid ${toast.kind === 'ok' ? '#166534' : '#7f1d1d'}`,
-            color: toast.kind === 'ok' ? '#86efac' : '#fca5a5',
+            background: toast.kind === 'ok' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
+            border: `1px solid ${toast.kind === 'ok' ? 'var(--color-success-dim)' : 'var(--color-danger-dim)'}`,
+            color: toast.kind === 'ok' ? 'var(--color-success-soft)' : 'var(--color-danger-soft)',
             borderRadius: 6,
             padding: '8px 14px',
             zIndex: 50,
