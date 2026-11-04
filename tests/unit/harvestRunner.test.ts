@@ -18,6 +18,7 @@ import { loadConfig } from '../../src/app/config.js';
 import { startHarvestRunner, type HarvestRunner } from '../../src/app/harvestRunner.js';
 import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
 import { runMemoryQuery } from '../../src/app/mcp/query.js';
+import { ingestEvent } from '../../src/core/write/ingest.js';
 import * as annotationRepo from '../../src/infra/sqlite/annotationRepo.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import { bm25Search } from '../../src/infra/sqlite/ftsRepo.js';
@@ -179,5 +180,41 @@ describe('写入闭环（P1-22）', () => {
     await runner.runOnce();
     expect(factRepo.searchFacts(db, { ftype: ['semantic'], limit: 10 })).toHaveLength(1);
     expect(factRepo.countFacts(db)).toBe(4);
+  });
+
+  it('工具序列落库后，同一轮收尾提炼 procedure（P2-10 接线点）', async () => {
+    const db = freshDb();
+    const runner = runnerFor(db, 0);
+    let second = 0;
+    for (const session of ['s1', 's2', 's3']) {
+      for (const cmd of ['pnpm install', 'pnpm build', 'pnpm test']) {
+        second += 1;
+        const ts = new Date(Date.UTC(2026, 10, 4, 0, 0, second)).toISOString();
+        ingestEvent(db, {
+          ts,
+          sessionId: session,
+          cwd: '/work/runner',
+          agent: 'test',
+          rawHash: `${session}:${ts}:${cmd}`,
+          rawPath: '/tmp/session.jsonl',
+          role: 'tool',
+          tool: { name: 'Bash', input: { command: cmd }, output: 'ok', exitCode: 0 },
+        });
+      }
+    }
+
+    await runner.runOnce();
+    const procedures = factRepo
+      .searchFacts(db, { ftype: ['semantic'], limit: 100 })
+      .filter((fact) => fact.confidenceSource === 'procedure');
+    expect(procedures).toHaveLength(1);
+    expect(procedures[0]?.attrs.frozen.predicate).toBe('procedure:build');
+
+    await runner.runOnce();
+    expect(
+      factRepo
+        .searchFacts(db, { ftype: ['semantic'], limit: 100 })
+        .filter((fact) => fact.confidenceSource === 'procedure'),
+    ).toHaveLength(1);
   });
 });

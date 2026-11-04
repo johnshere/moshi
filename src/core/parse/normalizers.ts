@@ -108,8 +108,9 @@ export function normalizeProcess(raw: string): string | null {
 
 /** `"Installed Version"` → `"installed_version"` */
 export function normalizePredicate(raw: string): string | null {
-  const s = raw
-    .trim()
+  const trimmed = raw.trim();
+  if (/^procedure:[a-z0-9][a-z0-9-]*$/i.test(trimmed)) return trimmed.toLowerCase();
+  const s = trimmed
     .toLowerCase()
     .replace(/\s+/g, '_')
     .replace(/[^a-z0-9_]/g, '')

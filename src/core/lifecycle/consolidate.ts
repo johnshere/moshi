@@ -27,7 +27,7 @@ import { isMoshiError } from '../../domain/errors.js';
 import { canonicalJson, sha256Hex, valueHash } from '../../domain/hash.js';
 import { newId } from '../../domain/ids.js';
 import { addMs, nowIso } from '../../domain/time.js';
-import type { Fact, FactAttrs } from '../../domain/types.js';
+import type { Fact, FactAttrs, ProcedureStep } from '../../domain/types.js';
 import { appendAudit } from '../../infra/sqlite/auditRepo.js';
 import {
   countActiveConsolidationSources,
@@ -36,12 +36,25 @@ import {
   listActiveDerivedPointsForSources,
   listAllActiveDerivedPoints,
   listEpisodicGroups,
+  listProcedureTurns,
+  type ProcedureTurnRow,
 } from '../../infra/sqlite/consolidationRepo.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import { insertEdge } from '../../infra/sqlite/edgeRepo.js';
-import { findByIdentity, insertFact, invalidate, listByIds } from '../../infra/sqlite/factRepo.js';
+import { findByCanonical } from '../../infra/sqlite/entityRepo.js';
+import {
+  findByIdentity,
+  insertFact,
+  invalidate,
+  listByIdentityKey,
+  listByIds,
+} from '../../infra/sqlite/factRepo.js';
 import { withTransaction } from '../../infra/sqlite/tx.js';
+import { normalizePath } from '../parse/normalizers.js';
+import { priorFor } from '../write/confidence.js';
+import { buildIdentity } from '../write/identity.js';
 import { clipContent, DEFAULT_QUARANTINE } from '../write/quarantine.js';
+import { resolveEntity } from '../write/resolve.js';
 import { round4 } from './strength.js';
 
 /** 提炼阈值（详设 §8.3.1：同 key ≥3 条 episodic） */
@@ -364,6 +377,262 @@ export async function consolidate(
         invalidate(db, old.id, { validTo, supersededBy: fact.id, status: 'invalidated' });
       }
     });
+  }
+
+  res.ms = Math.round(performance.now() - startedAt);
+  return res;
+}
+
+export const PROCEDURE_MIN_OCCURRENCES = 3;
+export const PROCEDURE_MIN_WINDOW = 3;
+export const PROCEDURE_MAX_WINDOW = 5;
+export const PROCEDURE_PROVENANCE = 'rule:procedure';
+
+export interface ProcedureCandidate {
+  cwd: string;
+  name: string;
+  steps: ProcedureStep[];
+  occurrences: number;
+  sourceIds: string[];
+  lastTs: string;
+}
+
+export interface ProcedureOptions {
+  minOccurrences?: number;
+  ratePerSec?: number;
+  dryRun?: boolean;
+  maxContentBytes?: number;
+}
+
+export interface ProcedureResult {
+  candidates: number;
+  created: number;
+  skipped: number;
+  superseded: number;
+  ms: number;
+}
+
+export function commandAction(cmd: string): string {
+  return cmd.trim().split(/\s+/).slice(0, 2).join(' ');
+}
+
+function actionVerb(action: string): string {
+  const tokens = action.split(' ');
+  return (tokens[1] ?? tokens[0] ?? '').toLowerCase();
+}
+
+export function procedureName(actions: readonly string[]): string {
+  const tokens = actions.flatMap((action) => action.toLowerCase().split(' '));
+  for (const preset of ['build', 'test', 'dev'] as const) {
+    if (tokens.includes(preset)) return preset;
+  }
+  if (tokens.includes('kill') && tokens.some((v) => ['start', 'restart', 'serve', 'dev'].includes(v))) {
+    return 'port-conflict';
+  }
+  const fallback = (actionVerb(actions[0] ?? '') || 'unknown').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return fallback || 'unknown';
+}
+
+function asStep(action: string): ProcedureStep {
+  return { action, expect: '', on_fail: '' };
+}
+
+function isNewerProcedure(a: ProcedureCandidate, b: ProcedureCandidate): boolean {
+  if (a.lastTs !== b.lastTs) return a.lastTs > b.lastTs;
+  if (a.steps.length !== b.steps.length) return a.steps.length > b.steps.length;
+  return canonicalJson(a.steps.map((s) => s.action)) < canonicalJson(b.steps.map((s) => s.action));
+}
+
+export function discoverProcedures(
+  turns: readonly ProcedureTurnRow[],
+  minOccurrences = PROCEDURE_MIN_OCCURRENCES,
+): ProcedureCandidate[] {
+  const sequences = new Map<string, { cwd: string; turns: ProcedureTurnRow[] }>();
+  for (const turn of turns) {
+    const cwd = normalizePath(turn.cwd);
+    if (cwd === null || commandAction(turn.cmd) === '') continue;
+    const session = turn.session ?? turn.episodeId;
+    const key = `${cwd}\u0000${session}`;
+    const group = sequences.get(key) ?? { cwd, turns: [] };
+    group.turns.push(turn);
+    sequences.set(key, group);
+  }
+
+  const patterns = new Map<string, ProcedureCandidate & { actionKey: string }>();
+  for (const { cwd, turns: sequence } of sequences.values()) {
+    sequence.sort((a, b) => a.ts === b.ts ? a.annotationId.localeCompare(b.annotationId) : a.ts.localeCompare(b.ts));
+    for (let length = PROCEDURE_MIN_WINDOW; length <= PROCEDURE_MAX_WINDOW; length += 1) {
+      for (let start = 0; start + length <= sequence.length; start += 1) {
+        const window = sequence.slice(start, start + length);
+        const actions = window.map((turn) => commandAction(turn.cmd));
+        const actionKey = canonicalJson(actions);
+        const key = `${cwd}\u0000${actionKey}`;
+        const end = window[window.length - 1] as ProcedureTurnRow;
+        const existing = patterns.get(key);
+        if (existing !== undefined) {
+          existing.occurrences += 1;
+          existing.sourceIds = [...new Set([...existing.sourceIds, ...window.map((turn) => turn.annotationId)])];
+          if (end.ts > existing.lastTs) existing.lastTs = end.ts;
+          continue;
+        }
+        patterns.set(key, {
+          cwd,
+          name: procedureName(actions),
+          steps: actions.map(asStep),
+          occurrences: 1,
+          sourceIds: window.map((turn) => turn.annotationId),
+          lastTs: end.ts,
+          actionKey,
+        });
+      }
+    }
+  }
+
+  const latest = new Map<string, ProcedureCandidate & { actionKey: string }>();
+  for (const pattern of patterns.values()) {
+    if (pattern.occurrences < minOccurrences) continue;
+    const key = `${pattern.cwd}\u0000${pattern.name}`;
+    const current = latest.get(key);
+    if (current === undefined || isNewerProcedure(pattern, current)) latest.set(key, pattern);
+  }
+  return [...latest.values()]
+    .sort((a, b) => a.cwd === b.cwd ? a.name.localeCompare(b.name) : a.cwd.localeCompare(b.cwd))
+    .map(({ actionKey: _actionKey, ...candidate }) => candidate);
+}
+
+function existingProcedureState(db: Db, candidate: ProcedureCandidate) {
+  const cwd = normalizePath(candidate.cwd);
+  if (cwd === null) return null;
+  const entity = findByCanonical(db, cwd, 'path', 'global');
+  if (entity === null) return null;
+  const identity = buildIdentity({
+    scope: 'global',
+    entityId: entity.id,
+    predicate: `procedure:${candidate.name}`,
+    value: candidate.steps,
+  });
+  const active = listByIdentityKey(db, identity.canonicalKey, 'global').filter(
+    (fact) => fact.validTo === null && fact.confidenceSource === 'procedure',
+  );
+  return { active, unchanged: active.some((fact) => fact.valueHash === identity.valueHash) };
+}
+
+function buildProcedureFact(
+  candidate: ProcedureCandidate,
+  parts: { entityId: string; entityName: string; canonicalKey: string; valueHash: string },
+  now: string,
+  maxContentBytes: number,
+): Fact {
+  const predicate = `procedure:${candidate.name}`;
+  const actions = candidate.steps.map((step) => step.action);
+  return {
+    id: newId('fact'),
+    content: capConsolidatedContent(
+      `${candidate.cwd} 的 ${predicate} 为 ${actions.join(' → ')}（同目录重复 ${candidate.occurrences} 次）`,
+      maxContentBytes,
+    ),
+    ftype: 'semantic',
+    confidence: priorFor('procedure'),
+    confidenceSource: 'procedure',
+    strength: 0.5,
+    importance: 0.5,
+    pool: 'utility',
+    epistemicStatus: 'active',
+    attrs: {
+      frozen: {
+        subject: { entity_id: parts.entityId, name: parts.entityName },
+        predicate,
+        value: candidate.steps,
+      },
+      ext: {
+        steps: candidate.steps,
+        derived_from: derivedFromOf(candidate.sourceIds),
+        occurrences: candidate.occurrences,
+      },
+    },
+    canonicalKey: parts.canonicalKey,
+    valueHash: parts.valueHash,
+    scope: 'global',
+    supersededBy: null,
+    validAt: now,
+    validTo: null,
+    recordedAt: now,
+    communityId: null,
+    degree: 0,
+    accessCount: 0,
+    lastAccessAt: null,
+    lastDecayAt: now,
+    sourceEpisode: null,
+    span: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export async function extractProcedures(db: Db, opts: ProcedureOptions = {}): Promise<ProcedureResult> {
+  const startedAt = performance.now();
+  const dryRun = opts.dryRun ?? false;
+  const ratePerSec = opts.ratePerSec ?? CONSOLIDATE_RATE_PER_SEC;
+  const maxContentBytes = opts.maxContentBytes ?? DEFAULT_QUARANTINE.maxContentBytes;
+  const candidates = discoverProcedures(
+    listProcedureTurns(db),
+    opts.minOccurrences ?? PROCEDURE_MIN_OCCURRENCES,
+  );
+  const res: ProcedureResult = { candidates: candidates.length, created: 0, skipped: 0, superseded: 0, ms: 0 };
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index] as ProcedureCandidate;
+    const before = existingProcedureState(db, candidate);
+    if (before?.unchanged === true) {
+      res.skipped += 1;
+      continue;
+    }
+    if (dryRun) {
+      res.created += 1;
+      res.superseded += before?.active.length ?? 0;
+      continue;
+    }
+    if (!dryRun && ratePerSec > 0 && index > 0) await delay(Math.ceil(1000 / ratePerSec));
+
+    const written = withTransaction(db, () => {
+      const now = nowIso();
+      const resolved = resolveEntity(db, { subject: candidate.cwd, etype: 'path', scope: 'global', ts: now });
+      const identity = buildIdentity({
+        scope: 'global',
+        entityId: resolved.entity.id,
+        predicate: `procedure:${candidate.name}`,
+        value: candidate.steps,
+      });
+      const active = listByIdentityKey(db, identity.canonicalKey, 'global').filter(
+        (fact) => fact.validTo === null && fact.confidenceSource === 'procedure',
+      );
+      if (active.some((fact) => fact.valueHash === identity.valueHash)) {
+        return { created: false, superseded: 0 };
+      }
+      const fact = buildProcedureFact(candidate, {
+        entityId: resolved.entity.id,
+        entityName: resolved.canonicalName,
+        canonicalKey: identity.canonicalKey,
+        valueHash: identity.valueHash,
+      }, now, maxContentBytes);
+      insertFact(db, fact);
+      for (const old of active) {
+        const validTo = old.validAt < now ? now : addMs(old.validAt, 1);
+        invalidate(db, old.id, { validTo, supersededBy: fact.id, status: 'invalidated' });
+        insertEdge(db, {
+          id: newId('edge'),
+          src: fact.id,
+          dst: old.id,
+          etype: 'supersedes',
+          validAt: now,
+          provenance: PROCEDURE_PROVENANCE,
+        });
+      }
+      return { created: true, superseded: active.length };
+    });
+    if (written.created) res.created += 1;
+    else res.skipped += 1;
+    res.superseded += written.superseded;
   }
 
   res.ms = Math.round(performance.now() - startedAt);

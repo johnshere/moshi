@@ -78,6 +78,7 @@ export async function main(argv: readonly string[]): Promise<number> {
           db,
           log,
           consolidate: { maxContentBytes: booted.ingest.max_fact_bytes },
+          procedures: { maxContentBytes: booted.ingest.max_fact_bytes },
         });
         // P1-24 互斥裁决的前置：ontology 里得有谓词基数性。启动即算一次，
         // 之后按 schema_rev 脏检查兜底重算（见 schemaInferRunner）。

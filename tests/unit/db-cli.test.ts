@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { COMMANDS, runCli } from '../../src/app/cli/index.js';
+import { ingestEvent } from '../../src/core/write/ingest.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
@@ -204,6 +205,26 @@ function seedEpisodic(db: Db, values: readonly string[]): void {
   }
 }
 
+function seedProcedure(db: Db): void {
+  let second = 0;
+  for (const session of ['s1', 's2', 's3']) {
+    for (const cmd of ['pnpm install', 'pnpm build', 'pnpm test']) {
+      second += 1;
+      const ts = new Date(Date.UTC(2026, 10, 4, 0, 0, second)).toISOString();
+      ingestEvent(db, {
+        ts,
+        sessionId: session,
+        cwd: '/work/cli',
+        agent: 'test',
+        rawHash: `${session}:${ts}:${cmd}`,
+        rawPath: '/tmp/session.jsonl',
+        role: 'tool',
+        tool: { name: 'Bash', input: { command: cmd }, output: 'ok', exitCode: 0 },
+      });
+    }
+  }
+}
+
 describe('db consolidate（P2-09）', () => {
   it('把同 key ≥3 条 episodic 归纳成 1 条要点；再跑一次 created=0', async () => {
     const { home, dbFile } = fakeHome();
@@ -256,5 +277,44 @@ describe('db consolidate（P2-09）', () => {
     const badFlag = await cli(home, ['db', 'consolidate', '--force']);
     expect(badFlag.code).toBe(2);
     expect(badFlag.err).toContain('consolidate');
+  });
+
+  it('同一命令提炼过程并输出 procedures；第二次零新增', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, seedProcedure);
+
+    const first = await cli(home, ['db', 'consolidate', '--rate', '0']);
+    expect(first.code).toBe(0);
+    expect(JSON.parse(first.out.trim())).toMatchObject({
+      command: 'db consolidate',
+      procedures: { candidates: 1, created: 1, skipped: 0, superseded: 0 },
+      dry_run: false,
+    });
+
+    const second = await cli(home, ['db', 'consolidate', '--rate', '0']);
+    expect(second.code).toBe(0);
+    expect(JSON.parse(second.out.trim())).toMatchObject({
+      procedures: { candidates: 1, created: 0, skipped: 1, superseded: 0 },
+    });
+    withDb(dbFile, (db) => {
+      expect(factRepo.countFacts(db)).toBe(1);
+    });
+  });
+
+  it('过程提炼 --dry-run 不写实体、事实或边', async () => {
+    const { home, dbFile } = fakeHome();
+    withDb(dbFile, seedProcedure);
+
+    const run = await cli(home, ['db', 'consolidate', '--dry-run', '--rate', '0']);
+    expect(run.code).toBe(0);
+    expect(JSON.parse(run.out.trim())).toMatchObject({
+      procedures: { candidates: 1, created: 1 },
+      dry_run: true,
+    });
+    withDb(dbFile, (db) => {
+      expect(factRepo.countFacts(db)).toBe(0);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM entity').get()).toEqual({ n: 0 });
+      expect(db.prepare('SELECT COUNT(*) AS n FROM edge').get()).toEqual({ n: 0 });
+    });
   });
 });

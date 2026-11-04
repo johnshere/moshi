@@ -7,8 +7,8 @@
  * 而不是「再衰减一次」：每条按自己的 `last_decay_at` 算到 `now`，所以连跑两次，
  * 第二次 `changed` 必为 0。只写变化行（Δ > 1e-3）。
  *
- * `consolidate`：手动跑一轮情景→语义巩固（平时由 harvest runner 收尾自动跑）。
- * 幂等键是源 id 集合指纹，所以连跑两次 `created` 必为 0。
+ * `consolidate`：手动跑一轮情景→语义巩固与过程提炼（平时由 harvest runner 收尾自动跑）。
+ * 幂等键是源 id 集合指纹或活跃过程身份，所以连跑两次 `created` 必为 0。
  *
  * 两个子命令都支持 `--dry-run`（一次写都不发）。
  */
@@ -16,6 +16,7 @@ import { existsSync } from 'node:fs';
 import {
   consolidate,
   CONSOLIDATE_RATE_PER_SEC,
+  extractProcedures,
 } from '../../../core/lifecycle/consolidate.js';
 import { applyStrength } from '../../../core/lifecycle/strength.js';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
@@ -36,7 +37,7 @@ const USAGE = [
   '',
   '子命令：',
   '  rebuild-strength [--dry-run]               按当前时刻惰性衰减全表重算强度（幂等；只写有变化的行）',
-  '  consolidate [--dry-run] [--rate <n>]       把同 key ≥3 条 episodic 归纳成 1 条 semantic 要点',
+  '  consolidate [--dry-run] [--rate <n>]       归纳同 key episodic 要点，并提炼同 cwd 重复工具过程',
   '',
   '公共参数：',
   '  --dry-run  只统计不写库',
@@ -103,12 +104,16 @@ export const dbCommand: Command = {
       migrate(db, { backupsDir: paths.backups });
 
       if (sub === 'consolidate') {
-        const res = await consolidate(db, {
+        const options = {
           dryRun,
           maxContentBytes: ctx.cfg.ingest.max_fact_bytes,
           ...(rate === null ? {} : { ratePerSec: rate }),
-        });
-        ctx.stdout(`${JSON.stringify({ command: 'db consolidate', ...res, dry_run: dryRun })}\n`);
+        };
+        const res = await consolidate(db, options);
+        const procedures = await extractProcedures(db, options);
+        ctx.stdout(
+          `${JSON.stringify({ command: 'db consolidate', ...res, procedures, dry_run: dryRun })}\n`,
+        );
         return 0;
       }
 

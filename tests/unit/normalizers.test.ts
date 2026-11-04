@@ -125,6 +125,7 @@ describe('normalizePredicate', () => {
     ['is-active', 'isactive'],
     ['  UPPER_case  ', 'upper_case'],
     ['a__b', 'a_b'],
+    ['Procedure:Build', 'procedure:build'],
   ])('%s → %s', (input, expected) => {
     expect(normalizePredicate(input)).toBe(expected);
   });

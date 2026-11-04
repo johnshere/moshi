@@ -20,6 +20,12 @@ import type {
   Verdict,
 } from './enums.js';
 
+export interface ProcedureStep {
+  action: string;
+  expect: string;
+  on_fail: string;
+}
+
 /** `attrs` 两区：frozen 写入后不可变，ext 可扩展可改（D3） */
 export interface FactAttrs {
   frozen: {

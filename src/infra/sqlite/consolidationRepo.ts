@@ -8,6 +8,42 @@ import type { Fact } from '../../domain/types.js';
 import type { Db } from './db.js';
 import { rowToFact } from './mappers.js';
 
+export interface ProcedureTurnRow {
+  annotationId: string;
+  episodeId: string;
+  session: string | null;
+  cwd: string;
+  ts: string;
+  cmd: string;
+}
+
+export function listProcedureTurns(db: Db): ProcedureTurnRow[] {
+  const rows = db
+    .prepare(
+      `SELECT a.id AS annotation_id,
+              json_extract(a.payload_json, '$.episodeId') AS episode_id,
+              COALESCE(json_extract(a.payload_json, '$.sessionId'), e.session) AS session,
+              COALESCE(json_extract(a.payload_json, '$.cwd'), e.cwd) AS cwd,
+              COALESCE(json_extract(a.payload_json, '$.ts'), e.ts, a.received_at) AS ts,
+              json_extract(a.payload_json, '$.cmd') AS cmd
+         FROM annotation a
+         LEFT JOIN episode e ON e.id = json_extract(a.payload_json, '$.episodeId')
+        WHERE a.channel = 'tool_parse'
+          AND json_extract(a.payload_json, '$.cmd') <> ''
+          AND COALESCE(json_extract(a.payload_json, '$.cwd'), e.cwd) IS NOT NULL
+        ORDER BY cwd, session, ts, a.id`,
+    )
+    .all() as Record<string, unknown>[];
+  return rows.map((r) => ({
+    annotationId: String(r['annotation_id']),
+    episodeId: String(r['episode_id']),
+    session: (r['session'] as string | null) ?? null,
+    cwd: String(r['cwd']),
+    ts: String(r['ts']),
+    cmd: String(r['cmd']),
+  }));
+}
+
 export interface ConsolidationGroup {
   canonicalKey: string;
   /** `canonical_key` 里已含 scope；单独带出来是为了建要点时不用再猜 */

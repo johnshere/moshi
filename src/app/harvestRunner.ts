@@ -9,12 +9,17 @@
  * - **兜底**：即便没人唤醒（比如队列是上一次进程留下的），每 `intervalMs` 也会扫一轮。
  * - **限深**：单轮最多 `maxBatches` 批，队列再长也会让出事件循环，不阻塞 HTTP。
  * - **不重入**：运行中再来的唤醒只置一个 `again` 标记，一轮结束后再补一次，不并发跑两轮。
- * - **收尾巩固**：一轮 harvest 结束后串行跑一次情景→语义巩固（P2-09）。巩固是低优先级
- *   后台维护，跑挂了只记日志，不影响已经落库的事实。
+ * - **收尾巩固**：一轮 harvest 结束后串行跑情景→语义巩固（P2-09）与过程提炼（P2-10）。
+ *   巩固是低优先级后台维护，跑挂了只记日志，不影响已经落库的事实。
  *
  * 不做的事：不碰 sidecar、不写归档、不改生命周期状态——那些有各自的触发点。
  */
-import { consolidate, type ConsolidateOptions } from '../core/lifecycle/consolidate.js';
+import {
+  consolidate,
+  extractProcedures,
+  type ConsolidateOptions,
+  type ProcedureOptions,
+} from '../core/lifecycle/consolidate.js';
 import { harvest, type HarvestResult } from '../core/write/harvest.js';
 import { countPending, countErrors } from '../infra/sqlite/annotationRepo.js';
 import type { Db } from '../infra/sqlite/db.js';
@@ -37,6 +42,8 @@ export interface HarvestRunnerOptions {
    * `false` = 关掉（只想测写入链路、或调用方自己控制巩固时机）。
    */
   consolidate?: ConsolidateOptions | false;
+  /** harvest 收尾的过程提炼（P2-10）。默认开，`false` = 关掉 */
+  procedures?: ProcedureOptions | false;
 }
 
 export interface HarvestRunnerState {
@@ -67,6 +74,7 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
   const batchSize = opts.batchSize ?? HARVEST_BATCH_SIZE;
   const maxBatches = opts.maxBatches ?? HARVEST_MAX_BATCHES;
   const consolidateOpts = opts.consolidate === false ? null : (opts.consolidate ?? {});
+  const procedureOpts = opts.procedures === false ? null : (opts.procedures ?? {});
 
   let timer: NodeJS.Timeout | undefined;
   let running = false;
@@ -96,6 +104,19 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
         log?.error(
           { event: 'consolidate.failed', err: (err as Error).message },
           'consolidate round failed',
+        );
+      }
+    }
+    if (procedureOpts !== null) {
+      try {
+        const p = await extractProcedures(db, procedureOpts);
+        if (p.created + p.superseded > 0) {
+          log?.info({ event: 'procedure.run', ...p }, 'procedures extracted');
+        }
+      } catch (err) {
+        log?.error(
+          { event: 'procedure.failed', err: (err as Error).message },
+          'procedure round failed',
         );
       }
     }
