@@ -29,6 +29,7 @@ import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
 import { batchRoutes } from './routes/batch.js';
 import { queueRoutes } from './routes/queues.js';
+import { diagRoutes } from './routes/diag.js';
 import { archiveRoutes } from './routes/archive.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
@@ -84,6 +85,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     ...(deps.batchOpTtlMs === undefined ? {} : { ttlMs: deps.batchOpTtlMs }),
   });
   await app.register(queueRoutes, { prefix: '/api/queues', db: deps.db });
+await app.register(diagRoutes, { prefix: '/api/diag', db: deps.db, cfg: deps.cfg });
   // 归档台账与 .proposed 三选一（P2-15）
   await app.register(archiveRoutes, { prefix: '/api/archive', db: deps.db, cfg: deps.cfg });
   await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });

@@ -29,6 +29,8 @@
     "inspector/**/*.tsx",
     "inbox/**/*.ts",
     "inbox/**/*.tsx",
+    "settings/**/*.ts",
+    "settings/**/*.tsx",
     "vite.config.ts"
   ]
 }
