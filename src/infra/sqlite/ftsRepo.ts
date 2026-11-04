@@ -51,6 +51,41 @@ export function bm25Search(db: Db, matchQuery: string, k = 20): Bm25Hit[] {
   }
 }
 
+export interface FtsFactHit {
+  fact_id: string;
+  content: string;
+  canonical_key: string;
+  importance: number;
+  confidence: number;
+  /** bm25() 原始输出（负数，越负越相关）；对外 `GET /api/search` 转成正向 relevance */
+  bm25: number;
+}
+
+/**
+ * 带事实元数据的 BM25 查询（P2-19A-02 `GET /api/search` 用）。
+ *
+ * 与 `bm25Search` 同口径（同一 `fact_fts` MATCH、同 bm25 排序），只多带顶部搜索
+ * 要展示的几列。排序稳定：`bm25` 升序后按 `fact_id` 升序，同分两次调用逐行一致。
+ * 查询失败与 `bm25Search` 一样**上抛**，不吞成空结果（§6.13）。
+ */
+export function searchFactsWithMeta(db: Db, matchQuery: string, k = 10): FtsFactHit[] {
+  if (matchQuery.trim() === '') return [];
+  try {
+    return db
+      .prepare(
+        `SELECT f.id AS fact_id, f.content, f.canonical_key, f.importance, f.confidence,
+                bm25(fact_fts) AS bm25
+           FROM fact_fts JOIN fact f ON f.id = fact_fts.fact_id
+          WHERE fact_fts MATCH ?
+          ORDER BY bm25 ASC, f.id ASC
+          LIMIT ?`,
+      )
+      .all(matchQuery, k) as FtsFactHit[];
+  } catch (err) {
+    throw new MoshiError('E_DB', `FTS 查询失败：${(err as Error).message}`, { matchQuery });
+  }
+}
+
 /** FTS 行数（doctor 校验：== fact 行数） */
 export function countFts(db: Db): number {
   try {

@@ -137,6 +137,51 @@ export function markMerged(db: Db, loserId: string, winnerId: string): void {
   db.prepare('UPDATE entity SET merged_into = ? WHERE id = ?').run(winnerId, loserId);
 }
 
+export interface EntitySearchHit {
+  entity_id: string;
+  canonical_name: string;
+  etype: EntityType;
+  /** 该实体作为 subject 的**活跃**事实数（epistemic_status='active'） */
+  fact_count: number;
+}
+
+/**
+ * LIKE 通配符转义：用户输入里的 `%` / `_` / `\` 一律按字面量匹配。
+ * 不转义时 `q=%` 会命中全库实体（`q=a_b` 还会把 `aXb` 当成命中）。
+ */
+function escapeLike(s: string): string {
+  return s.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
+ * 实体搜索（P2-19A-02 `GET /api/search` 的数据源之一）。
+ *
+ * 匹配口径：canonical_name 或任一名别（alias.alias）的**子串**命中；合并 loser
+ * （merged_into 非空）不出现。排序按活跃事实数降序、同数按 id 升序（两次调用逐行一致）。
+ * 活跃事实的关联键是 `fact.attrs.frozen.subject.entity_id`（详设 §2.2，entity 表没有外键列）。
+ */
+export function searchEntitiesByName(db: Db, q: string, limit = 10): EntitySearchHit[] {
+  const pattern = `%${escapeLike(q)}%`;
+  return db
+    .prepare(
+      `SELECT e.id AS entity_id, e.canonical_name, e.etype, COUNT(f.id) AS fact_count
+         FROM entity e
+         LEFT JOIN fact f
+           ON json_extract(f.attrs, '$.frozen.subject.entity_id') = e.id
+          AND f.epistemic_status = 'active'
+        WHERE e.merged_into IS NULL
+          AND (e.canonical_name LIKE ? ESCAPE '\\'
+               OR EXISTS (
+                 SELECT 1 FROM alias a
+                  WHERE a.entity_id = e.id AND a.alias LIKE ? ESCAPE '\\'
+               ))
+        GROUP BY e.id
+        ORDER BY fact_count DESC, e.id ASC
+        LIMIT ?`,
+    )
+    .all(pattern, pattern, limit) as EntitySearchHit[];
+}
+
 export function countEntities(db: Db): number {
   const row = db.prepare('SELECT COUNT(*) AS n FROM entity').get() as { n: number };
   return row.n;

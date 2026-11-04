@@ -31,6 +31,7 @@ import { batchRoutes } from './routes/batch.js';
 import { queueRoutes } from './routes/queues.js';
 import { diagRoutes } from './routes/diag.js';
 import { archiveRoutes } from './routes/archive.js';
+import { searchRoutes } from './routes/search.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
@@ -78,6 +79,7 @@ export async function buildHttpApp(deps: HttpDeps) {
 
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+  await app.register(searchRoutes, { prefix: '/api/search', db: deps.db });
   // 批量动作与 factRoutes 同前缀、不同路由（Fastify 允许多插件共享前缀）
   await app.register(batchRoutes, {
     prefix: '/api/facts',
