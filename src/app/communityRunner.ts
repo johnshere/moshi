@@ -9,10 +9,16 @@
  * 自己写回 `community_id` 是 UPDATE（无触发器、不推 schema_rev），且 `community_rev`
  * 在写回事务内推进——投影刷新不会反过来触发自身重算，无死循环。
  *
+ * P2-12 起同轮还要生成社区摘要：`community_summary` 的 INSERT/UPDATE 会推高
+ * `schema_rev`（002_schema_rev.sql），所以脏检查必须记录**跑完之后**的 rev，
+ * 否则下一轮会把自己刚写的摘要当成"库变过"，每 5 分钟空转重写全部摘要。
+ *
  * 周级调度语义由 P2-17 调度器统一接管后，本 runner 的定时器会被替换
  * （同 D-69/D-73 的处理方式），`runOnce` 保持可复用。
  */
 import { recomputeCommunities, type CommunityResult } from '../core/lifecycle/community.js';
+import { buildCommunitySummaries } from '../core/lifecycle/community-summary.js';
+import { nowIso } from '../domain/time.js';
 import type { Db } from '../infra/sqlite/db.js';
 import { countEdges } from '../infra/sqlite/edgeRepo.js';
 import {
@@ -20,6 +26,8 @@ import {
   communityRev,
   countCommunityChanges,
   loadCommunityGraph,
+  loadSummaryFacts,
+  writeCommunitySummaries,
 } from '../infra/sqlite/communityRepo.js';
 import { schemaRev } from '../infra/sqlite/metaRepo.js';
 
@@ -49,6 +57,8 @@ export interface CommunityRunResult {
   inherited: number;
   /** 实际写入的 fact 行数（dryRun 时为"将写入"） */
   wrote: number;
+  /** 生成/写入的社区摘要条数（P2-12；dryRun 时为"将写入"） */
+  summaries: number;
   /** Louvain 模块度 */
   modularity: number;
   /** Louvain 聚合轮数 */
@@ -93,6 +103,16 @@ export function runCommunityOnce(
     wrote = applyCommunityAssignment(db, result.assignment);
   }
 
+  // 社区摘要（详设 §8.3.3）：与划分同轮生成，供全局路径的 topic 清单消费。
+  // dryRun 不落库，但仍要算出"将写入"条数；已归属事实以库内为准，
+  // 未归属（首次划分 dryRun）用本轮 assignment 覆盖。
+  const summaryFacts = loadSummaryFacts(db).map((fact) => {
+    const cid = result.assignment.get(fact.id);
+    return cid === undefined ? fact : { ...fact, communityId: cid };
+  });
+  const drafts = buildCommunitySummaries(summaryFacts);
+  const summaries = dryRun ? drafts.length : writeCommunitySummaries(db, drafts, nowIso());
+
   const sizes = [...result.sizes.values()];
   const ms = Math.round(performance.now() - startedAt);
   return {
@@ -101,6 +121,7 @@ export function runCommunityOnce(
     communities: sizes.length,
     inherited: result.inherited.size,
     wrote,
+    summaries,
     modularity: result.modularity,
     iterations: result.iterations,
     rev: communityRev(db),
@@ -122,7 +143,9 @@ export function startCommunityRunner(opts: CommunityRunnerOptions): CommunityRun
     if (state.lastRev === rev && state.lastEdgeCount === edgeCount) return null;
 
     const result = runCommunityOnce(db);
-    state.lastRev = rev;
+    // 记录写入后的 rev：摘要写库会推高 schema_rev（002 触发器），记旧值会让
+    // 下一轮把自己刚写的摘要判成脏数据，形成每轮空转重写的自触发循环。
+    state.lastRev = schemaRev(db);
     state.lastEdgeCount = edgeCount;
     state.runs += 1;
 
@@ -134,11 +157,14 @@ export function startCommunityRunner(opts: CommunityRunnerOptions): CommunityRun
         communities: result.communities,
         inherited: result.inherited,
         wrote: result.wrote,
+        summaries: result.summaries,
         modularity: result.modularity,
         rev: result.rev,
         ms: result.ms,
       },
-      result.wrote > 0 ? '社区划分已更新' : '社区划分已运行（无归属变化）',
+      result.wrote > 0 || result.summaries > 0
+        ? '社区划分与摘要已更新'
+        : '社区划分已运行（无归属变化）',
     );
     return result;
   };

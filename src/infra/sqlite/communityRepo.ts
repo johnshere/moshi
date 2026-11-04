@@ -7,15 +7,26 @@
  * P2-11 追加：图输入装载（`loadCommunityGraph` / `loadOldAssignment`）与划分结果
  * 写回（`applyCommunityAssignment` / `communityRev` / `bumpCommunityRev`）。
  * 写回必须经 `factRepo.setCommunity` 专用入口、放在事务里（progress P2-11 开工核查）；
- * `setCommunity` 不更新 `updated_at`、不推 `schema_rev`（DDL 只有 INSERT 触发器），
- * 符合"社区是派生投影"的语义——投影刷新不会反过来触发自身重算。
+ * `setCommunity` 不更新 `updated_at`、不推 `schema_rev`（002 的 fact UPDATE 触发器
+ * 带 WHEN 白名单，community_id 不在白名单里），符合"社区是派生投影"的语义。
+ *
+ * P2-12 追加：摘要输入装载（`loadSummaryFacts`）与写库（`writeCommunitySummaries`）。
+ * summary 的文案拼接是纯函数（`core/lifecycle/community-summary.ts`），这里只做
+ * SQL 与事务；source_rev 的预估口径见 `writeCommunitySummaries` 的注释。
  */
-import type { CommunityEdge, CommunityGraphInput } from '../../core/lifecycle/community.js';
+import type {
+  CommunityEdge,
+  CommunityGraphInput,
+} from '../../core/lifecycle/community.js';
+import type {
+  CommunitySummaryDraft,
+  SummaryFact,
+} from '../../core/lifecycle/community-summary.js';
 import type { Fact } from '../../domain/types.js';
 import type { Db } from './db.js';
 import { setCommunity } from './factRepo.js';
 import { rowToFact } from './mappers.js';
-import { getMeta, setMeta } from './metaRepo.js';
+import { getMeta, schemaRev, setMeta } from './metaRepo.js';
 import { withTransaction } from './tx.js';
 
 export interface TopicCandidateRow {
@@ -258,4 +269,102 @@ export function countCommunityChanges(
     if ((currentById.get(factId) ?? null) !== cid) changed += 1;
   }
   return changed;
+}
+
+// ────────────────────────────────────────────────────────────
+// P2-12 社区摘要：输入装载与写库
+// ────────────────────────────────────────────────────────────
+
+/**
+ * 摘要输入：全部 active/disputed 事实 + 主体实体信息（详设 §8.3.3）。
+ *
+ * `community_id` 原样返回（可为 NULL）——daemon 写回后所有活跃事实都有归属；
+ * dryRun 时调用方用本轮划分结果覆盖，尚未归属的事实（首次划分）也能参与摘要。
+ * 实体名优先取 `entity.canonical_name`，没有对应实体行时回退事实里的
+ * `attrs.frozen.subject.name`（种子库 / 未归一化写入都能出 label）。
+ */
+export function loadSummaryFacts(db: Db): SummaryFact[] {
+  const rows = db
+    .prepare(
+      `SELECT f.id                                   AS id,
+              f.community_id                         AS community_id,
+              f.scope                                AS scope,
+              f.content                              AS content,
+              f.importance                           AS importance,
+              f.confidence                           AS confidence,
+              json_extract(f.attrs, '$.frozen.subject.entity_id') AS entity_id,
+              COALESCE(
+                NULLIF(e.canonical_name, ''),
+                NULLIF(json_extract(f.attrs, '$.frozen.subject.name'), '')
+              )                                      AS entity_name
+         FROM fact f
+         LEFT JOIN entity e
+           ON e.id = json_extract(f.attrs, '$.frozen.subject.entity_id')
+        WHERE f.epistemic_status IN ('active','disputed')
+        ORDER BY f.community_id, f.id`,
+    )
+    .all() as {
+    id: string;
+    community_id: number | null;
+    scope: string;
+    content: string;
+    importance: number;
+    confidence: number;
+    entity_id: string | null;
+    entity_name: string | null;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    communityId: r.community_id,
+    scope: r.scope,
+    content: r.content,
+    importance: r.importance,
+    confidence: r.confidence,
+    entityId: r.entity_id,
+    entityName: r.entity_name,
+  }));
+}
+
+/**
+ * 写社区摘要（单事务 UPSERT），返回写入行数；空数组不写库、不推 rev。
+ *
+ * `source_rev` 必须填**写完后的** `meta.schema_rev`：002_schema_rev.sql 对
+ * `community_summary` 的每次 INSERT/UPDATE 都会把 `schema_rev` +1，
+ * 而 `core/read/search.ts` 的新鲜度判据是 `source_rev >= schema_rev`。
+ * 若填写入前的 rev，刚写完的摘要立刻被判陈旧（`summary_missing` 恒真）。
+ * 一个 upsert 行恰好触发一次触发器，所以最终 rev = 写入前 rev + 行数；
+ * 因此在事务内先算 `revAfter = schemaRev(db) + rows.length`，所有行填同一个值。
+ */
+export function writeCommunitySummaries(
+  db: Db,
+  rows: readonly CommunitySummaryDraft[],
+  now: string,
+): number {
+  if (rows.length === 0) return 0;
+  return withTransaction(db, () => {
+    const revAfter = schemaRev(db) + rows.length;
+    const stmt = db.prepare(
+      `INSERT INTO community_summary
+         (community_id, scope, label, summary, fact_count, derived_at, source_rev)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(community_id, scope) DO UPDATE SET
+         label      = excluded.label,
+         summary    = excluded.summary,
+         fact_count = excluded.fact_count,
+         derived_at = excluded.derived_at,
+         source_rev = excluded.source_rev`,
+    );
+    for (const row of rows) {
+      stmt.run(
+        row.communityId,
+        row.scope,
+        row.label,
+        row.summary,
+        row.factCount,
+        now,
+        revAfter,
+      );
+    }
+    return rows.length;
+  });
 }
