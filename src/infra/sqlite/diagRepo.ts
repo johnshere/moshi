@@ -221,6 +221,8 @@ export interface DiagArchiveSummary {
   topics: number;
   dirty: number;
   human_edited: number;
+  proposed_pending: number;
+  merged_or_split: number;
 }
 
 export function readArchiveSummary(db: Db): DiagArchiveSummary {
@@ -228,14 +230,51 @@ export function readArchiveSummary(db: Db): DiagArchiveSummary {
     .prepare(
       `SELECT COUNT(*) AS topics,
               COALESCE(SUM(dirty = 1), 0) AS dirty,
-              COALESCE(SUM(human_edited <> 0), 0) AS human_edited
+              COALESCE(SUM(human_edited <> 0), 0) AS human_edited,
+              COALESCE(SUM(human_edited = 1), 0) AS proposed_pending,
+              COALESCE(SUM(status <> 'active'), 0) AS merged_or_split
          FROM archive_meta`,
     )
-    .get() as { topics: number; dirty: number; human_edited: number } | undefined;
+    .get() as
+    | {
+        topics: number;
+        dirty: number;
+        human_edited: number;
+        proposed_pending: number;
+        merged_or_split: number;
+      }
+    | undefined;
   return {
     topics: row?.topics ?? 0,
     dirty: row?.dirty ?? 0,
     human_edited: row?.human_edited ?? 0,
+    proposed_pending: row?.proposed_pending ?? 0,
+    merged_or_split: row?.merged_or_split ?? 0,
+  };
+}
+
+/**
+ * 布局新鲜度的两个时间点（P2-19A 补）。
+ *
+ * `meta` 里只有 `layout_version`（代数，不是时间），因此直接用 `layout` 表自带的
+ * `computed_at`：它就是最近一次布局的真实时间，不是近似口径，也不需要新表。
+ * 空库 / 从未跑过布局时 `last_layout_at` 为 null，报告输出 null。
+ */
+export interface DiagLayoutTimestamps {
+  last_layout_at: string | null;
+  last_fact_write_at: string | null;
+}
+
+export function readLayoutTimestamps(db: Db): DiagLayoutTimestamps {
+  const layout = db.prepare('SELECT MAX(computed_at) AS at FROM layout').get() as
+    | { at: string | null }
+    | undefined;
+  const fact = db.prepare('SELECT MAX(updated_at) AS at FROM fact').get() as
+    | { at: string | null }
+    | undefined;
+  return {
+    last_layout_at: layout?.at ?? null,
+    last_fact_write_at: fact?.at ?? null,
   };
 }
 

@@ -97,7 +97,13 @@ describe('GET /api/diag', () => {
     expect(typeof body.model.embed).toBe('string');
     expect(body.model.gat).toBe('off');
     expect(body.model.weights).toBe(false);
-    expect(body.archive).toEqual({ topics: 0, dirty: 0, human_edited: 0 });
+    expect(body.archive).toEqual({
+      topics: 0,
+      dirty: 0,
+      human_edited: 0,
+      proposed_pending: 0,
+      merged_or_split: 0,
+    });
     expect(body.quality).toEqual({
       orphan_ratio: null,
       modularity: null,
@@ -105,24 +111,58 @@ describe('GET /api/diag', () => {
       near_dup_ratio: 0,
       key_entity_coverage: null,
       scope_leak: 0,
+      layout_freshness: null,
     });
     expect(body.last_harvest_at).toBeNull();
     expect(body.last_eval).toBeNull();
   });
 
-  it('/api/diag/quality 返回六项指标', async () => {
+  it('/api/diag/quality 返回七项指标（六项 + 布局新鲜度）', async () => {
     const db = freshDb();
     const app = await diagApp(db);
     const res = await app.inject({ method: 'GET', url: '/api/diag/quality' });
     expect(res.statusCode).toBe(200);
     expect(Object.keys(res.json<Record<string, unknown>>()).sort()).toEqual([
       'key_entity_coverage',
+      'layout_freshness',
       'modularity',
       'near_dup_ratio',
       'orphan_ratio',
       'scope_leak',
       'stale_chains',
     ]);
+  });
+
+  it('archive 补项：待合并提案 / 合并分裂计数；layout 新鲜度按 layout.computed_at 口径', () => {
+    const db = freshDb();
+    const factId = insertFact(db, { id: 'fact_layout' });
+    const insertArchive = db.prepare(
+      `INSERT INTO archive_meta (topic_id, slug, path, title, content_hash, revision, last_exported_at, dirty, human_edited, status)
+       VALUES (?, ?, ?, 't', 'h', 1, '2026-01-01T00:00:00.000Z', ?, ?, ?)`,
+    );
+    insertArchive.run('topic_auto', 'auto', 'auto.md', 0, 0, 'active');
+    insertArchive.run('topic_pending', 'pending', 'pending.md', 1, 1, 'active');
+    insertArchive.run('topic_merged', 'merged', 'merged.md', 0, 2, 'merged');
+
+    // 布局落后于写入 24 小时：正数表示有新内容尚未上屏
+    db.prepare(
+      `INSERT INTO layout (fact_id, x, y, z, layout_version, computed_at)
+       VALUES (?, 1, 2, 3, 1, '2026-01-01T00:00:00.000Z')`,
+    ).run(factId);
+    db.prepare('UPDATE fact SET updated_at = ? WHERE id = ?').run(
+      '2026-01-02T00:00:00.000Z',
+      factId,
+    );
+
+    const report = reportOf(db);
+    expect(report.archive).toEqual({
+      topics: 3,
+      dirty: 1,
+      human_edited: 2,
+      proposed_pending: 1,
+      merged_or_split: 1,
+    });
+    expect(report.quality.layout_freshness).toBe(24);
   });
 });
 

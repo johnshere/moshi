@@ -14,10 +14,16 @@ import {
   readInvariantInputs,
   readLastEvalRaw,
   readLastHarvestAt,
+  readLayoutTimestamps,
   readQualityInputs,
 } from '../../infra/sqlite/diagRepo.js';
 import { getVec } from '../../infra/vec/index.js';
-import { computeModularity, computeNearDupRatio, round4 } from './quality.js';
+import {
+  computeLayoutFreshness,
+  computeModularity,
+  computeNearDupRatio,
+  round4,
+} from './quality.js';
 import { buildDiagReport } from './report.js';
 import type {
   DiagEvalJson,
@@ -101,6 +107,7 @@ export function collectDiagReport(
           })),
         );
 
+  const layoutTimestamps = readLayoutTimestamps(db);
   const quality: DiagQualityJson = {
     orphan_ratio: round4(raw.orphan_ratio),
     modularity,
@@ -108,6 +115,10 @@ export function collectDiagReport(
     near_dup_ratio: nearDupRatio,
     key_entity_coverage: round4(raw.key_entity_coverage),
     scope_leak: raw.scope_leak,
+    layout_freshness: computeLayoutFreshness(
+      layoutTimestamps.last_layout_at,
+      layoutTimestamps.last_fact_write_at,
+    ),
   };
 
   return buildDiagReport({

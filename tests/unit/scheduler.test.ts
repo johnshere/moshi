@@ -289,20 +289,42 @@ describe('限速与联动', () => {
     layout.stop();
   });
 
-  it('真实默认 JOBS：03:00 跑 backup→harvest→consolidate→infer，并更新 last_harvest_at', async () => {
+  it('真实默认 JOBS：03:00 跑 backup→harvest→consolidate→infer→community，并更新 last_harvest_at', async () => {
     const { db, cfg, home } = makeEnv();
     const log = fakeLog();
     const sched = startScheduler({ db, cfg, log, timerMs: 0, now: () => new Date(2026, 10, 4, 3, 0, 0) });
 
     const res = await sched.runDue(new Date(2026, 10, 4, 3, 0, 0));
     const names = res.map((r) => r.name);
-    // backup 优先级 5 最先；harvest 触发 consolidate → infer
+    // backup 优先级 5 最先；harvest 触发 consolidate → infer → community
     expect(names.indexOf('harvest')).toBeGreaterThan(names.indexOf('backup'));
     expect(names.indexOf('consolidate')).toBeGreaterThan(names.indexOf('harvest'));
     expect(names.indexOf('infer')).toBeGreaterThan(names.indexOf('consolidate'));
+    expect(names.indexOf('community')).toBeGreaterThan(names.indexOf('infer'));
     expect(res.every((r) => r.status === 'ok' || r.status === 'skipped')).toBe(true);
     expect(getMeta(db, 'last_harvest_at')).not.toBeNull();
     expect(home.length).toBeGreaterThan(0);
+    sched.stop();
+  });
+
+  it('社区重建：独立周级 cron（周日 05:00）+ after:infer 顺序，且一轮只触发一次', async () => {
+    const { db, cfg } = makeEnv();
+    const sched = startScheduler({ db, cfg, log: fakeLog(), timerMs: 0 });
+
+    // 周三 03:00：harvest 链把 community 带进本轮，排在 infer 之后、只出现一次
+    const chain = await sched.runDue(new Date(2026, 10, 4, 3, 0, 0));
+    const chainNames = chain.map((r) => r.name);
+    expect(chainNames).toContain('community');
+    expect(chainNames.indexOf('community')).toBeGreaterThan(chainNames.indexOf('infer'));
+    expect(chainNames.filter((n) => n === 'community')).toHaveLength(1);
+
+    // 周六 05:00：既不是 harvest 链，也不是周日 cron —— 不触发
+    const sat = await sched.runDue(new Date(2026, 10, 7, 5, 0, 0));
+    expect(sat.map((r) => r.name)).not.toContain('community');
+
+    // 周日 05:00：独立 cron 兜底触发（图没变时走脏检查跳过，仍算一次触发）
+    const sun = await sched.runDue(new Date(2026, 10, 8, 5, 0, 0));
+    expect(sun.map((r) => r.name)).toContain('community');
     sched.stop();
   });
 });

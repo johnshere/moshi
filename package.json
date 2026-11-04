@@ -23,9 +23,10 @@
     "lint": "eslint src tools tests --ext .ts",
     "lint:deps": "tsx tools/lint-deps.ts",
     "lint:desc": "tsx tools/lint-descriptions.ts",
-    "verify": "pnpm typecheck && pnpm typecheck:ui && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm test",
+    "verify": "pnpm typecheck && pnpm typecheck:ui && pnpm lint:deps && pnpm lint:lifecycle && pnpm lint:writes && pnpm lint:archive && pnpm test",
     "lint:lifecycle": "tsx tools/check-lifecycle.ts",
     "lint:writes": "tsx tools/check-writes.ts",
+    "lint:archive": "tsx tools/check-archive.ts",
     "bench": "tsx tools/bench.ts"
   },
   "dependencies": {

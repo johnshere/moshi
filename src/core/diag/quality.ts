@@ -54,6 +54,23 @@ export interface NearDupVectorPair {
 }
 
 /**
+ * 布局新鲜度（小时）：最近一次事实写入比最近一次布局晚多少。
+ *
+ * 正数 = 布局落后于写入（有新内容尚未上屏）；负数 = 布局比最近写入还新。
+ * 无布局记录 / 无事实 / 时间戳不可解析 → null（不拿 0 冒充"新鲜"）。
+ */
+export function computeLayoutFreshness(
+  lastLayoutAt: string | null,
+  lastFactWriteAt: string | null,
+): number | null {
+  if (lastLayoutAt === null || lastFactWriteAt === null) return null;
+  const layout = Date.parse(lastLayoutAt);
+  const write = Date.parse(lastFactWriteAt);
+  if (!Number.isFinite(layout) || !Number.isFinite(write)) return null;
+  return round4((write - layout) / 3_600_000);
+}
+
+/**
  * 近似重复比 = 相似度 ≥ 阈值 的候选对 / 可测候选对。
  *
  * 任何一对缺向量都返回 null（不拿"只测了一半"冒充全量结论）；

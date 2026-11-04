@@ -23,9 +23,11 @@ import { harvest } from '../../core/write/harvest.js';
 import { nowIso } from '../../domain/time.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import { countUnlaidFacts } from '../../infra/sqlite/layoutRepo.js';
-import { setMeta } from '../../infra/sqlite/metaRepo.js';
+import { countEdges } from '../../infra/sqlite/edgeRepo.js';
+import { schemaRev, setMeta } from '../../infra/sqlite/metaRepo.js';
 import { safeEnsureDir, safeRemoveFile } from '../../infra/fs/safeWrite.js';
 import { dataPaths, type Config } from '../config.js';
+import { runCommunityOnce } from '../communityRunner.js';
 import { runLayoutJob } from './layout.job.js';
 
 /** 单任务硬超时：10 分钟（详设 §8.6） */
@@ -249,6 +251,13 @@ function buildDefaultJobs(
   cfg: Config,
   harvestRun?: () => Promise<unknown> | unknown,
 ): SchedulerJob[] {
+  // 社区周重建的脏检查状态：等价 `startCommunityRunner().runOnce()` 的判据
+  // （schema_rev + 活跃边数）。调度器接管周级节奏后不再起 runner 定时器，
+  // 但也不能每天 harvest 链都把无变化的图重算一遍；记"跑完后的 schema_rev"
+  // 是因为社区摘要写库会推高它（同 communityRunner 注释）。
+  let communityLastRev: number | null = null;
+  let communityLastEdgeCount: number | null = null;
+
   return [
     {
       name: 'backup',
@@ -313,6 +322,27 @@ function buildDefaultJobs(
         if (!c.layout.enabled) return { skipped: 'layout-disabled' };
         if (countUnlaidFacts(db) === 0) return { skipped: 'up-to-date' };
         return runLayoutJob({ db, cfg: c });
+      },
+    },
+    {
+      // 社区周重建（P2-19A）：独立周级 cron 是兜底触发点；after:'infer' 把
+      // 它挂进 harvest 链尾，保证「schema/事实先更新、社区后重建」且只触发一次。
+      // 日常链路是否真重算由下面的脏检查决定，无变化的图直接跳过。
+      name: 'community',
+      cron: '0 5 * * 0',
+      after: 'infer',
+      priority: 60,
+      async run({ db }) {
+        const rev = schemaRev(db);
+        const edgeCount = countEdges(db, true);
+        if (communityLastRev === rev && communityLastEdgeCount === edgeCount) {
+          return { skipped: 'up-to-date' };
+        }
+        const result = runCommunityOnce(db);
+        // 摘要写入会推高 schema_rev，必须记跑完后的值（否则下一轮空转）
+        communityLastRev = schemaRev(db);
+        communityLastEdgeCount = edgeCount;
+        return result;
       },
     },
   ];
