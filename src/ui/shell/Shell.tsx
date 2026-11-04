@@ -9,6 +9,7 @@ import { PAGES, lightColor, pageHref, queueBadge, statusLights, type PageKey, ty
 import { navigate, navigatePage } from './navigate.js';
 import { SearchBox } from './SearchBox.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
+import { FirstRun } from './FirstRun.js';
 
 const POLL_MS = 30_000;
 
@@ -112,6 +113,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
 
   return (
     <div style={shellStyle}>
+      <FirstRun />
       <aside style={navStyle} data-testid="shell-nav">
         <div style={brandStyle}>默识</div>
         {PAGES.map((page) => {

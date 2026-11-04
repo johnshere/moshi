@@ -35,6 +35,7 @@ import { searchRoutes } from './routes/search.js';
 import { configRoutes } from './routes/config.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
+import { buildStatusExtras } from '../../core/ops/status.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
 
 export interface HttpDeps {
@@ -125,7 +126,8 @@ export async function buildHttpApp(deps: HttpDeps) {
       indexed: countFts(deps.db),
       total,
     };
-    return reply.send(status);
+    // P2-19A-08：模型/任务/MCP 时间戳等扩展字段（只增字段）
+    return reply.send({ ...status, ...buildStatusExtras(deps.db, deps) });
   });
 
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──

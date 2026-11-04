@@ -12,6 +12,7 @@
 import { z } from 'zod';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { MoshiError } from '../../domain/errors.js';
+import { setMeta } from '../../infra/sqlite/metaRepo.js';
 import { ANNOTATIONS, DESCRIPTIONS, TITLES, type ToolName } from './descriptions.js';
 import { annotateShape, correctShape, feedbackShape, queryShape } from './schemas.js';
 import { runMemoryQuery } from './query.js';
@@ -107,6 +108,21 @@ export function findTool(name: string): ToolSpec | null {
 }
 
 /**
+ * 记录最近一次 MCP 工具调用（P2-19A-08，详设 §10.7 / 概设 §8.4 首次引导）。
+ *
+ * 成交口径是「宿主连上过我们」：成功、参数错、未知工具都算一次调用；只有 meta 写失败
+ * 不算调用失败——埋点永远不该反过来阻断业务（比如库暂时只读时工具仍要能用）。
+ */
+export function recordToolCall(deps: McpDeps, name: string, at: Date = new Date()): void {
+  try {
+    setMeta(deps.db, 'mcp.last_call_at', at.toISOString());
+    setMeta(deps.db, 'mcp.last_call_tool', name);
+  } catch {
+    /* meta 写入失败不阻断工具调用：状态栏最多显示旧时间，比工具失败轻 */
+  }
+}
+
+/**
  * 统一的调用入口：校验 → 执行 → 错误归一。
  *
  * 抽出来是为了让测试可以**直接调用工具**而不经过 HTTP / MCP 传输层——
@@ -117,6 +133,8 @@ export async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<CallToolResult> {
+  // 先记时间：未知工具也是宿主的一次尝试（首开「MCP 是否连上」看的是这个，不是成功次数）
+  recordToolCall(deps, name);
   const tool = findTool(name);
   if (tool === null) {
     return errorResult(new MoshiError('E_INPUT', `未知工具：${name}`, { name }));
