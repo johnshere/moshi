@@ -7,6 +7,12 @@
  * 3. `localStorage['moshi-token']`（`?token=` 落到 localStorage，刷新不掉）
  */
 import type { TraceEdgeReadout, TraceRecord, TraceSummary } from './graph/pure/trace.js';
+import type {
+  ArchiveExportResult,
+  ArchiveProposalAction,
+  ArchiveTopicDetail,
+  ArchiveTopicSummary,
+} from './archive/pure.js';
 
 export interface GraphNode {
   id: string;
@@ -157,6 +163,104 @@ export async function fetchTraceList(limit = 20, signal?: AbortSignal): Promise<
   });
   if (!res.ok) throw new Error(await errorMessage(res));
   return (await res.json()) as TraceListPayload;
+}
+
+/**
+ * `/api/archive/*` 的请求函数（P2-19A-05b 只增）。
+ *
+ * 后端契约：
+ * - `GET  /api/archive/topics`      → `{items: ArchiveTopicSummary[]}`
+ * - `GET  /api/archive/topics/:slug` → `ArchiveTopicDetail`；404 `archive_slug_not_found`
+ * - `POST /api/archive/export`      → `{exported,written,unchanged,proposed,dir,elapsed_ms}`
+ * - `POST /api/archive/proposed/:slug` body `{action}` → `{human_edited,revision,...}`
+ */
+export class MoshiApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly detail: unknown;
+
+  constructor(message: string, code: string, status: number, detail: unknown) {
+    super(message);
+    this.name = 'MoshiApiError';
+    this.code = code;
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+async function throwArchiveError(res: Response): Promise<never> {
+  const body = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    message?: string;
+    detail?: unknown;
+  };
+  throw new MoshiApiError(
+    body.message ?? body.error ?? `HTTP ${String(res.status)}`,
+    body.error ?? `HTTP_${String(res.status)}`,
+    res.status,
+    body.detail ?? null,
+  );
+}
+
+export async function fetchArchiveTopics(signal?: AbortSignal): Promise<ArchiveTopicSummary[]> {
+  const res = await fetch('/api/archive/topics', {
+    headers: { 'X-Moshi-Token': resolveToken() },
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (!res.ok) await throwArchiveError(res);
+  const body = (await res.json()) as { items?: ArchiveTopicSummary[] };
+  return Array.isArray(body.items) ? body.items : [];
+}
+
+/** 单篇正文；404 = 列表过期/主题不存在，属于可降级分支，返回 null。 */
+export async function fetchArchiveTopic(
+  slug: string,
+  signal?: AbortSignal,
+): Promise<ArchiveTopicDetail | null> {
+  const res = await fetch(`/api/archive/topics/${encodeURIComponent(slug)}`, {
+    headers: { 'X-Moshi-Token': resolveToken() },
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (res.status === 404) return null;
+  if (!res.ok) await throwArchiveError(res);
+  return (await res.json()) as ArchiveTopicDetail;
+}
+
+/** 全量导出（重建归档）；同步执行，响应里 elapsed_ms 是真实耗时。 */
+export async function requestArchiveExport(signal?: AbortSignal): Promise<ArchiveExportResult> {
+  const res = await fetch('/api/archive/export', {
+    method: 'POST',
+    headers: { 'X-Moshi-Token': resolveToken(), 'Content-Type': 'application/json' },
+    body: '{}',
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (!res.ok) await throwArchiveError(res);
+  return (await res.json()) as ArchiveExportResult;
+}
+
+export interface ArchiveProposalResult {
+  slug: string;
+  action: ArchiveProposalAction;
+  human_edited: number;
+  revision: number;
+  content_hash: string | null;
+  path: string;
+  history_path: string | null;
+}
+
+export async function applyArchiveProposal(
+  slug: string,
+  action: ArchiveProposalAction,
+  signal?: AbortSignal,
+): Promise<ArchiveProposalResult> {
+  const res = await fetch(`/api/archive/proposed/${encodeURIComponent(slug)}`, {
+    method: 'POST',
+    headers: { 'X-Moshi-Token': resolveToken(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+    ...(signal === undefined ? {} : { signal }),
+  });
+  if (!res.ok) await throwArchiveError(res);
+  return (await res.json()) as ArchiveProposalResult;
 }
 
 /**
