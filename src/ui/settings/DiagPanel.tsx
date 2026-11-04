@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { resolveToken } from '../api.js';
+import { evalRunText } from './privacy-pure.js';
 
 // 与 core/diag/types.ts 逐字段一致；UI 包不跨包 import 服务端类型，故在此复述契约。
 interface DiagReport {
@@ -129,6 +130,8 @@ export function DiagPanel(): JSX.Element {
   const [report, setReport] = useState<DiagReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [evalBusy, setEvalBusy] = useState(false);
+  const [evalMessage, setEvalMessage] = useState<string | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal): Promise<void> => {
     setBusy(true);
@@ -151,6 +154,45 @@ export function DiagPanel(): JSX.Element {
       controller.abort();
     };
   }, [load]);
+
+  const runEval = useCallback(async (): Promise<void> => {
+    if (evalBusy) return;
+    setEvalBusy(true);
+    setEvalMessage(null);
+    try {
+      const res = await fetch('/api/eval/run', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'X-Moshi-Token': resolveToken() },
+        body: '{}',
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        message?: string;
+        error?: string;
+        ok?: boolean;
+        reason?: string;
+        at?: string;
+        passed?: number;
+        total?: number;
+        blocking_failures?: number;
+        elapsed_ms?: number;
+        detail?: { reason?: string };
+      };
+      if (!res.ok) {
+        setEvalMessage(
+          res.status === 409
+            ? '已有评测在跑'
+            : (body.message ?? body.error ?? `HTTP ${String(res.status)}`),
+        );
+        return;
+      }
+      setEvalMessage(evalRunText(body, res.status));
+      await load();
+    } catch (err) {
+      setEvalMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEvalBusy(false);
+    }
+  }, [evalBusy, load]);
 
   if (error !== null) {
     return (
@@ -270,7 +312,20 @@ export function DiagPanel(): JSX.Element {
                 `eval ${report.last_eval.at} · ${String(report.last_eval.passed)}/${String(report.last_eval.total)}` +
                   ` · 阻断 ${String(report.last_eval.blocking_failures)}`,
               )}
+          <button
+            type="button"
+            data-testid="diag-run-eval"
+            disabled={evalBusy}
+            onClick={() => void runEval()}
+          >
+            {evalBusy ? '评测中…' : '跑 golden set'}
+          </button>
         </div>
+        {evalMessage !== null && (
+          <div data-testid="diag-eval-message" style={{ color: '#fbbf24', fontSize: 12 }}>
+            {evalMessage}
+          </div>
+        )}
       </div>
     </div>
   );

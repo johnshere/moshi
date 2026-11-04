@@ -8,6 +8,7 @@ import type { ReactElement } from 'react';
 import { ConfigForm } from './ConfigForm.js';
 import { DiagPanel } from './DiagPanel.js';
 import { MaintenancePanel } from './MaintenancePanel.js';
+import { PrivacyPanel } from './PrivacyPanel.js';
 
 export function SettingsPage(): ReactElement {
   return (
@@ -19,11 +20,12 @@ export function SettingsPage(): ReactElement {
         设置与诊断
       </div>
       <div style={{ color: '#64748b', fontSize: 12, padding: '4px 18px 10px' }}>
-        配置（白名单键，原子写回 TOML）、索引维护，以及只读自检（I1–I10 / 图质量 / 模型归档）。
+        配置（白名单键，原子写回 TOML）、索引维护、隐私与全库导出，以及只读自检（I1–I10 / 图质量 / 模型归档）。
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 18px 18px' }}>
         <ConfigForm />
         <MaintenancePanel />
+        <PrivacyPanel />
         <DiagPanel />
       </div>
     </div>
