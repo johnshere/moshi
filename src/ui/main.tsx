@@ -1,13 +1,18 @@
 /**
- * `/ui/graph` 与 `/ui/inbox` 的 React 入口（P2-07 起两页共用同一份产物）。
+ * 五个一级页面的 React 入口（P2-19-A，概设 §8.1 / 详设 §10.1）。
  *
- * 分派只按路径前缀：`/ui/inbox*` → `InboxPage`，其余一律走图谱 `App`。
- * 不引路由库（概设 §8.9 纪律：不加没必要的依赖），两页互不 import，
- * 所以首屏不会因为多了一页而把另一页的代码也拉进来。
+ * 分派按 pathname：`pageFromPath` 把 `/ui/graph|memories|inbox|archive|settings` 映射到
+ * 页面，`/ui` 与未知路径回落到图谱（服务端已把 `/ui` 302 到 `/ui/graph`）。仍不引路由库
+ * （概设 §8.9），URL 是唯一真相源；`Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { fetchGraph, type GraphPayload } from './api.js';
+import { ArchivePage } from './archive/ArchivePage.js';
+import { MemoriesPage } from './memories/MemoriesPage.js';
+import { SettingsPage } from './settings/SettingsPage.js';
+import { Shell } from './shell/Shell.js';
+import { focusHref, parseRoute, type RouteInfo } from './shell/pure.js';
 import { Graph2D, type Graph2DStats } from './graph/Graph2D.js';
 import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
@@ -18,6 +23,7 @@ import { InboxPage } from './inbox/InboxPage.js';
 import { useActivity } from './state/activity.js';
 import { refreshLatestTrace, useTrace } from './state/trace.js';
 import { useFilter } from './state/filter.js';
+import { useSelection } from './state/selection.js';
 import { FilterBar } from './filter/FilterBar.js';
 import { FactsTable } from './table/FactsTable.js';
 import { Inspector } from './inspector/Inspector.js';
@@ -181,7 +187,7 @@ function TraceNote(): JSX.Element {
   );
 }
 
-function App(): JSX.Element {
+function App({ route }: { route: RouteInfo }): JSX.Element {
   const [data, setData] = useState<GraphPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -272,6 +278,55 @@ function App(): JSX.Element {
     setView(next);
     window.history.pushState({ view: next }, '', viewHref(next));
   }, []);
+
+  // P2-19-A 深链：`/ui/graph?focus=<id>` 选中该节点（3D/2D/表格/Inspector 共用 selection）。
+  useEffect(() => {
+    if (route.focusId === null) return;
+    useSelection.getState().select(route.focusId);
+  }, [route.focusId]);
+
+  // 选中态 → URL：点节点/表格行/取消选中都走同一个 store，这里用 replaceState 同步
+  // `?focus=`（不新增历史条目，后退仍按页面而不是按每次点选回退）。
+  const selectedFocusId = useSelection((s) => s.focusId);
+  useEffect(() => {
+    const current = `${window.location.pathname}${window.location.search}`;
+    const next = focusHref(window.location.pathname, window.location.search, selectedFocusId);
+    if (next !== current) window.history.replaceState(null, '', next);
+  }, [selectedFocusId]);
+
+  // 深链有 id 但当前图里没有（被 limit 截掉 / 已删除）→ 取消选中并提示，不装作选中。
+  const [focusNote, setFocusNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (route.focusId === null || data === null) {
+      setFocusNote(null);
+      return;
+    }
+    if (data.nodes.some((node) => node.id === route.focusId)) {
+      setFocusNote(null);
+      return;
+    }
+    useSelection.getState().clear();
+    setFocusNote(`深链 focus=${route.focusId} 不在当前图中（limit=${limit}），已取消选中`);
+  }, [data, route.focusId, limit]);
+
+  // 表格视图的「聚焦」= 选中 + 滚到行；行是虚拟滚动的，等它进 DOM 再滚。
+  useEffect(() => {
+    if (view !== 'table' || route.focusId === null) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const rows = document.querySelectorAll<HTMLElement>('[role="row"][title]');
+      for (const row of rows) {
+        if ((row.getAttribute('title') ?? '').endsWith(route.focusId ?? '')) {
+          row.scrollIntoView({ block: 'center' });
+          window.clearInterval(timer);
+          return;
+        }
+      }
+      if (attempts >= 50) window.clearInterval(timer);
+    }, 200);
+    return () => window.clearInterval(timer);
+  }, [view, route.focusId]);
 
   const meta = data?.meta;
   const fps = view === '2d' ? stats2d?.fps : stats3d?.fps;
@@ -384,6 +439,11 @@ function App(): JSX.Element {
           </div>
         )}
         {!isTable && error !== null && <div style={{ color: '#ef4444' }}>取数失败：{error}</div>}
+        {!isTable && focusNote !== null && (
+          <div style={{ color: '#f59e0b' }} data-testid="focus-miss">
+            {focusNote}
+          </div>
+        )}
         {!isTable && <ActivityNote />}
         {!isTable && <TraceNote />}
       </div>
@@ -409,8 +469,44 @@ function App(): JSX.Element {
   );
 }
 
+/**
+ * 解析当前 URL；`?canonical_key=` 在记忆页归一到 `?q=`（`/api/facts` 没有该筛选参数，
+ * 见 `MemoriesPage` 的页内说明）。归一是 replaceState：不产生额外历史、不打断后退。
+ */
+function currentRoute(): RouteInfo {
+  let route = parseRoute(window.location.pathname, window.location.search);
+  if (route.page === 'memories' && route.canonicalKey !== null && route.query === '') {
+    const url = new URL(window.location.href);
+    url.searchParams.set('q', route.canonicalKey);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    route = parseRoute(url.pathname, url.search);
+  }
+  return route;
+}
+
+function Root(): JSX.Element {
+  const [route, setRoute] = useState<RouteInfo>(currentRoute);
+
+  useEffect(() => {
+    const onPopState = (): void => {
+      useFilter.getState().syncFromURL();
+      setRoute(currentRoute());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  return (
+    <Shell route={route.page}>
+      {route.page === 'graph' ? <App route={route} /> : null}
+      {route.page === 'memories' ? <MemoriesPage route={route} /> : null}
+      {route.page === 'inbox' ? <InboxPage /> : null}
+      {route.page === 'archive' ? <ArchivePage /> : null}
+      {route.page === 'settings' ? <SettingsPage /> : null}
+    </Shell>
+  );
+}
+
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root not found');
-// 两页共用一份产物：`/ui/inbox*` 渲染待办页，其余（`/ui/graph` 等）渲染图谱。
-const isInbox = window.location.pathname.startsWith('/ui/inbox');
-createRoot(host).render(isInbox ? <InboxPage /> : <App />);
+createRoot(host).render(<Root />);

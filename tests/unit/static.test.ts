@@ -2,8 +2,8 @@
  * `/ui/graph` 静态托管测试（P2-02）。
  *
  * 三件事必须钉住：
- * 1. 老 `/ui` 没被新 SPA 抢走（两套前端并存）；
- * 2. 非静态资源路径回 `index.html`（SPA fallback），否则深链刷新 404；
+ * 1. `/ui`、`/ui/` 302 到 `/ui/graph`（P2-19-A 起老单文件 UI 不再由 HTTP 提供）；
+ * 2. 五个一级页面的入口/深链都回 `index.html`（SPA fallback），否则刷新 404；
  * 3. 路径穿越不能读到 dist 外面的文件。
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -122,15 +122,30 @@ describe('/ui/graph 托管', () => {
     expect(res.json<{ error: string }>().error).toBe('E_UI_NOT_BUILT');
   });
 
-  it('老 /ui 仍然可用（两套前端并存）', async () => {
+  it('/ui 与 /ui/ 302 到 /ui/graph，并保留 query', async () => {
     const { dist } = makeDist();
     const app = await makeApp(dist);
-    const res = await app.inject({ method: 'GET', url: '/ui' });
-    expect(res.statusCode).toBe(200);
-    expect(res.body).toContain(`'${TOKEN}'`);
-    // 老页面是单文件列表 UI，不是 3D 图谱
-    expect(res.body).toContain('daemon 运行中');
-    expect(res.body).not.toContain('/ui/graph/assets/');
+    for (const url of ['/ui', '/ui/']) {
+      const res = await app.inject({ method: 'GET', url });
+      expect(res.statusCode).toBe(302);
+      expect(res.headers['location']).toBe('/ui/graph');
+    }
+    const withToken = await app.inject({ method: 'GET', url: '/ui?token=t0k' });
+    expect(withToken.statusCode).toBe(302);
+    expect(withToken.headers['location']).toBe('/ui/graph?token=t0k');
+  });
+
+  it('五个一级页面入口都回 index.html 并注入 token（P2-19-A）', async () => {
+    const { dist } = makeDist();
+    const app = await makeApp(dist);
+    for (const page of ['graph', 'memories', 'inbox', 'archive', 'settings']) {
+      for (const url of [`/ui/${page}`, `/ui/${page}/`, `/ui/${page}/deep/link`]) {
+        const res = await app.inject({ method: 'GET', url });
+        expect(res.statusCode).toBe(200);
+        expect(res.headers['content-type']).toContain('text/html');
+        expect(res.body).toContain(`window.__MOSHI_TOKEN__ = '${TOKEN}'`);
+      }
+    }
   });
 });
 

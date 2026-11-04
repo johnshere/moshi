@@ -5,9 +5,15 @@
  * `pnpm build` 再把它搬进 `dist/app/ui/dist`——两条路径相对本文件的 `__dirname`
  * 都是 `../ui/dist`，所以这里只需要一个 `defaultUiDistDir()`。
  *
- * 路由分工（老 UI 不动）：
- *   /ui        → 仍由 server.ts 吐老的单文件 ui.html
- *   /ui/graph  → 新的 3D 图谱，SPA fallback：非静态资源一律回 index.html
+ * 路由分工（P2-19-A 起五个一级页面共用同一份产物）：
+ *   /ui、/ui/  → 302 到 `/ui/graph`（保留 query，比如 dev 的 `?token=`）
+ *   /ui/{graph,memories,inbox,archive,settings} → index.html，SPA fallback：
+ *     非静态资源一律回 index.html，深链刷新不 404
+ *
+ * `/ui` 的 302 不能靠在这里再注册一条 GET /ui 实现——server.ts 已有一条老路由，
+ * Fastify 会直接抛 `FST_ERR_DUPLICATED_ROUTE`。本文件因此用 `skip-override` 把
+ * staticRoutes 变成非封装插件，注册一个根作用域的 `onRequest` 钩子，在旧 handler
+ * 之前把 `/ui`、`/ui/` 重定向掉（server.ts 无需改动）。
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -87,10 +93,22 @@ export async function staticRoutes(app: FastifyInstance, opts: StaticRoutesOpts)
       .send(html);
   };
 
-  // 两个 SPA 入口共用同一份产物：vite `base = '/ui/graph/'`，所以 `/ui/inbox` 页面
-  // 的资源仍从 `/ui/graph/assets/*` 取（由下面的 graph 通配符兜住），这里只需把
-  // `/ui/inbox`、`/ui/inbox/`、`/ui/inbox/*` 也映射到同一份 index.html。
-  for (const prefix of ['/ui/graph', '/ui/inbox'] as const) {
+  // `/ui`、`/ui/` → `/ui/graph`。只精确匹配这两个路径（`/ui/graph` 等不拦），
+  // 保留 query 串（dev 模式 `?token=` 不能丢）。钩子必须在旧 GET /ui 之前执行，
+  // 所以本插件设了 skip-override（见文件头注释）。
+  app.addHook('onRequest', async (req, reply) => {
+    const raw = req.raw.url ?? '';
+    const q = raw.indexOf('?');
+    const pathname = q === -1 ? raw : raw.slice(0, q);
+    if (pathname !== '/ui' && pathname !== '/ui/') return;
+    reply.redirect(`/ui/graph${q === -1 ? '' : raw.slice(q)}`, 302);
+    return reply;
+  });
+
+  // 五个一级页面共用同一份产物：vite `base = '/ui/graph/'`，所以其它页面的资源
+  // 仍从 `/ui/graph/assets/*` 取（由 graph 通配符兜住），这里只需把每个入口
+  // `/ui/<page>`、`/ui/<page>/`、`/ui/<page>/*` 都映射到同一份 index.html。
+  for (const prefix of ['/ui/graph', '/ui/memories', '/ui/inbox', '/ui/archive', '/ui/settings'] as const) {
     // 入口：`/ui/<page>` 与 `/ui/<page>/`（后者靠显式注册，不指望通配符兜空串）
     app.get(prefix, async (_req, reply) => sendIndex(reply));
     app.get(`${prefix}/`, async (_req, reply) => sendIndex(reply));
@@ -110,3 +128,9 @@ export async function staticRoutes(app: FastifyInstance, opts: StaticRoutesOpts)
     });
   }
 }
+
+/**
+ * 与 `fastify-plugin` 同一机制：跳过封装，让上面的 `onRequest` 钩子注册到根实例，
+ * 从而能先于 server.ts 里旧的 `GET /ui` 执行（见文件头注释）。
+ */
+Object.defineProperty(staticRoutes, Symbol.for('skip-override'), { value: true });

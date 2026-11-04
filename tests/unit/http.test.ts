@@ -65,14 +65,11 @@ describe('token auth', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('/ui 首屏包含 token', async () => {
-    const { app, token } = await makeApp(freshDb());
+  it('/ui 302 到 /ui/graph（P2-19-A 起一级页面由 SPA 接手）', async () => {
+    const { app } = await makeApp(freshDb());
     const res = await app.inject({ method: 'GET', url: '/ui' });
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toContain('text/html');
-    expect(res.body).toContain(token);
-    // 占位符必须被替换掉，而不是原样留在页面里
-    expect(res.body).not.toContain('window.__MOSHI_TOKEN__');
+    expect(res.statusCode).toBe(302);
+    expect(res.headers['location']).toBe('/ui/graph');
   });
 });
 

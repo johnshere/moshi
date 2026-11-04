@@ -1,0 +1,256 @@
+/**
+ * 应用外壳的纯函数（P2-19-A，概设 §8.1 / 详设 §10.1）。
+ *
+ * 这一层不碰 DOM、不 import React：路由解析、导航 href、待办角标、`/` 快捷键判定、
+ * 三灯映射都在这里，单测可以直接钉（`tests/unit/shell.test.ts`）。
+ *
+ * 路由仍是「按 pathname 前缀分派」，不引路由库（概设 §8.9：不加没必要的依赖）。
+ * URL 是唯一真相源：页面、筛选、深链都从 pathname + search 解析，不回写 store。
+ */
+
+/** 五个一级页面（概设 §8.1）。顺序即左侧导航顺序。 */
+export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'settings';
+
+export interface PageDef {
+  key: PageKey;
+  label: string;
+  /** 概设 §8.1 的页面路径；`/ui` 默认重定向到 graph。 */
+  path: string;
+  title: string;
+}
+
+export const PAGES: readonly PageDef[] = [
+  { key: 'graph', label: '图谱', path: '/ui/graph', title: '3D/2D/表格三视图 + 证据链' },
+  { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
+  { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
+  { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
+  { key: 'settings', label: '设置与诊断', path: '/ui/settings', title: '自检红绿灯与配置视图' },
+];
+
+export const DEFAULT_PAGE: PageKey = 'graph';
+
+const PAGE_KEYS: readonly string[] = PAGES.map((p) => p.key);
+
+/** 解析后的路由态：页面 + 深链参数（全部已 trim，空串归一为 null）。 */
+export interface RouteInfo {
+  page: PageKey;
+  /** `/ui/memories?fact=<id>`：选中并滚到可见 */
+  factId: string | null;
+  /** `/ui/memories?canonical_key=<k>`：按规范化键过滤（后端只有 q，见页内说明） */
+  canonicalKey: string | null;
+  /** `/ui/graph?focus=<id>`：选中图节点 */
+  focusId: string | null;
+  /** `/ui/memories?q=<查询>`：记忆页搜索词 */
+  query: string;
+}
+
+function nonEmpty(raw: string | null | undefined): string | null {
+  if (raw === null || raw === undefined) return null;
+  const v = raw.trim();
+  return v === '' ? null : v;
+}
+
+/**
+ * pathname → 页面。`/ui`、`/ui/`、未知子路径都回落默认页（深链拼错不该白屏）；
+ * 末尾斜杠忽略，`/ui/memories/` 与 `/ui/memories` 等价。
+ */
+export function pageFromPath(pathname: string): PageKey {
+  const normalized = pathname.replace(/\/+/g, '/').replace(/\/+$/, '');
+  if (normalized === '' || normalized === '/ui') return DEFAULT_PAGE;
+  const match = /^\/ui\/([A-Za-z0-9_-]+)$/.exec(normalized);
+  const key = match?.[1];
+  if (key !== undefined && PAGE_KEYS.includes(key)) return key as PageKey;
+  return DEFAULT_PAGE;
+}
+
+export function parseRoute(pathname: string, search: string): RouteInfo {
+  const params = new URLSearchParams(search);
+  return {
+    page: pageFromPath(pathname),
+    factId: nonEmpty(params.get('fact')),
+    canonicalKey: nonEmpty(params.get('canonical_key')),
+    focusId: nonEmpty(params.get('focus')),
+    query: nonEmpty(params.get('q')) ?? '',
+  };
+}
+
+/** 只把 `token` 带过页面导航（dev 模式从 `?token=` 进入时刷新/跳页不丢鉴权）。 */
+function tokenOf(currentSearch: string): string | null {
+  return nonEmpty(new URLSearchParams(currentSearch).get('token'));
+}
+
+function hrefWith(path: string, entries: readonly (readonly [string, string])[]): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of entries) params.set(key, value);
+  const qs = params.toString();
+  return qs === '' ? path : `${path}?${qs}`;
+}
+
+/** 左侧导航目标：保留 token，丢掉其它页面参数（筛选/深链不该跨页泄漏）。 */
+export function pageHref(page: PageKey, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  return hrefWith(`/ui/${page}`, token === null ? [] : [['token', token]]);
+}
+
+/** 顶部搜索回车目标：`/ui/memories?q=<输入>`。 */
+export function memoriesHref(query: string, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  const entries: (readonly [string, string])[] = token === null ? [] : [['token', token]];
+  const q = query.trim();
+  if (q !== '') entries.push(['q', q]);
+  return hrefWith('/ui/memories', entries);
+}
+
+/**
+ * 选中态 → 地址栏（`?focus=` 双向同步用）：`history.replaceState` 的目标 URL。
+ *
+ * 保留 pathname 上的其它参数（`token`、`view`、`limit`…），只增删 `focus`；
+ * `id === null` 表示取消选中，删除该参数。与 `parseRoute` 构成 URL ↔ 选中态往返。
+ */
+export function focusHref(pathname: string, search: string, id: string | null): string {
+  const params = new URLSearchParams(search);
+  if (id === null) params.delete('focus');
+  else params.set('focus', id);
+  const qs = params.toString();
+  return qs === '' ? pathname : `${pathname}?${qs}`;
+}
+
+/** 搜索建议点一条：跳到记忆页并选中该事实（深链 `?fact=`）。 */
+export function factHref(id: string, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  return hrefWith('/ui/memories', [
+    ...(token === null ? [] : ([['token', token]] as const)),
+    ['fact', id],
+  ]);
+}
+
+/** 队列单页上限：与 `/api/queues/*` 的 MAX_LIMIT 对齐（角标是按此估算的，不是精确 total）。 */
+export const QUEUE_PAGE_LIMIT = 200;
+
+export interface QueueBadge {
+  /** 三队列条数之和；有队列打满一页时是下界 */
+  total: number;
+  /** 是否有队列达到单页上限（此时 total 只是下界） */
+  capped: boolean;
+  /** 角标显示文本：不满一页用精确值，打满用 `N+` */
+  label: string;
+}
+
+/**
+ * 待办角标 N = resolve + lowconf + prune。
+ *
+ * 后端三个 GET 只回 `items`、没有 `total`（`routes/queues.ts`），D-89 又不许改契约，
+ * 所以只能按单页上限估算：任一队列打满 200 条时显示 `N+`，不假装是精确总数。
+ */
+export function queueBadge(counts: readonly number[], cap = QUEUE_PAGE_LIMIT): QueueBadge {
+  let total = 0;
+  let capped = false;
+  for (const n of counts) {
+    total += Math.max(0, Math.floor(n));
+    if (n >= cap) capped = true;
+  }
+  return { total, capped, label: capped ? `${String(total)}+` : String(total) };
+}
+
+/** 决定 `/` 快捷键是否该让位给输入：焦点在可编辑元素里时不能抢字符。 */
+export function isTypingTarget(
+  target: { tagName?: string; isContentEditable?: boolean } | null,
+): boolean {
+  if (target === null) return false;
+  if (target.isContentEditable === true) return true;
+  const tag = target.tagName?.toUpperCase();
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+}
+
+/** `/` 唤起搜索：不带 Ctrl/Alt/Meta（`Ctrl+/` 是浏览器/编辑器快捷键）。 */
+export function isSearchShortcut(event: {
+  key: string;
+  ctrlKey?: boolean;
+  altKey?: boolean;
+  metaKey?: boolean;
+}): boolean {
+  if (event.key !== '/') return false;
+  return event.ctrlKey !== true && event.altKey !== true && event.metaKey !== true;
+}
+
+export type LightState = 'ok' | 'warn' | 'off' | 'error';
+
+export interface StatusLight {
+  key: 'daemon' | 'sidecar' | 'vector';
+  label: string;
+  state: LightState;
+  /** 灯旁的一句话；hover title 与无障碍文本都用它 */
+  text: string;
+}
+
+/** `GET /api/status` 的最小读取契约（server.ts 内联路由，字段全可选）。 */
+export interface DaemonStatus {
+  daemon?: unknown;
+  sidecar?: { state?: unknown; mode?: unknown };
+  vector?: { state?: unknown; indexed?: unknown; total?: unknown };
+  fts?: unknown;
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+function asCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * 三灯 = daemon 存活 / sidecar / 向量（或模型）。
+ *
+ * 状态数据缺失一律显式降级（「未连接」「未配置」「未知」），不把 undefined 渲染成亮灯——
+ * 灯是用来区分"坏了"和"没配"的，不能两个都绿。
+ */
+export function statusLights(status: DaemonStatus | null): StatusLight[] {
+  const daemon = status === null ? null : asString(status.daemon);
+  const sidecarState = status?.sidecar === undefined ? null : asString(status.sidecar.state);
+  const sidecarMode = status?.sidecar === undefined ? null : asString(status.sidecar.mode);
+  const vectorState = status?.vector === undefined ? null : asString(status.vector.state);
+  const indexed = asCount(status?.vector?.indexed);
+  const total = asCount(status?.vector?.total);
+
+  const daemonLight: StatusLight =
+    daemon === 'ok'
+      ? { key: 'daemon', label: 'daemon', state: 'ok', text: 'daemon 运行中' }
+      : { key: 'daemon', label: 'daemon', state: 'error', text: status === null ? '未连接（/api/status 取数失败）' : `异常：${daemon ?? '未知'}` };
+
+  let sidecarLight: StatusLight;
+  if (sidecarState === null) {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '未配置（无 sidecar 依赖）' };
+  } else if (sidecarMode === 'off') {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '已关闭（mode=off）' };
+  } else if (sidecarState === 'ready') {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'ok', text: 'ready' };
+  } else if (sidecarState === 'starting') {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'warn', text: '启动中' };
+  } else if (sidecarState === 'failed') {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'error', text: 'failed' };
+  } else {
+    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: sidecarState };
+  }
+
+  let vectorLight: StatusLight;
+  if (vectorState === 'on') {
+    const progress =
+      indexed === null || total === null ? '已启用' : `已索引 ${String(indexed)} / ${String(total)}`;
+    vectorLight = { key: 'vector', label: '向量', state: total !== null && total > 0 && indexed === 0 ? 'warn' : 'ok', text: progress };
+  } else if (vectorState === 'off') {
+    vectorLight = { key: 'vector', label: '向量', state: 'off', text: '已关闭（vector_disabled）' };
+  } else {
+    vectorLight = { key: 'vector', label: '向量', state: 'warn', text: '未知（状态缺失）' };
+  }
+
+  return [daemonLight, sidecarLight, vectorLight];
+}
+
+/** 灯色（inline 风格沿用现状，P2-19-B 再统一 token）。 */
+export function lightColor(state: LightState): string {
+  if (state === 'ok') return '#34d399';
+  if (state === 'warn') return '#f59e0b';
+  if (state === 'error') return '#ef4444';
+  return '#475569';
+}
