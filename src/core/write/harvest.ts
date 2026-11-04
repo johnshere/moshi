@@ -17,12 +17,13 @@ import { MoshiError } from '../../domain/errors.js';
 import type { Cardinality, ConfSource, EntityType, Ftype } from '../../domain/enums.js';
 import { newId } from '../../domain/ids.js';
 import { nowIso } from '../../domain/time.js';
-import type { Fact } from '../../domain/types.js';
+import type { Fact, FactAttrs } from '../../domain/types.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import * as annotationRepo from '../../infra/sqlite/annotationRepo.js';
 import type { AnnotationRow } from '../../infra/sqlite/annotationRepo.js';
 import * as edgeRepo from '../../infra/sqlite/edgeRepo.js';
 import * as factRepo from '../../infra/sqlite/factRepo.js';
+import { loadRegisteredKeys, recordPendingKeys } from '../../infra/sqlite/ontologyRepo.js';
 import { withTransaction } from '../../infra/sqlite/tx.js';
 import { parseTurn } from '../parse/registry.js';
 import { applyConflictPolicy, cardinalityOf, type ConflictResult, type OntologyHint } from './conflict.js';
@@ -39,6 +40,12 @@ import {
 } from './quarantine.js';
 import { redactText, redactValue, type RedactOptions } from './redact.js';
 import { resolveEntity, type IdentityState, type ResolveDeps } from './resolve.js';
+import {
+  assertAttrsValid,
+  attrsFromDraft,
+  pendingEntries,
+  type RegisteredKeyDef,
+} from '../lifecycle/schema-validate.js';
 
 export type UpsertOutcome = 'created' | 'refreshed' | 'recreated' | 'superseded' | 'coexist';
 
@@ -79,6 +86,11 @@ export interface UpsertDeps extends ResolveDeps {
    * 默认 `false`，harvest / 入队通道的既有裁决行为一字不改。
    */
   blockOnConflict?: boolean;
+  /**
+   * 已登记 schema 定义（`ontology` promoted=1 行）。undefined = 不校验（兼容既有调用）。
+   * 由调用方每轮/每批只读一次，别逐条查库。
+   */
+  schema?: readonly RegisteredKeyDef[];
 }
 
 function draftToFact(
@@ -136,7 +148,26 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
   const scope = draft.scope ?? 'global';
   const ts = nowIso();
 
-  return withTransaction(db, () => {
+  // 先校验、后落库：类型/基数性不符必须在实体消解之前拦住。校验失败抛 E_SCHEMA，
+  // 此时一条 SQL 都还没发，不会留下被消解出来的实体/别名。
+  let attrs: FactAttrs | null = null;
+  let unregisteredKeys: readonly string[] = [];
+  if (deps.schema !== undefined) {
+    attrs = attrsFromDraft({
+      subject: draft.subject,
+      predicate: draft.predicate,
+      value: draft.value,
+      ...(draft.ext === undefined ? {} : { ext: draft.ext }),
+    });
+    const check = assertAttrsValid(attrs, deps.schema, {
+      ...(draft.cardinality === undefined || draft.cardinality === null
+        ? {}
+        : { declaredCardinality: draft.cardinality }),
+    });
+    unregisteredKeys = check.unregisteredKeys;
+  }
+
+  const result = withTransaction<UpsertResult>(db, () => {
     const resolved = resolveEntity(
       db,
       { subject: draft.subject, etype: draft.etype, scope, ts },
@@ -269,6 +300,13 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
       conflict,
     };
   });
+
+  // 未登记键放行（不拦写），但记一次待晋升观测：ontology promoted=0，复用现有表。
+  if (attrs !== null && unregisteredKeys.length > 0) {
+    recordPendingKeys(db, pendingEntries(attrs, unregisteredKeys), ts);
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------- harvest 六步
@@ -347,6 +385,8 @@ interface HarvestContext {
   quarantine: QuarantineOptions;
   redact: RedactOptions;
   ontology?: (predicate: string) => OntologyHint | null;
+  /** 本轮已登记 schema（每轮 harvest 只读一次）；undefined = 不校验 */
+  schema?: readonly RegisteredKeyDef[];
   ts: string;
 }
 
@@ -419,6 +459,7 @@ function writeOne(
   return upsertFact(db, draft, {
     priors: ctx.priors,
     ...(ctx.ontology === undefined ? {} : { ontology: ctx.ontology }),
+    ...(ctx.schema === undefined ? {} : { schema: ctx.schema }),
   });
 }
 
@@ -551,11 +592,14 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
 export async function harvest(db: Db, opts: HarvestOptions = {}): Promise<HarvestResult> {
   const batchSize = opts.batchSize ?? 200;
   const stats = emptyResult();
+  // 已登记 schema 每轮只读一次：逐条查 ontology 会把每批写入拖成 N+1。
+  const schema = loadRegisteredKeys(db);
   const ctx: HarvestContext = {
     priors: opts.priors ?? DEFAULT_PRIORS,
     quarantine: opts.quarantine ?? DEFAULT_QUARANTINE,
     redact: opts.redact ?? {},
     ...(opts.ontology === undefined ? {} : { ontology: opts.ontology }),
+    schema,
     ts: nowIso(),
   };
   const started = Date.now();

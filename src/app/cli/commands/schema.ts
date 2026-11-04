@@ -1,0 +1,278 @@
+/**
+ * `moshi schema <子命令>` —— schema 校验与晋升 diff（详设 §2.6 / §8.5；台账 P2-14）。
+ *
+ * - `validate`：扫全库 fact 的 attrs，对照 `ontology` 里已登记（promoted=1）的
+ *   predicate / attr_key 定义，报告违反项与未登记键（待晋升清单）。只读，不写库。
+ *   `--snapshot <file>` 顺手把「当前已登记 schema」导出成快照，供晋升后 diff 用。
+ * - `diff`：读两个 schema 快照（晋升前 / 晋升后），输出差异清单与迁移脚本**草稿**。
+ *   `--to` 省略时用当前库的已登记 schema 当「晋升后」。`--out <file>` 把脚本草稿
+ *   落盘（走白名单写盘）；不执行任何 DDL。
+ *
+ * 退出码沿用 `db` 命令的约定：0 = 通过 / 无差异；1 = 校验有违反项或 IO 错误；
+ * 2 = 用法错误。
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import {
+  buildSchemaSnapshot,
+  diffSchemaSnapshots,
+  parseSchemaSnapshot,
+  renderSchemaMigration,
+  validateAttrs,
+  type SchemaSnapshot,
+  type SchemaSnapshotEntry,
+} from '../../../core/lifecycle/schema-validate.js';
+import { nowIso } from '../../../domain/time.js';
+import { closeDb, openDb } from '../../../infra/sqlite/db.js';
+import { listFactsPage } from '../../../infra/sqlite/factRepo.js';
+import { migrate } from '../../../infra/sqlite/migrate.js';
+import { loadRegisteredKeys } from '../../../infra/sqlite/ontologyRepo.js';
+import { safeWriteFile } from '../../../infra/fs/safeWrite.js';
+import { dataPaths } from '../../config.js';
+import type { Command, CommandContext } from '../types.js';
+
+/** 每批扫描行数（与 db 命令一致） */
+const BATCH = 200;
+/** 报告里最多列多少条违反项（库里积压很多时避免刷屏） */
+const MAX_REPORTED_VIOLATIONS = 50;
+
+const USAGE = [
+  '用法：moshi schema <子命令>',
+  '',
+  '子命令：',
+  '  validate [--snapshot <file>]                       校验全库 attrs 是否符合已登记 schema',
+  '  diff --from <file> [--to <file>] [--out <file>]    对比晋升前后 schema 快照，输出迁移脚本草稿',
+  '',
+  'validate 参数：',
+  '  --snapshot file   把当前已登记 schema 导出为快照 JSON（晋升前先跑一次）',
+  '',
+  'diff 参数：',
+  '  --from file       晋升前快照（必填，由 validate --snapshot 生成）',
+  '  --to file         晋升后快照；省略则用当前库的已登记 schema',
+  '  --out file        迁移脚本草稿落盘位置；省略则随 JSON 输出到 stdout',
+  '',
+].join('\n');
+
+const SUBCOMMANDS = ['validate', 'diff'] as const;
+type Subcommand = (typeof SUBCOMMANDS)[number];
+
+function isSubcommand(s: string): s is Subcommand {
+  return (SUBCOMMANDS as readonly string[]).includes(s);
+}
+
+/** `--flag value` 形式的公共解析：取下一个非 flag 参数；缺失返回 null */
+function takeValue(args: readonly string[], i: number): string | null {
+  const value = args[i + 1];
+  if (value === undefined || value.startsWith('--')) return null;
+  return value;
+}
+
+function snapshotFromDb(db: Parameters<typeof loadRegisteredKeys>[0], generatedAt: string): SchemaSnapshot {
+  const entries: SchemaSnapshotEntry[] = loadRegisteredKeys(db).map((key) => ({
+    kind: key.kind,
+    name: key.name,
+    valueType: key.valueType,
+    cardinality: key.cardinality,
+  }));
+  return buildSchemaSnapshot(entries, generatedAt);
+}
+
+function writeRoots(ctx: CommandContext): readonly string[] {
+  return [ctx.cfg.storage.data_dir, ctx.cfg.storage.archive_dir, ctx.home];
+}
+
+function runValidate(ctx: CommandContext, rest: readonly string[]): number {
+  let snapshotPath: string | null = null;
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i] as string;
+    if (arg === '--snapshot') {
+      const value = takeValue(rest, i);
+      if (value === null) {
+        ctx.stderr(`--snapshot 需要文件路径\n${USAGE}`);
+        return 2;
+      }
+      snapshotPath = value;
+      i += 1;
+      continue;
+    }
+    ctx.stderr(`未知参数：${arg}\n${USAGE}`);
+    return 2;
+  }
+
+  const paths = dataPaths(ctx.cfg);
+  if (!existsSync(paths.db)) {
+    ctx.stderr(`尚未观测到数据库：${paths.db}\n`);
+    return 1;
+  }
+
+  const { db } = openDb({ file: paths.db });
+  try {
+    migrate(db, { backupsDir: paths.backups });
+    const defs = loadRegisteredKeys(db);
+
+    const violations: { fact_id: string; key: string; expected: string; actual: string }[] = [];
+    const unregistered = new Map<string, number>();
+    let scanned = 0;
+    let violationCount = 0;
+
+    let after = 0;
+    for (;;) {
+      const page = listFactsPage(db, after, BATCH);
+      const last = page[page.length - 1];
+      if (last === undefined) break;
+      after = last.rowid;
+      for (const { fact } of page) {
+        scanned += 1;
+        const result = validateAttrs(fact.attrs, defs);
+        for (const error of result.errors) {
+          violationCount += 1;
+          if (violations.length < MAX_REPORTED_VIOLATIONS) {
+            violations.push({ fact_id: fact.id, ...error });
+          }
+        }
+        for (const key of result.unregisteredKeys) {
+          unregistered.set(key, (unregistered.get(key) ?? 0) + 1);
+        }
+      }
+    }
+
+    let snapshotOut: string | null = null;
+    if (snapshotPath !== null) {
+      const snapshot = snapshotFromDb(db, nowIso());
+      safeWriteFile(snapshotPath, `${JSON.stringify(snapshot, null, 2)}\n`, writeRoots(ctx));
+      snapshotOut = snapshotPath;
+    }
+
+    const unregisteredList = [...unregistered.entries()]
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([key, count]) => ({ key, count }));
+
+    ctx.stdout(
+      `${JSON.stringify({
+        command: 'schema validate',
+        ok: violationCount === 0,
+        facts: scanned,
+        registered_keys: defs.length,
+        violations,
+        violation_count: violationCount,
+        violations_truncated: violationCount > violations.length,
+        unregistered: unregisteredList,
+        ...(snapshotOut === null ? {} : { snapshot: snapshotOut }),
+      })}\n`,
+    );
+    return violationCount === 0 ? 0 : 1;
+  } finally {
+    closeDb(db);
+  }
+}
+
+function readSnapshotFile(ctx: CommandContext, file: string): SchemaSnapshot | null {
+  let text: string;
+  try {
+    text = readFileSync(file, 'utf8');
+  } catch {
+    ctx.stderr(`无法读取 schema 快照：${file}\n`);
+    return null;
+  }
+  try {
+    return parseSchemaSnapshot(text);
+  } catch (err) {
+    ctx.stderr(`${(err as Error).message}\n`);
+    return null;
+  }
+}
+
+function currentSnapshot(ctx: CommandContext): SchemaSnapshot | null {
+  const paths = dataPaths(ctx.cfg);
+  if (!existsSync(paths.db)) {
+    ctx.stderr(`尚未观测到数据库：${paths.db}\n`);
+    return null;
+  }
+  const { db } = openDb({ file: paths.db });
+  try {
+    migrate(db, { backupsDir: paths.backups });
+    return snapshotFromDb(db, nowIso());
+  } finally {
+    closeDb(db);
+  }
+}
+
+function runDiff(ctx: CommandContext, rest: readonly string[]): number {
+  let fromPath: string | null = null;
+  let toPath: string | null = null;
+  let outPath: string | null = null;
+
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i] as string;
+    if (arg === '--from' || arg === '--to' || arg === '--out') {
+      const value = takeValue(rest, i);
+      if (value === null) {
+        ctx.stderr(`${arg} 需要文件路径\n${USAGE}`);
+        return 2;
+      }
+      if (arg === '--from') fromPath = value;
+      else if (arg === '--to') toPath = value;
+      else outPath = value;
+      i += 1;
+      continue;
+    }
+    ctx.stderr(`未知参数：${arg}\n${USAGE}`);
+    return 2;
+  }
+
+  if (fromPath === null) {
+    ctx.stderr(`缺少 --from 快照\n${USAGE}`);
+    return 2;
+  }
+
+  const before = readSnapshotFile(ctx, fromPath);
+  if (before === null) return 1;
+
+  let after: SchemaSnapshot | null;
+  if (toPath !== null) {
+    after = readSnapshotFile(ctx, toPath);
+  } else {
+    after = currentSnapshot(ctx);
+  }
+  if (after === null) return 1;
+
+  const diff = diffSchemaSnapshots(before, after);
+  const generatedAt = nowIso();
+  const script = renderSchemaMigration(diff, generatedAt);
+
+  if (outPath !== null) {
+    safeWriteFile(outPath, script, writeRoots(ctx));
+  }
+
+  ctx.stdout(
+    `${JSON.stringify({
+      command: 'schema diff',
+      from: fromPath,
+      to: toPath ?? '(current db)',
+      generated_at: generatedAt,
+      added: diff.added,
+      removed: diff.removed,
+      changed: diff.changed,
+      unchanged: diff.unchanged,
+      ...(outPath === null ? { script } : { out: outPath }),
+    })}\n`,
+  );
+  return 0;
+}
+
+export const schemaCommand: Command = {
+  name: 'schema',
+  summary: 'schema 校验与晋升 diff（schema validate | schema diff）',
+  async run(ctx) {
+    const sub = ctx.args[0];
+    if (sub === undefined) {
+      ctx.stderr(`缺少子命令\n${USAGE}`);
+      return 2;
+    }
+    if (!isSubcommand(sub)) {
+      ctx.stderr(`未知子命令：${sub}\n${USAGE}`);
+      return 2;
+    }
+    const rest = ctx.args.slice(1);
+    return sub === 'validate' ? runValidate(ctx, rest) : runDiff(ctx, rest);
+  },
+};

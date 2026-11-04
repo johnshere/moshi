@@ -29,6 +29,7 @@ import * as annotationRepo from '../../infra/sqlite/annotationRepo.js';
 import * as auditRepo from '../../infra/sqlite/auditRepo.js';
 import * as edgeRepo from '../../infra/sqlite/edgeRepo.js';
 import * as factRepo from '../../infra/sqlite/factRepo.js';
+import { loadRegisteredKeys } from '../../infra/sqlite/ontologyRepo.js';
 import {
   DIRECT_ORIGIN,
   countRecentDirect,
@@ -157,6 +158,8 @@ export function runDirectWrite(
   };
   const reviewFlagged = new Set<number>();
   const edges: string[] = [];
+  // 已登记 schema 每批只读一次；直写与 harvest 共用同一套校验 + 待晋升记录
+  const schema = loadRegisteredKeys(deps.db);
 
   withTransaction(deps.db, () => {
     for (const { index, fact, payload, dedupKey } of items) {
@@ -203,7 +206,7 @@ export function runDirectWrite(
             ...(payload.sourceEpisode === undefined ? {} : { sourceEpisode: payload.sourceEpisode }),
             ...(payload.importance === undefined ? {} : { importance: payload.importance }),
           },
-          { blockOnConflict: true },
+          { blockOnConflict: true, schema },
         );
       } catch (err) {
         if (!(err instanceof MoshiError) || err.code !== 'E_CONFLICT_IDENTITY') throw err;

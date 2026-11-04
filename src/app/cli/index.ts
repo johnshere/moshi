@@ -10,6 +10,7 @@ import { exportCommand } from './commands/export.js';
 import { revokeCommand } from './commands/revoke.js';
 import { layoutCommand } from './commands/layout.js';
 import { dbCommand } from './commands/db.js';
+import { schemaCommand } from './commands/schema.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
@@ -23,6 +24,7 @@ export const COMMANDS: readonly Command[] = [
   revokeCommand,
   layoutCommand,
   dbCommand,
+  schemaCommand,
 ];
 
 export function usage(): string {
