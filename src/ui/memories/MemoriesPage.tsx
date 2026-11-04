@@ -10,6 +10,7 @@ import { useEffect, type CSSProperties, type ReactElement } from 'react';
 import { FactsTable } from '../table/FactsTable.js';
 import { FilterBar } from '../filter/FilterBar.js';
 import { Inspector } from '../inspector/Inspector.js';
+import { useNav } from '../state/nav.js';
 import { useSelection } from '../state/selection.js';
 import type { RouteInfo } from '../shell/pure.js';
 import { EntityMergePanel } from './EntityMergePanel.js';
@@ -59,6 +60,35 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
     useSelection.getState().select(factId);
     return scrollToFact(factId);
   }, [factId]);
+
+  // 行 id 注册给 j/k 导航：FactsTable 是虚拟滚动，行 id 只写在 DOM 的 title 里
+  // （`content\n\nid`），不改表格组件，用 MutationObserver 跟随渲染/滚动变化。
+  useEffect(() => {
+    const readIds = (): string[] => {
+      const rows = document.querySelectorAll<HTMLElement>('[role="row"][title]');
+      const ids: string[] = [];
+      for (const row of rows) {
+        const title = row.getAttribute('title') ?? '';
+        const id = title.split('\n\n').pop() ?? '';
+        if (id !== '') ids.push(id);
+      }
+      return ids;
+    };
+    useNav.getState().setItems(readIds());
+    const observer = new MutationObserver(() => {
+      useNav.getState().setItems(readIds());
+    });
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['title'],
+    });
+    return () => {
+      observer.disconnect();
+      useNav.getState().clear();
+    };
+  }, []);
 
   return (
     <div style={{ position: 'absolute', inset: 0 }}>

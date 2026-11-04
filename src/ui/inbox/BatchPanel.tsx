@@ -4,16 +4,17 @@
  * 面板只做展示与回调，所有状态（选中集 / 预览结果 / op / 倒计时 / 错误）都在
  * `InboxPage`——这样跨 tab 切换不会把"已经预览过的影响面"弄丢。
  *
- * 展示顺序刻意固定为「选了几条 → 预览影响面（含连带失效）→ 确认 → 撤销条」：
+ * 展示顺序刻意固定为「选了几条 → 预览影响面（含连带失效）→ 确认」：
  * ① 影响面预览必达：invalidate 的 `invalidated_by_cascade` 单独一行、用警示色，
  *    不能折进总数里；prune 不连锁（cascade 恒 0），所以不显示那一行；
- * ② 30 秒可撤销：确认后原地变成撤销条 + 倒计时，过期由页面处理（这里只显示剩余秒数）。
+ * ② 30 秒可撤销：P2-19A-07b 起撤销条移到全局 `ToastHost`（`src/ui/state/toast.ts`），
+ *    本面板不再内联渲染；提交后由 `InboxPage` push 一条 `kind='undo'` 的 toast。
  *
  * P2-13 起同一面板支持两种批量动作（文案与撤销语义都不同）：
  * - `invalidate`：失效（清 valid_to，撤销 = 清回 valid_to）；
  * - `prune`：剪枝（软删 epistemic_status='pruned'，撤销 = 还原 epistemic_status）。
- * P2-19-A 起撤销条还可能是单条 `alias_merge`（resolve 队列「并入」）：
- * 它不是批量动作，只出现在撤销条文案里（撤销 = 还原 alias 的 source/confidence）。
+ * P2-19-A 起撤销还可能是单条 `alias_merge`（resolve 队列「并入」）：
+ * 它不是批量动作，但共用同一 toast 文案表与撤销 fetch。
  */
 import type { CSSProperties } from 'react';
 import type { BatchAction, PreviewResult, UndoAction } from './api.js';
@@ -23,17 +24,10 @@ export interface BatchPanelProps {
   action: BatchAction;
   selectedCount: number;
   preview: PreviewResult | null;
-  /** 当前可撤销的截止时刻（毫秒时间戳）；null = 没有待撤销的批量操作 */
-  undoDeadlineMs: number | null;
-  /** 距截止还剩多少毫秒（由页面每 250ms 重算，这里只显示） */
-  remainingMs: number;
-  /** 待撤销 op 的动作：决定撤销条文案（不能拿当前 tab 猜；可能是单条并入） */
-  undoAction: UndoAction | null;
   busy: boolean;
   onPreview: () => void;
   onConfirm: () => void;
   onCancelPreview: () => void;
-  onUndo: () => void;
 }
 
 const panelStyle: CSSProperties = {
@@ -92,27 +86,7 @@ const COPY: Record<
 };
 
 export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
-  const { action, selectedCount, preview, undoDeadlineMs, remainingMs, undoAction, busy } = props;
-
-  // 撤销优先：窗口开着时，面板只显示撤销条（避免误点"再确认一次"）
-  if (undoDeadlineMs !== null) {
-    const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-    const copy = COPY[undoAction ?? action];
-    return (
-      <div style={panelStyle} role="status" aria-live="polite">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <span style={{ color: '#f8fafc' }}>{copy.done}</span>
-          <span style={warnStyle}>撤销窗口剩余 {seconds} 秒</span>
-          <span style={{ color: '#475569' }}>{copy.undoHint}</span>
-          <span style={{ marginLeft: 'auto' }}>
-            <button type="button" style={btn(true)} disabled={busy} onClick={props.onUndo}>
-              {busy ? '撤销中…' : '撤销'}
-            </button>
-          </span>
-        </div>
-      </div>
-    );
-  }
+  const { action, selectedCount, preview, busy } = props;
 
   if (preview !== null) {
     const copy = COPY[action];

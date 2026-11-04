@@ -4,12 +4,16 @@
  * 外壳只负责「常驻」和「取全局状态」，不接管页面内容：页面仍是 absolute inset:0
  * 填满 <main>。三灯与角标 30s 轮询一次，取数失败显式降级，不静默装正常。
  */
-import { useEffect, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
 import { PAGES, lightColor, pageHref, queueBadge, statusLights, type PageKey, type QueueBadge, type StatusLight } from './pure.js';
 import { navigate, navigatePage } from './navigate.js';
+import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { SearchBox } from './SearchBox.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
 import { FirstRun } from './FirstRun.js';
+import { ToastHost } from './ToastHost.js';
+import { useNav } from '../state/nav.js';
+import { useSelection } from '../state/selection.js';
 
 const POLL_MS = 30_000;
 
@@ -82,6 +86,60 @@ export interface ShellProps {
 export function Shell({ route, children }: ShellProps): ReactElement {
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
+  /** `g` 序列的起点时刻；600ms 内按第二个键才跳页（见 keyboard.ts） */
+  const pendingGRef = useRef<number | null>(null);
+
+  // 全局键盘导航（P2-19A-07b）：`/` 聚焦搜索、`g` 序列跳页、j/k 列表移动、Esc 收起。
+  // 纯解析在 keyboard.ts，这里只执行；add/remove 严格配对、卸载时清理。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      const now = Date.now();
+      const action = resolveKey(event, {
+        pendingGAt: pendingGRef.current,
+        now,
+        listNav: useNav.getState().items.length > 0,
+      });
+      if (action === null) {
+        if (gSequenceExpired(pendingGRef.current, now)) pendingGRef.current = null;
+        return;
+      }
+      switch (action.type) {
+        case 'arm-g':
+          pendingGRef.current = now;
+          return;
+        case 'focus-search': {
+          event.preventDefault();
+          pendingGRef.current = null;
+          const input = document.querySelector<HTMLInputElement>('[data-testid="global-search"]');
+          input?.focus();
+          input?.select();
+          return;
+        }
+        case 'nav':
+          event.preventDefault();
+          pendingGRef.current = null;
+          navigatePage(action.page);
+          return;
+        case 'move':
+          event.preventDefault();
+          pendingGRef.current = null;
+          useNav.getState().move(action.delta);
+          return;
+        case 'escape': {
+          pendingGRef.current = null;
+          const active = document.activeElement;
+          if (active instanceof HTMLElement && active.getAttribute('data-testid') === 'global-search') {
+            active.blur();
+          } else {
+            useSelection.getState().clear();
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -190,6 +248,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
         </header>
         <main style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0 }}>{children}</main>
       </div>
+      <ToastHost />
     </div>
   );
 }

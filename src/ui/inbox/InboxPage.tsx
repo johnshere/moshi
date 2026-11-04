@@ -8,6 +8,11 @@
  *   动作按选中集判定：**全部来自淘汰候选 → 剪枝（软删 pruned）**，否则失效（清 valid_to）。
  *   这样跨 tab 夹选时永远退化成更保守的失效，绝不会把低置信事实误剪枝。
  *
+ * P2-19A-07b：
+ * - 撤销条收口到全局 `ToastHost`（`useToast.push({kind:'undo'})`），本页不再内联渲染，
+ *   但 undo fetch 仍在这里（`runUndo`）；
+ * - 当前 tab 的队列 id 注册到 `useNav`，j/k 用既有 `useSelection` 选中并高亮。
+ *
  * 状态全在本组件：批量操作是"跨 tab 的一件事"，放进子组件会让切 tab 丢掉预览结果。
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
@@ -28,9 +33,11 @@ import {
   type PruneThresholds,
   type QueueKind,
   type ResolveRow,
-  type UndoAction,
 } from './api.js';
 import { BatchPanel } from './BatchPanel.js';
+import { useNav } from '../state/nav.js';
+import { useSelection } from '../state/selection.js';
+import { useToast, type ToastInput } from '../state/toast.js';
 
 type Tab = 'resolve' | 'lowconf' | 'prune';
 
@@ -42,15 +49,6 @@ const TABS: readonly { key: Tab; label: string; hint: string }[] = [
 
 /** 每页取多少条：与服务端默认 limit 一致 */
 const QUEUE_LIMIT = 50;
-/** 倒计时刷新间隔；撤销窗口只有 30 秒，250ms 足够跟手又不浪费 */
-const TICK_MS = 250;
-
-interface ActiveOp {
-  opId: string;
-  deadlineMs: number;
-  /** 这笔 op 的动作：撤销条文案与"当前选中集动作"无关，必须记在 op 上 */
-  action: UndoAction;
-}
 
 const pageStyle = {
   position: 'absolute',
@@ -80,7 +78,6 @@ const rowStyle: CSSProperties = {
 };
 
 const muted: CSSProperties = { color: '#64748b' };
-const warn: CSSProperties = { color: '#f59e0b' };
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -162,14 +159,15 @@ export function InboxPage(): JSX.Element {
   const [pruneThresholds, setPruneThresholds] = useState<PruneThresholds | null>(null);
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [preview, setPreview] = useState<PreviewResult | null>(null);
-  const [op, setOp] = useState<ActiveOp | null>(null);
-  const [nowTs, setNowTs] = useState(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   /** 正在处理的单条行 id（行内按钮只锁自己那一行，不锁整页） */
   const [rowBusy, setRowBusy] = useState<string | null>(null);
+  const focusId = useSelection((s) => s.focusId);
+  const pushToast = useCallback((input: ToastInput): void => {
+    useToast.getState().push(input);
+  }, []);
 
   const loadAll = useCallback(async (): Promise<void> => {
     setLoading(true);
@@ -195,21 +193,19 @@ export function InboxPage(): JSX.Element {
     void loadAll();
   }, [loadAll]);
 
-  // 撤销窗口倒计时：只有窗口开着时才挂定时器（沉默时不空转）
+  // 当前 tab 的行 id 注册给 j/k 导航（useNav.move 内部用 useSelection.select 选中）
   useEffect(() => {
-    if (op === null) return;
-    setNowTs(Date.now());
-    const timer = window.setInterval(() => setNowTs(Date.now()), TICK_MS);
-    return () => window.clearInterval(timer);
-  }, [op]);
+    const ids =
+      tab === 'resolve'
+        ? resolveRows.map((row) => row.id)
+        : tab === 'lowconf'
+          ? lowConfRows.map((row) => row.id)
+          : pruneRows.map((row) => row.id);
+    useNav.getState().setItems(ids);
+  }, [tab, resolveRows, lowConfRows, pruneRows]);
 
-  // 过期：撤销窗口走完 → 提示 + 刷新（服务端同样会 410，这里只是不让 UI 挂着假按钮）
-  useEffect(() => {
-    if (op === null || nowTs < op.deadlineMs) return;
-    setOp(null);
-    setNotice('撤销已过期，已刷新队列');
-    void loadAll();
-  }, [op, nowTs, loadAll]);
+  // 离开页面时清空导航项，避免 j/k 跨页残留
+  useEffect(() => () => useNav.getState().clear(), []);
 
   const toggle = useCallback((id: string): void => {
     setSelected((prev) => {
@@ -242,64 +238,79 @@ export function InboxPage(): JSX.Element {
     }
   }, [action, selected]);
 
+  /** 撤销一次 op：toast 按钮触发；410 = 撤销窗口已过，只刷新队列 */
+  const runUndo = useCallback(
+    async (opId: string): Promise<void> => {
+      setBusy(true);
+      setError(null);
+      try {
+        const result = await undoBatch(opId);
+        pushToast({ kind: 'success', text: `已撤销，恢复 ${result.restored} 条事实` });
+        await loadAll();
+      } catch (e) {
+        if (e instanceof InboxApiError && e.status === 410) {
+          pushToast({ kind: 'info', text: '撤销已过期，已刷新队列' });
+          await loadAll();
+        } else {
+          setError(`撤销失败：${errorText(e)}`);
+          pushToast({ kind: 'error', text: `撤销失败：${errorText(e)}` });
+        }
+      } finally {
+        setBusy(false);
+      }
+    },
+    [loadAll, pushToast],
+  );
+
   const onConfirm = useCallback(async (): Promise<void> => {
     setBusy(true);
     setError(null);
     try {
       const result = await submitBatch(action, [...selected]);
-      setOp({ opId: result.op_id, deadlineMs: Date.parse(result.undo_deadline), action });
       setPreview(null);
       setSelected(new Set());
-      setNotice(
-        action === 'prune'
-          ? `已剪枝 ${result.facts} 条事实（软删，可撤销）`
-          : `已失效 ${result.facts} 条事实（连带失效 ${result.invalidated_by_cascade} 条）`,
-      );
+      pushToast({
+        kind: 'undo',
+        text:
+          action === 'prune'
+            ? `已剪枝 ${result.facts} 条事实（软删）`
+            : `已失效 ${result.facts} 条事实（连带失效 ${result.invalidated_by_cascade} 条）`,
+        actionLabel: '撤销',
+        deadline: Date.parse(result.undo_deadline),
+        onAction: () => {
+          void runUndo(result.op_id);
+        },
+      });
       await loadAll();
     } catch (e) {
       setError(`执行失败：${errorText(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [action, selected, loadAll]);
+  }, [action, selected, loadAll, pushToast, runUndo]);
 
-  const onUndo = useCallback(async (): Promise<void> => {
-    if (op === null) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await undoBatch(op.opId);
-      setOp(null);
-      setNotice(`已撤销，恢复 ${result.restored} 条事实`);
-      await loadAll();
-    } catch (e) {
-      if (e instanceof InboxApiError && e.status === 410) {
-        setOp(null);
-        setNotice('撤销已过期，已刷新队列');
-        await loadAll();
-      } else {
-        setError(`撤销失败：${errorText(e)}`);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }, [op, loadAll]);
-
-  /** 单条决策（P2-19-A）：成功后刷新队列；merge / invalidate 会拿到 op_id，复用撤销条 */
+  /** 单条决策（P2-19-A）：merge / invalidate 会拿到 op_id → 生成同款撤销 toast */
   const onDecide = useCallback(
     async (kind: QueueKind, id: string, decideAction: DecideAction): Promise<void> => {
       setRowBusy(id);
       setError(null);
       try {
         const result = await decideQueue(kind, id, decideAction);
+        const text = decideNotice(decideAction, result.before, result.after);
         if (result.op_id !== undefined && result.undo_deadline !== undefined) {
-          setOp({
-            opId: result.op_id,
-            deadlineMs: Date.parse(result.undo_deadline),
-            action: kind === 'resolve' ? 'alias_merge' : 'invalidate',
+          const opId = result.op_id;
+          pushToast({
+            kind: 'undo',
+            text,
+            actionLabel: '撤销',
+            deadline: Date.parse(result.undo_deadline),
+            onAction: () => {
+              void runUndo(opId);
+            },
           });
+        } else {
+          pushToast({ kind: 'success', text });
         }
-        setNotice(decideNotice(decideAction, result.before, result.after));
         await loadAll();
       } catch (e) {
         setError(`处理失败：${errorText(e)}`);
@@ -307,13 +318,17 @@ export function InboxPage(): JSX.Element {
         setRowBusy(null);
       }
     },
-    [loadAll],
+    [loadAll, pushToast, runUndo],
   );
 
   const rows: JSX.Element[] =
     tab === 'resolve'
-      ? resolveRows.map((row) => (
-          <div key={row.id} style={rowStyle}>
+        ? resolveRows.map((row) => (
+          <div
+            key={row.id}
+            data-fact-id={row.id}
+            style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+          >
             <span style={{ ...muted, width: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {row.alias}
             </span>
@@ -346,7 +361,11 @@ export function InboxPage(): JSX.Element {
         ))
       : tab === 'lowconf'
         ? lowConfRows.map((row) => (
-            <div key={row.id} style={rowStyle}>
+            <div
+              key={row.id}
+              data-fact-id={row.id}
+              style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+            >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
               <span style={{ color: '#e2e8f0', flex: 1 }}>{row.content}</span>
               <span style={{ ...muted, width: 110, textAlign: 'right' }}>conf {row.confidence.toFixed(2)}</span>
@@ -370,7 +389,11 @@ export function InboxPage(): JSX.Element {
             </div>
           ))
         : pruneRows.map((row) => (
-            <div key={row.id} style={rowStyle}>
+            <div
+              key={row.id}
+              data-fact-id={row.id}
+              style={{ ...rowStyle, background: row.id === focusId ? '#132033' : 'transparent' }}
+            >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
               <span style={{ color: '#e2e8f0', flex: 1 }}>{row.content}</span>
               <span style={{ color: '#f59e0b', width: 110, textAlign: 'right' }}>
@@ -429,7 +452,6 @@ export function InboxPage(): JSX.Element {
       </div>
 
       {error !== null && <div style={{ color: '#ef4444', marginTop: 8 }}>出错了：{error}</div>}
-      {notice !== null && <div style={{ ...warn, marginTop: 8 }}>{notice}</div>}
 
       <div style={{ marginTop: 10, overflowY: 'auto', flex: 1 }}>
         {rows.length === 0 ? (
@@ -443,14 +465,10 @@ export function InboxPage(): JSX.Element {
         action={action}
         selectedCount={selected.size}
         preview={preview}
-        undoDeadlineMs={op === null ? null : op.deadlineMs}
-        remainingMs={op === null ? 0 : op.deadlineMs - nowTs}
-        undoAction={op === null ? null : op.action}
         busy={busy}
         onPreview={() => void onPreview()}
         onConfirm={() => void onConfirm()}
         onCancelPreview={() => setPreview(null)}
-        onUndo={() => void onUndo()}
       />
     </div>
   );
