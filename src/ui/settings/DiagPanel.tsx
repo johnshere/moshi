@@ -16,7 +16,13 @@ interface DiagReport {
   indexes: { fts: string; vec: string; degree_mismatch: number };
   invariants: Record<string, boolean>;
   model: { embed: string; gat: string; weights: boolean };
-  archive: { topics: number; dirty: number; human_edited: number };
+  archive: {
+    topics: number;
+    dirty: number;
+    human_edited: number;
+    proposed_pending: number;
+    merged_or_split: number;
+  };
   quality: {
     orphan_ratio: number | null;
     modularity: number | null;
@@ -24,7 +30,10 @@ interface DiagReport {
     near_dup_ratio: number | null;
     key_entity_coverage: number | null;
     scope_leak: number;
+    layout_freshness: number | null;
   };
+  resolve: { pending: number };
+  schema: { pending_promotions: number };
   last_harvest_at: string | null;
   last_eval: { at: string; passed: number; total: number; blocking_failures: number } | null;
 }
@@ -38,6 +47,7 @@ const QUALITY_FIELDS: readonly { key: keyof DiagReport['quality']; label: string
   { key: 'near_dup_ratio', label: '近似重复比' },
   { key: 'key_entity_coverage', label: '关键实体覆盖率' },
   { key: 'scope_leak', label: '跨 scope 泄漏' },
+  { key: 'layout_freshness', label: '布局滞后（h）' },
 ];
 
 async function fetchDiag(signal?: AbortSignal): Promise<DiagReport> {
@@ -212,13 +222,27 @@ export function DiagPanel(): JSX.Element {
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>图质量六项</span>
+        <span style={sectionTitleStyle}>图质量（六项 + 布局新鲜度）</span>
         <div style={rowStyle}>
           {QUALITY_FIELDS.map((field) => (
             <span key={field.key} style={chipStyle}>
               {field.label} {formatMetric(report.quality[field.key])}
             </span>
           ))}
+        </div>
+      </div>
+
+      <div style={cardStyle}>
+        <span style={sectionTitleStyle}>待办 / 结构</span>
+        <div style={rowStyle}>
+          {chip(
+            `实体消解待办 ${String(report.resolve.pending)}`,
+            report.resolve.pending === 0 ? '#4ade80' : '#fbbf24',
+          )}
+          {chip(
+            `结构待晋升 ${String(report.schema.pending_promotions)}`,
+            report.schema.pending_promotions === 0 ? '#4ade80' : '#fbbf24',
+          )}
         </div>
       </div>
 
@@ -231,6 +255,8 @@ export function DiagPanel(): JSX.Element {
           {chip(`归档主题 ${String(report.archive.topics)}`)}
           {chip(`待导出 ${String(report.archive.dirty)}`)}
           {chip(`人工修改 ${String(report.archive.human_edited)}`)}
+          {chip(`待合并提案 ${String(report.archive.proposed_pending)}`)}
+          {chip(`已合并/分裂 ${String(report.archive.merged_or_split)}`)}
         </div>
       </div>
 

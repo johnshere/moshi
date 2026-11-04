@@ -24,7 +24,8 @@ import { applyDoctorFixes, doctorExitCode } from '../../src/app/cli/commands/doc
 import { collectDiagReport } from '../../src/core/diag/collect.js';
 import { computeModularity, computeNearDupRatio } from '../../src/core/diag/quality.js';
 import type { DiagReport } from '../../src/core/diag/types.js';
-import { insertEdge, insertFact } from '../fixtures/factories.js';
+import { insertEdge, insertFact, makeEntity } from '../fixtures/factories.js';
+import { addAlias } from '../../src/infra/sqlite/entityRepo.js';
 
 const MODEL = { embed: 'test-embed', gat: 'off' as const, weights_path: 'Z:/definitely/missing.pt' };
 
@@ -115,6 +116,9 @@ describe('GET /api/diag', () => {
     });
     expect(body.last_harvest_at).toBeNull();
     expect(body.last_eval).toBeNull();
+    // P2-19A-13b：待办/结构待晋升两块在空库上必须是 0（不是 undefined）
+    expect(body.resolve).toEqual({ pending: 0 });
+    expect(body.schema).toEqual({ pending_promotions: 0 });
   });
 
   it('/api/diag/quality 返回七项指标（六项 + 布局新鲜度）', async () => {
@@ -341,5 +345,55 @@ describe('meta 心跳', () => {
 
     setMeta(db, 'last_eval', '{"at": 1}');
     expect(reportOf(db).last_eval).toBeNull();
+  });
+});
+
+describe('P2-19A-13b：resolve / schema 待办量补项', () => {
+  it('resolve.pending 口径与 resolve 队列一致（source=vector 且相似度在区间内）', async () => {
+    const db = freshDb();
+    const entity = makeEntity(db, 'pkg-resolve');
+    addAlias(db, { alias: 'a-in-range', entityId: entity, source: 'vector', confidence: 0.8 });
+    addAlias(db, { alias: 'a-too-low', entityId: entity, source: 'vector', confidence: 0.5 });
+    addAlias(db, { alias: 'a-too-high', entityId: entity, source: 'vector', confidence: 0.95 });
+    addAlias(db, { alias: 'a-human', entityId: entity, source: 'human', confidence: 0.8 });
+    addAlias(db, { alias: 'a-rule', entityId: entity, source: 'rule', confidence: 0.8 });
+
+    expect(reportOf(db).resolve).toEqual({ pending: 1 });
+    const app = await diagApp(db);
+    const res = await app.inject({ method: 'GET', url: '/api/diag' });
+    expect(res.json<DiagReport>().resolve).toEqual({ pending: 1 });
+  });
+
+  it('schema.pending_promotions = ontology.promoted=0 行数', async () => {
+    const db = freshDb();
+    const ts = '2026-11-01T00:00:00.000Z';
+    const insert = db.prepare(
+      `INSERT INTO ontology (kind, name, registered_at, promoted) VALUES ('predicate', ?, ?, ?)`,
+    );
+    insert.run('version', ts, 0);
+    insert.run('port', ts, 0);
+    insert.run('owner', ts, 1);
+
+    expect(reportOf(db).schema).toEqual({ pending_promotions: 2 });
+    const app = await diagApp(db);
+    const res = await app.inject({ method: 'GET', url: '/api/diag' });
+    expect(res.json<DiagReport>().schema).toEqual({ pending_promotions: 2 });
+  });
+
+  it('eval 写入的 last_eval 出现在 /api/diag（触发与诊断共用 meta 契约）', async () => {
+    const db = freshDb();
+    setMeta(
+      db,
+      'last_eval',
+      JSON.stringify({ at: '2026-11-04T14:00:00.000Z', passed: 40, total: 40, blocking_failures: 0 }),
+    );
+    const app = await diagApp(db);
+    const res = await app.inject({ method: 'GET', url: '/api/diag' });
+    expect(res.json<DiagReport>().last_eval).toEqual({
+      at: '2026-11-04T14:00:00.000Z',
+      passed: 40,
+      total: 40,
+      blocking_failures: 0,
+    });
   });
 });

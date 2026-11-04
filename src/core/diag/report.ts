@@ -17,6 +17,8 @@ import type {
   DiagModelJson,
   DiagQualityJson,
   DiagReport,
+  DiagResolveJson,
+  DiagSchemaJson,
 } from './types.js';
 
 export interface BuildDiagInput {
@@ -25,6 +27,8 @@ export interface BuildDiagInput {
   invariants: DiagInvariantInputs;
   archive: DiagArchiveSummary;
   quality: DiagQualityJson;
+  resolve: DiagResolveJson;
+  schema: DiagSchemaJson;
   model: DiagModelJson;
   last_harvest_at: string | null;
   last_eval: DiagEvalJson | null;
@@ -58,6 +62,8 @@ export function buildDiagReport(input: BuildDiagInput): DiagReport {
     model: input.model,
     archive: input.archive,
     quality: input.quality,
+    resolve: input.resolve,
+    schema: input.schema,
     last_harvest_at: input.last_harvest_at,
     last_eval: input.last_eval,
   };

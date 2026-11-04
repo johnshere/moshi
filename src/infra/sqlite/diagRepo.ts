@@ -10,6 +10,7 @@
  */
 import { statSync } from 'node:fs';
 import type { Db } from './db.js';
+import { RESOLVE_MAX_SIM, RESOLVE_MIN_SIM } from './inboxRepo.js';
 import { getMeta } from './metaRepo.js';
 
 // ── DB 基础信息 ────────────────────────────────────────────────────────────
@@ -460,4 +461,27 @@ export function readLastHarvestAt(db: Db): string | null {
 /** `meta.last_eval` 的原始 JSON 文本（解析/校验在 core） */
 export function readLastEvalRaw(db: Db): string | null {
   return getMeta(db, 'last_eval');
+}
+
+// ── 待办量 / 结构待晋升（P2-19A-13b）──────────────────────────────────────
+
+/**
+ * 实体消解待办量：口径与 `/api/queues/resolve` 完全一致
+ * （`source='vector'` 且 confidence 在 `[RESOLVE_MIN_SIM, RESOLVE_MAX_SIM]`），
+ * 阈值直接复用 inboxRepo 的常量，避免诊断页与队列页两个数字对不上。
+ */
+export function readResolvePending(db: Db): number {
+  return scalar(
+    db,
+    `SELECT COUNT(*) AS n
+       FROM alias a
+       JOIN entity e ON e.id = a.entity_id
+      WHERE a.source = 'vector'
+        AND a.confidence BETWEEN ${RESOLVE_MIN_SIM} AND ${RESOLVE_MAX_SIM}`,
+  );
+}
+
+/** 结构待晋升量：`ontology.promoted = 0` 的行数（概设 §2.6 L289 待晋升清单） */
+export function readPendingPromotions(db: Db): number {
+  return scalar(db, `SELECT COUNT(*) AS n FROM ontology WHERE promoted = 0`);
 }

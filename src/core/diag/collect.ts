@@ -15,7 +15,9 @@ import {
   readLastEvalRaw,
   readLastHarvestAt,
   readLayoutTimestamps,
+  readPendingPromotions,
   readQualityInputs,
+  readResolvePending,
 } from '../../infra/sqlite/diagRepo.js';
 import { getVec } from '../../infra/vec/index.js';
 import {
@@ -127,6 +129,8 @@ export function collectDiagReport(
     invariants,
     archive,
     quality,
+    resolve: { pending: readResolvePending(db) },
+    schema: { pending_promotions: readPendingPromotions(db) },
     model: toModelJson(model),
     last_harvest_at: readLastHarvestAt(db),
     last_eval: parseEvalJson(readLastEvalRaw(db)),

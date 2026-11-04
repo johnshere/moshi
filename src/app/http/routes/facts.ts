@@ -36,6 +36,25 @@ function parseSort(raw: string | string[] | undefined): SortKey {
   return raw === 'importance' ? 'importance' : 'time';
 }
 
+/**
+ * `depth` 解析（详设 §4.3 L1345：`GET /api/facts/:id?depth≤3`）。
+ *
+ * 默认 1（检查器默认只看一跳）；0 / 4 / 小数 / 文/数组一律 400——
+ * 静默夹到 3 会让深链参数与返回内容对不上，也不该让手搓 URL 拉全图。
+ */
+function parseDepth(raw: unknown): number {
+  if (Array.isArray(raw)) {
+    throw new MoshiError('E_INPUT', 'depth 必须是单个值，收到数组', { reason: 'depth_invalid' });
+  }
+  if (raw === undefined) return 1;
+  if (typeof raw !== 'string' || !/^[1-3]$/.test(raw.trim())) {
+    throw new MoshiError('E_INPUT', `depth 必须是 1..3 的整数，收到「${String(raw)}」`, {
+      reason: 'depth_invalid',
+    });
+  }
+  return Number(raw.trim());
+}
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 
@@ -276,6 +295,13 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
   // GET /api/facts/:id  详情
   app.get('/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
+    let depth: number;
+    try {
+      depth = parseDepth((req.query as Record<string, unknown>).depth);
+    } catch (err) {
+      if (!(err instanceof MoshiError)) throw err;
+      return reply.code(400).send({ error: err.code, message: err.message, detail: err.detail });
+    }
     const fact = factRepo.getFact(db, id);
     if (fact === null) {
       return reply.code(404).send({ error: 'E_NOT_FOUND', message: `fact 不存在：${id}` });
@@ -283,9 +309,9 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
     const audits = auditRepo.auditByRow(db, 'fact', id);
     // 向量信息（P1-02）：详情弹窗展示该事实是否已进向量索引 + 前 8 维摘要
     const vec = getVec(db, id);
-    // 溯源数据（详设 §10.5 溯源档）：依赖链上下游各 3 跳 / 冲突对 / 反向 supersedes 链。
+    // 溯源数据（详设 §10.5 溯源档）：依赖链按 `depth` 展开（1..3 跳）/ 冲突对 / 反向 supersedes 链。
     // 检查器预算 < 50ms（详设 §10.8），详情本就按需请求，一次带全比多次 round-trip 便宜。
-    const depends = factRepo.traceDepends(db, id);
+    const depends = factRepo.traceDepends(db, id, { hops: depth });
     const conflicts = factRepo.listConflicts(db, id);
     const superseding = factRepo.listSuperseding(db, id);
     const sourceEpisode = fact.sourceEpisode === null ? null : episodeRepo.getById(db, fact.sourceEpisode);
@@ -323,6 +349,7 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
               raw_path: sourceEpisode.rawPath,
             },
       span: fact.span,
+      depth,
       depends: { upstream: depends.upstream.map(digest), downstream: depends.downstream.map(digest) },
       conflicts: conflicts.map(digest),
       superseded: superseding.map(digest),

@@ -34,6 +34,7 @@ import { archiveRoutes } from './routes/archive.js';
 import { searchRoutes } from './routes/search.js';
 import { entitiesRoutes } from './routes/entities.js';
 import { privacyRoutes, exportRoutes } from './routes/privacy.js';
+import { evalRoutes } from './routes/eval.js';
 import { configRoutes } from './routes/config.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
@@ -97,6 +98,8 @@ export async function buildHttpApp(deps: HttpDeps) {
   // 隐私：总览 / purge（唯一物理删除入口，先审计后删）；全库导出（P2-19-A）
   await app.register(privacyRoutes, { prefix: '/api/privacy', db: deps.db, cfg: deps.cfg });
   await app.register(exportRoutes, { prefix: '/api/export', db: deps.db });
+  // golden set 评测触发（P2-19-A）：跑完写 meta.last_eval
+  await app.register(evalRoutes, { prefix: '/api/eval', db: deps.db, cfg: deps.cfg });
   // 设置页：配置白名单读写 + 维护重建（P2-19-A）
   await app.register(configRoutes, {
     prefix: '/api',

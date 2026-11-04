@@ -86,6 +86,16 @@ export interface DiagEvalJson {
   blocking_failures: number;
 }
 
+/** 实体消解待办量（P2-19A-13b；口径 = resolve 队列：source='vector' 且相似度在区间内） */
+export interface DiagResolveJson {
+  pending: number;
+}
+
+/** 结构待晋升量（P2-19A-13b；口径 = ontology.promoted=0 的行数） */
+export interface DiagSchemaJson {
+  pending_promotions: number;
+}
+
 export interface DiagReport {
   db: DiagDbJson;
   indexes: DiagIndexesJson;
@@ -93,6 +103,8 @@ export interface DiagReport {
   model: DiagModelJson;
   archive: DiagArchiveJson;
   quality: DiagQualityJson;
+  resolve: DiagResolveJson;
+  schema: DiagSchemaJson;
   last_harvest_at: string | null;
   last_eval: DiagEvalJson | null;
 }
