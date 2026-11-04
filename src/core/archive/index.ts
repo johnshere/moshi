@@ -15,6 +15,7 @@ import type { Db } from '../../infra/sqlite/db.js';
 import { nowIso } from '../../domain/time.js';
 import {
   getArchiveMeta,
+  getArchiveMetaBySlug,
   listSlugs,
   updateArchiveMetaState,
   upsertArchiveMeta,
@@ -24,6 +25,7 @@ import type { WriteRoots } from '../../infra/fs/safeWrite.js';
 import { selectTopics, slugFor } from './topics.js';
 import { renderTopic, type ArchiveDoc } from './render.js';
 import { decideArchiveWrite, type ArchiveWriteAction } from './guard.js';
+import { writeArchiveLedger } from './topic.js';
 import {
   mainFilePath,
   readDiskBodyHash,
@@ -259,4 +261,89 @@ export function archiveAll(db: Db, opts: ArchiveAllOptions = {}): ArchiveAllResu
     }
   }
   return { docs, changedDocs, proposedDocs, written, proposed, elapsedMs: Date.now() - started };
+}
+
+/** 一次导出（CLI `moshi export` 与 `POST /api/archive/export` 共用） */
+export interface ArchiveExportOptions {
+  /** 归档根目录（必给：这条路径一定要落盘） */
+  archiveDir: string;
+  /** 写盘白名单；缺省 `[archiveDir]` */
+  roots?: WriteRoots;
+  /** 只导出该归档 slug；省略 = 全量（与旧 CLI 行为一致） */
+  slug?: string;
+  now?: string;
+}
+
+export interface ArchiveExportResult {
+  /** 本次涉及的主题数 */
+  exported: number;
+  /** 写主文件篇数 */
+  written: number;
+  /** 未变（skip）篇数 */
+  unchanged: number;
+  /** 写 `.proposed.md` 篇数 */
+  proposed: number;
+  dir: string;
+  elapsedMs: number;
+  /** 台账与 DB 的差异条数（0 = 一致） */
+  ledgerDifferences: number;
+  /** 重建后的台账文件路径（CLI 提示用） */
+  ledgerPath: string;
+}
+
+/**
+ * 导出一轮归档：渲染 / guard / 落盘全走 `archiveTopic`，最后重建台账。
+ *
+ * 与 `archiveAll` 的差别：支持按 slug 单篇导出，并把「写盘 + 台账」收成一个
+ * 可复用入口——CLI 打印与 HTTP JSON 都从这里取数，避免两个入口各写一份。
+ * slug 不存在返回 `null`（调用方负责 404 / 退出码 1）。
+ */
+export function exportArchive(db: Db, opts: ArchiveExportOptions): ArchiveExportResult | null {
+  const started = Date.now();
+  const now = opts.now ?? nowIso();
+  const roots = opts.roots ?? [opts.archiveDir];
+  const shared = { now, archiveDir: opts.archiveDir, roots };
+
+  let exported: number;
+  let written: number;
+  let proposed: number;
+
+  if (opts.slug !== undefined) {
+    const meta = getArchiveMetaBySlug(db, opts.slug);
+    if (meta === null) return null;
+    const topicId = Number(meta.topicId);
+    if (!Number.isFinite(topicId)) return null;
+    const res = archiveTopic(db, topicId, {
+      ...shared,
+      ...(meta.title === null ? {} : { title: meta.title }),
+    });
+    exported = 1;
+    written = res.written ? 1 : 0;
+    proposed = res.proposed ? 1 : 0;
+  } else {
+    const res = archiveAll(db, shared);
+    exported = res.docs.length;
+    written = res.written;
+    proposed = res.proposed;
+  }
+
+  // 没有导出主题时保持旧行为：不建归档目录、不写台账（否则空库首次 export 会留下空目录）
+  let ledgerDifferences = 0;
+  let ledgerPath = '';
+  if (exported > 0) {
+    const ledger = writeArchiveLedger(db, { archiveDir: opts.archiveDir, roots, now });
+    ledgerDifferences = ledger.differences.length;
+    ledgerPath = ledger.path;
+  }
+
+  return {
+    exported,
+    written,
+    unchanged: exported - written - proposed,
+    proposed,
+    dir: opts.archiveDir,
+    elapsedMs: Date.now() - started,
+    ledgerDifferences,
+    ledgerPath,
+  };
 }

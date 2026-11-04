@@ -1,6 +1,10 @@
 /**
  * `moshi schema <子命令>` —— schema 校验与晋升 diff（详设 §2.6 / §8.5；台账 P2-14）。
  *
+ * - `infer`：统计谓词基数性并写回 ontology（详设 §8.5 判定表），同时输出
+ *   「待晋升清单」：本次只到 observe 的谓词（样本不足）与 ontology 里 promoted=0 的
+ *   线索，供 `/ui/diagnostics` 与人工晋升使用。P2-19-A 项 3 补齐（此前只有后台
+ *   `schemaInferRunner` 会跑，用户无法手动触发）。
  * - `validate`：扫全库 fact 的 attrs，对照 `ontology` 里已登记（promoted=1）的
  *   predicate / attr_key 定义，报告违反项与未登记键（待晋升清单）。只读，不写库。
  *   `--snapshot <file>` 顺手把「当前已登记 schema」导出成快照，供晋升后 diff 用。
@@ -25,7 +29,8 @@ import { nowIso } from '../../../domain/time.js';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
 import { listFactsPage } from '../../../infra/sqlite/factRepo.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
-import { loadRegisteredKeys } from '../../../infra/sqlite/ontologyRepo.js';
+import { listOntologyKeys, loadRegisteredKeys } from '../../../infra/sqlite/ontologyRepo.js';
+import { runSchemaInfer } from '../../../core/lifecycle/schema-infer.js';
 import { safeWriteFile } from '../../../infra/fs/safeWrite.js';
 import { dataPaths } from '../../config.js';
 import type { Command, CommandContext } from '../types.js';
@@ -39,8 +44,13 @@ const USAGE = [
   '用法：moshi schema <子命令>',
   '',
   '子命令：',
+  '  infer [--dry-run]                                 推断谓词基数性并写回 ontology，打印待晋升清单',
   '  validate [--snapshot <file>]                       校验全库 attrs 是否符合已登记 schema',
   '  diff --from <file> [--to <file>] [--out <file>]    对比晋升前后 schema 快照，输出迁移脚本草稿',
+  '',
+  'infer 参数：',
+  '  --dry-run         只判定不写库（updated=0，planned 给出本会写回的条数）',
+  '  --write           显式写回（默认行为，脚本自述用）',
   '',
   'validate 参数：',
   '  --snapshot file   把当前已登记 schema 导出为快照 JSON（晋升前先跑一次）',
@@ -52,7 +62,7 @@ const USAGE = [
   '',
 ].join('\n');
 
-const SUBCOMMANDS = ['validate', 'diff'] as const;
+const SUBCOMMANDS = ['infer', 'validate', 'diff'] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
 function isSubcommand(s: string): s is Subcommand {
@@ -78,6 +88,84 @@ function snapshotFromDb(db: Parameters<typeof loadRegisteredKeys>[0], generatedA
 
 function writeRoots(ctx: CommandContext): readonly string[] {
   return [ctx.cfg.storage.data_dir, ctx.cfg.storage.archive_dir, ctx.home];
+}
+
+/**
+ * `schema infer`：跑一次基数性推断并写回 ontology（幂等；`registered_at` 保留首次值）。
+ *
+ * 输出里区分三件事，避免用户把「已晋升」和「待晋升」混在一起：
+ * - `predicates`：本次全部判定（keep / promote / observe）；
+ * - `promoted`：本次写成 set / series 的谓词名；
+ * - `candidates`：样本不足、本次只 observe 的谓词（下一轮够 20 个 key 再判）；
+ * - `pending`：ontology 里 `promoted=0` 的线索（诊断页的「待晋升清单」口径）。
+ */
+function runInfer(ctx: CommandContext, rest: readonly string[]): number {
+  let dryRun = false;
+  for (const arg of rest) {
+    if (arg === '--dry-run') {
+      dryRun = true;
+      continue;
+    }
+    if (arg === '--write') continue; // 显式写回；与默认行为一致（脚本自述用）
+    ctx.stderr(`未知参数：${arg}\n${USAGE}`);
+    return 2;
+  }
+
+  const paths = dataPaths(ctx.cfg);
+  if (!existsSync(paths.db)) {
+    ctx.stderr(`尚未观测到数据库：${paths.db}\n`);
+    return 1;
+  }
+
+  const { db } = openDb({ file: paths.db });
+  try {
+    migrate(db, { backupsDir: paths.backups });
+    const generatedAt = nowIso();
+    const result = runSchemaInfer(db, { now: generatedAt, dryRun });
+    const candidates = result.predicates
+      .filter((p) => p.action === 'observe')
+      .map((p) => ({
+        predicate: p.name,
+        keys: p.keys,
+        single_ratio: p.single_ratio,
+        value_occurrences: p.value_occurrences,
+      }));
+    const pending = listOntologyKeys(db)
+      .filter((key) => !key.promoted)
+      .map((key) => ({
+        kind: key.kind,
+        name: key.name,
+        cardinality: key.cardinality,
+        sample_count: key.sampleCount,
+      }));
+    const kept = result.predicates.filter((p) => p.action === 'keep').length;
+    const promotedCount = result.predicates.filter((p) => p.action === 'promote').length;
+    const observed = result.predicates.filter((p) => p.action === 'observe').length;
+    // dry-run 不写库：updated=0，但 planned = 本会写回的条数（cardinality 已判定）
+    const planned = result.predicates.filter((p) => p.cardinality !== null).length;
+    ctx.stdout(
+      `${JSON.stringify({
+        command: 'schema infer',
+        generated_at: generatedAt,
+        dry_run: dryRun,
+        predicates: result.predicates,
+        attr_keys: result.attr_keys,
+        promoted: result.predicates.filter((p) => p.action === 'promote').map((p) => p.name),
+        candidates,
+        pending,
+        summary: {
+          updated: dryRun ? 0 : planned,
+          planned,
+          kept,
+          promoted: promotedCount,
+          observed,
+        },
+      })}\n`,
+    );
+    return 0;
+  } finally {
+    closeDb(db);
+  }
 }
 
 function runValidate(ctx: CommandContext, rest: readonly string[]): number {
@@ -261,7 +349,7 @@ function runDiff(ctx: CommandContext, rest: readonly string[]): number {
 
 export const schemaCommand: Command = {
   name: 'schema',
-  summary: 'schema 校验与晋升 diff（schema validate | schema diff）',
+  summary: 'schema 推断/校验/晋升 diff（schema infer | validate | diff）',
   async run(ctx) {
     const sub = ctx.args[0];
     if (sub === undefined) {
@@ -273,6 +361,7 @@ export const schemaCommand: Command = {
       return 2;
     }
     const rest = ctx.args.slice(1);
+    if (sub === 'infer') return runInfer(ctx, rest);
     return sub === 'validate' ? runValidate(ctx, rest) : runDiff(ctx, rest);
   },
 };

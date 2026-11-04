@@ -429,6 +429,17 @@ export interface SearchOptions {
   status?: readonly Epistemic[];
   /** true 则连已失效的历史行一起返回（详设 §4.1.1 的 `include_history`） */
   includeHistory?: boolean;
+  /**
+   * 精确匹配 `canonical_key`（概设 §8.1 深链 `/ui/memories?canonical_key=<k>`）。
+   * 与 `q` 的 LIKE 语义不同：这里只认全等，供 UI 从实体一跳定位到唯一身份键。
+   */
+  canonicalKey?: string;
+  /** `strength` 下限（含端点，0..1）：概设 §8.1 的 strength 分层筛选 */
+  strengthMin?: number;
+  /** `strength` 上限（含端点，0..1） */
+  strengthMax?: number;
+  /** 证据池筛选（详设 §1.4：utility / value_floor），与 `status` 是 AND 关系 */
+  pool?: Pool;
   from?: string;
   to?: string;
   /**
@@ -463,6 +474,22 @@ function buildWhere(opts: Omit<SearchOptions, 'limit'>): { sql: string; params: 
   if (opts.scope !== undefined) {
     where.push('scope = ?');
     params.push(opts.scope);
+  }
+  if (opts.canonicalKey !== undefined) {
+    where.push('canonical_key = ?');
+    params.push(opts.canonicalKey);
+  }
+  if (opts.strengthMin !== undefined) {
+    where.push('strength >= ?');
+    params.push(opts.strengthMin);
+  }
+  if (opts.strengthMax !== undefined) {
+    where.push('strength <= ?');
+    params.push(opts.strengthMax);
+  }
+  if (opts.pool !== undefined) {
+    where.push('pool = ?');
+    params.push(opts.pool);
   }
   if (opts.ftype !== undefined && opts.ftype.length > 0) {
     where.push(`ftype IN (${opts.ftype.map(() => '?').join(',')})`);

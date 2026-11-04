@@ -137,3 +137,125 @@ describe('moshi export（P1-21 / P2-15）', () => {
     );
   });
 });
+
+/** 导出前快照落在 `<data_dir>/backups/`，与每日 backup job 同目录 */
+function backupsDir(home: string): string {
+  return path.join(home, '.moshi', 'backups');
+}
+
+function listDbFiles(dir: string): string[] {
+  return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith('.db')) : [];
+}
+
+function snapshotPathOf(log: string): string | null {
+  const match = log.match(/已快照 -> (.+)\n/);
+  return match?.[1] ?? null;
+}
+
+describe('moshi export 导出前快照（P2-19-A 项 2）', () => {
+  it('本次有文档写盘 → 先快照（文件数 +1）并打印 已快照', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+
+    const out: string[] = [];
+    expect(await runCli(['export', '--all'], { home, stdout: (s) => out.push(s) })).toBe(0);
+    const log = out.join('');
+    expect(log).toContain('导出 1 篇（写盘 1、未变 0）');
+
+    const snapshot = snapshotPathOf(log);
+    expect(snapshot).not.toBeNull();
+    expect(existsSync(snapshot!)).toBe(true);
+    expect(path.dirname(snapshot!)).toBe(backupsDir(home));
+    expect(listDbFiles(backupsDir(home))).toHaveLength(1);
+  });
+
+  it('--no-backup → 有写盘也不产生快照', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+
+    const out: string[] = [];
+    expect(await runCli(['export', '--all', '--no-backup'], { home, stdout: (s) => out.push(s) })).toBe(0);
+    expect(out.join('')).toContain('导出 1 篇（写盘 1、未变 0）');
+    expect(out.join('')).not.toContain('已快照');
+    expect(listDbFiles(backupsDir(home))).toHaveLength(0);
+  });
+
+  it('内容未变（写盘 0）→ 不再产生快照', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+
+    expect(await runCli(['export', '--all'], { home })).toBe(0);
+    expect(listDbFiles(backupsDir(home))).toHaveLength(1);
+
+    const second: string[] = [];
+    expect(await runCli(['export', '--all'], { home, stdout: (s) => second.push(s) })).toBe(0);
+    expect(second.join('')).toContain('写盘 0');
+    expect(second.join('')).not.toContain('已快照');
+    expect(listDbFiles(backupsDir(home))).toHaveLength(1);
+  });
+
+  it('--slug 单篇导出同样在写盘前快照', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+    expect(await runCli(['export', '--all'], { home })).toBe(0);
+    const meta = db.prepare('SELECT slug FROM archive_meta WHERE topic_id = ?').get('7') as { slug: string };
+
+    // 改一条事实内容 → 渲染 hash 变化，--slug 会真正写盘
+    db.prepare("UPDATE fact SET content = content || '（更新）'").run();
+    const out: string[] = [];
+    expect(await runCli(['export', '--slug', meta.slug], { home, stdout: (s) => out.push(s) })).toBe(0);
+    expect(out.join('')).toContain('写盘 1');
+    expect(snapshotPathOf(out.join(''))).not.toBeNull();
+    expect(listDbFiles(backupsDir(home))).toHaveLength(2);
+  });
+});
+
+describe('moshi export --slug / --all（P2-19-A 项 4）', () => {
+  it('--slug 只导出指定主题；内容未变时写盘 0', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+    // 先全量导出一次，建出 archive_meta
+    const first: string[] = [];
+    expect(await runCli(['export', '--all'], { home, stdout: (s) => first.push(s) })).toBe(0);
+    expect(first.join('')).toContain('导出 1 篇（写盘 1、未变 0）');
+
+    const meta = db.prepare('SELECT slug FROM archive_meta WHERE topic_id = ?').get('7') as { slug: string };
+    const out: string[] = [];
+    const code = await runCli(['export', '--slug', meta.slug], { home, stdout: (s) => out.push(s) });
+    expect(code).toBe(0);
+    expect(out.join('')).toContain('导出 1 篇（写盘 0、未变 1）');
+  });
+
+  it('--slug 不存在 → 退出码 1，stderr 给出可读提示', async () => {
+    const home = tmpHome();
+    openHomeDb(home);
+    const err: string[] = [];
+    const code = await runCli(['export', '--slug', '不存在的主题'], { home, stderr: (s) => err.push(s) });
+    expect(code).toBe(1);
+    expect(err.join('')).toContain('尚未观察到归档主题：不存在的主题');
+  });
+
+  it('--slug 与 --all 互斥 → 退出码 2，不落盘', async () => {
+    const home = tmpHome();
+    const db = openHomeDb(home);
+    seedTopic(db, 7, 10);
+    const err: string[] = [];
+    const code = await runCli(['export', '--all', '--slug', 'x'], { home, stderr: (s) => err.push(s) });
+    expect(code).toBe(2);
+    expect(err.join('')).toContain('互斥');
+    expect(existsSync(path.join(home, 'Documents', '默识归档'))).toBe(false);
+  });
+
+  it('--slug 缺值 → 退出码 2', async () => {
+    const home = tmpHome();
+    openHomeDb(home);
+    const err: string[] = [];
+    expect(await runCli(['export', '--slug'], { home, stderr: (s) => err.push(s) })).toBe(2);
+    expect(err.join('')).toContain('--slug 需要一个值');
+  });
+});

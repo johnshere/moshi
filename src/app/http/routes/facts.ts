@@ -16,7 +16,8 @@ import type { Db } from '../../../infra/sqlite/db.js';
 import * as factRepo from '../../../infra/sqlite/factRepo.js';
 import * as auditRepo from '../../../infra/sqlite/auditRepo.js';
 import * as episodeRepo from '../../../infra/sqlite/episodeRepo.js';
-import type { Epistemic } from '../../../domain/enums.js';
+import type { Epistemic, Pool } from '../../../domain/enums.js';
+import { POOL } from '../../../domain/enums.js';
 import { withTransaction } from '../../../infra/sqlite/tx.js';
 import { getVec } from '../../../infra/vec/index.js';
 
@@ -63,6 +64,43 @@ function parseLimit(raw: string | string[] | undefined): number {
     throw new MoshiError('E_INPUT', `limit 必须 ≥ 1，收到「${raw}」`, { reason: 'limit_invalid' });
   }
   return Math.min(n, MAX_LIMIT);
+}
+
+/**
+ * `strength_min` / `strength_max` 解析（详设 §4.3 / 概设 §8.1 的 strength 分层筛选）。
+ *
+ * 只接受 0..1 的十进制写法：`0`、`0.85`、`1`、`1.0`。科学计数法（`1e-1`）、负数、
+ * 空串一律 400——静默截断会让筛选结果与 UI 上的区间读数对不上。
+ */
+function parseStrength(
+  raw: string | string[] | undefined,
+  name: 'strength_min' | 'strength_max',
+): number | undefined {
+  if (Array.isArray(raw)) {
+    throw new MoshiError('E_INPUT', `${name} 必须是单个值，收到数组`, { reason: `${name}_invalid` });
+  }
+  if (raw === undefined) return undefined;
+  const text = raw.trim();
+  if (!/^(0(\.\d+)?|1(\.0+)?)$/.test(text)) {
+    throw new MoshiError('E_INPUT', `${name} 必须是 0..1 之间的十进制数，收到「${raw}」`, {
+      reason: `${name}_invalid`,
+    });
+  }
+  return Number(text);
+}
+
+/** `pool` 只认枚举值（详设 §1.4：`utility` / `value_floor`），拼错 400 而不是空结果 */
+function parsePool(raw: string | string[] | undefined): Pool | undefined {
+  if (Array.isArray(raw)) {
+    throw new MoshiError('E_INPUT', `pool 必须是单个值，收到数组`, { reason: 'pool_invalid' });
+  }
+  if (raw === undefined) return undefined;
+  if (!(POOL as readonly string[]).includes(raw)) {
+    throw new MoshiError('E_INPUT', `pool 必须是 ${POOL.join(' / ')}，收到「${raw}」`, {
+      reason: 'pool_invalid',
+    });
+  }
+  return raw as Pool;
 }
 
 /** 坏游标的统一出口：`cursor_invalid` 是 400，绝不静默回第 1 页 */
@@ -157,6 +195,10 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
     let scope: string | undefined;
     let ftype: string | undefined;
     let status: string | undefined;
+    let canonicalKey: string | undefined;
+    let strengthMin: number | undefined;
+    let strengthMax: number | undefined;
+    let pool: Pool | undefined;
     let from: string | undefined;
     let to: string | undefined;
     try {
@@ -167,6 +209,10 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
       scope = single(query.scope, 'scope');
       ftype = single(query.ftype, 'ftype');
       status = single(query.status, 'status');
+      canonicalKey = single(query.canonical_key, 'canonical_key');
+      strengthMin = parseStrength(query.strength_min, 'strength_min');
+      strengthMax = parseStrength(query.strength_max, 'strength_max');
+      pool = parsePool(query.pool);
       from = single(query.from, 'from');
       to = single(query.to, 'to');
     } catch (err) {
@@ -174,11 +220,24 @@ export async function factRoutes(app: FastifyInstance, opts: FactRoutesOpts): Pr
       return reply.code(400).send({ error: err.code, message: err.message, detail: err.detail });
     }
 
+    // 区间反了不是空结果，是调用方拼错了 URL：直接 400，避免 UI 上出现「明明有数据却 0 条」
+    if (strengthMin !== undefined && strengthMax !== undefined && strengthMin > strengthMax) {
+      return reply.code(400).send({
+        error: 'E_INPUT',
+        message: `strength_min 不能大于 strength_max（${strengthMin} > ${strengthMax}）`,
+        detail: { reason: 'strength_range_invalid' },
+      });
+    }
+
     const filter: factRepo.SearchOptions = {
       q,
       scope,
       ...(ftype ? { ftype: ftype.split(',') as factRepo.SearchOptions['ftype'] } : {}),
       ...(status ? { status: status.split(',') as factRepo.SearchOptions['status'] } : {}),
+      ...(canonicalKey ? { canonicalKey } : {}),
+      ...(strengthMin !== undefined ? { strengthMin } : {}),
+      ...(strengthMax !== undefined ? { strengthMax } : {}),
+      ...(pool ? { pool } : {}),
       ...(from ? { from } : {}),
       ...(to ? { to } : {}),
       // keyset 分页：游标条件在 SQL 层生效（游标键与 sort 成对，见 SearchCursor）

@@ -37,7 +37,7 @@ const KEY_COUNT_MIN = 20;
 const SERIES_RATIO_MAX = 0.3;
 const SERIES_OCCURRENCES_MIN = 50;
 
-export function runSchemaInfer(db: Db, opts: { now?: string } = {}): SchemaInferResult {
+export function runSchemaInfer(db: Db, opts: { now?: string; dryRun?: boolean } = {}): SchemaInferResult {
   const now = opts.now ?? nowIso();
   const rows = selectPredicateStats(db);
 
@@ -61,16 +61,19 @@ export function runSchemaInfer(db: Db, opts: { now?: string } = {}): SchemaInfer
   });
 
   // 写回 ontology（registered_at 只在首次插入生效，promoted=1；observe 不写回）
-  for (const p of predicates) {
-    if (p.cardinality === null) continue;
-    upsertPredicateStat(db, {
-      name: p.name,
-      cardinality: p.cardinality,
-      sampleCount: p.keys,
-      distinctValues: p.value_occurrences,
-      singleRatio: p.single_ratio,
-      registeredAt: now,
-    });
+  // dryRun 只跳过写库，判定结果照常返回（CLI `--dry-run` / 预览用）
+  if (opts.dryRun !== true) {
+    for (const p of predicates) {
+      if (p.cardinality === null) continue;
+      upsertPredicateStat(db, {
+        name: p.name,
+        cardinality: p.cardinality,
+        sampleCount: p.keys,
+        distinctValues: p.value_occurrences,
+        singleRatio: p.single_ratio,
+        registeredAt: now,
+      });
+    }
   }
 
   return { predicates, attr_keys: [] };

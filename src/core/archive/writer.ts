@@ -72,6 +72,21 @@ export function historyFilePath(archiveDir: string, slug: string, date: string):
   return path.join(archiveDir, '_history', `${slug}@${date}.md`);
 }
 
+/**
+ * 只读一篇归档正文（`GET /api/archive/topics/:slug` 用；详设 §4.3）。
+ *
+ * `archive_meta.path` 来自 DB，不能直接信任：先解析成绝对路径，再断言它仍在
+ * `archiveDir` 内（越界按「文件缺失」返回 null，不读库外文件）。文件不存在同样返回
+ * null，页面据此降级——只读接口不写库、不建目录、不抛 404（404 只用于 slug 不存在）。
+ */
+export function readArchiveMarkdown(archiveDir: string, relativePath: string | null | undefined): string | null {
+  if (relativePath === null || relativePath === undefined || relativePath === '') return null;
+  const root = path.resolve(archiveDir);
+  const file = path.resolve(root, relativePath);
+  if (file !== root && !file.startsWith(`${root}${path.sep}`)) return null;
+  return readTextFile(file);
+}
+
 /** 读文本；不存在返回 null（ENOENT），其余 IO 错误照抛 */
 export function readTextFile(file: string): string | null {
   try {
