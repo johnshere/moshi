@@ -1,10 +1,9 @@
 /**
  * daemon 里的布局节流器（P2-01 / D16）。
  *
- * 为什么要有它：`moshi layout` 只解决"人能手动算一次"，而事实是 harvest 在不断
- * 产出的——不接定时触发，新事实会长时间没有坐标（图上不出现），或者要等用户
- * 想起来敲命令。P2-17 调度器还没开工，这里先按 P2-21 的同类做法，用一个
- * unref 的定时器顶住（台账 §5.2 D-69 的取舍），调度器落地后换驱动、不换逻辑。
+ * P2-17 收口后，daemon 里的驱动换成调度器的 `layout` 任务（`after: export`），
+ * 本 runner **默认不再自装定时器**（否则日志里同一任务两条调度链）。`runOnce()`
+ * 保持可复用；只有显式传 `intervalMs > 0` 才自调度（测试/独立使用）。
  *
  * 节流靠**脏检查**而不是"每次都算"：`countUnlaidFacts` 走一次索引即可，没有新
  * 事实时连 worker 都不起。周期默认 60s（`[layout].interval_ms`），
@@ -46,7 +45,8 @@ export const LAYOUT_INTERVAL_MS = 60_000;
 
 export function startLayoutRunner(opts: LayoutRunnerOptions): LayoutRunner {
   const { db, cfg, log } = opts;
-  const intervalMs = opts.intervalMs ?? cfg.layout.interval_ms;
+  // 默认 0：节奏由 P2-17 调度器持有（避免两条调度链）
+  const intervalMs = opts.intervalMs ?? 0;
 
   let timer: NodeJS.Timeout | undefined;
   let running = false;

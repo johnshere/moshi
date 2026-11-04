@@ -21,8 +21,10 @@ import {
   type ProcedureOptions,
 } from '../core/lifecycle/consolidate.js';
 import { harvest, type HarvestResult } from '../core/write/harvest.js';
+import { nowIso } from '../domain/time.js';
 import { countPending, countErrors } from '../infra/sqlite/annotationRepo.js';
 import type { Db } from '../infra/sqlite/db.js';
+import { setMeta } from '../infra/sqlite/metaRepo.js';
 
 /** 只用到 info/error 两条，避免把 pino 的类型拖进 app 层 */
 export interface HarvestRunnerLog {
@@ -86,6 +88,9 @@ export function startHarvestRunner(opts: HarvestRunnerOptions): HarvestRunner {
   const runOnce = async (): Promise<HarvestResult> => {
     const startedAt = performance.now();
     const res = await harvest(db, { batchSize, maxBatches });
+    // 详设 §8.6：harvest 成功即更新 last_harvest_at（/api/diag 与首次引导页都读它）。
+    // 调度器任务路径也会写一次，两处幂等（同一时刻只会有一条写者）。
+    setMeta(db, 'last_harvest_at', nowIso());
     // 只在真有变化或出错时写日志，空转不刷屏
     if (res.created + res.refreshed + res.superseded + res.coexist > 0 || res.failed > 0) {
       log?.info(

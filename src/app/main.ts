@@ -15,6 +15,7 @@ import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
 import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRunner.js';
 import { startCommunityRunner, type CommunityRunner } from './communityRunner.js';
 import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
+import { startScheduler, type Scheduler } from './jobs/scheduler.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { VERSION } from './version.js';
@@ -67,6 +68,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let communityRunner: CommunityRunner | undefined;
   let collectRunner: CollectRunner | undefined;
   let layoutRunner: LayoutRunner | undefined;
+  let scheduler: Scheduler | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
@@ -169,6 +171,20 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.error({ event: 'layout.start.failed', err: (err as Error).message }, 'layout runner failed');
   }
 
+  // P2-17 调度器：cron + after 依赖 + 单写者串行（并发 1）。collect/layout 的内部
+  // 定时器已收回，采集扫描改由调度器的 collect 伪任务驱动、布局挂在 export 之后
+  // （D-69 / D-73 收口）。harvest/schema/community 的 runner 保留以复用 runOnce。
+  try {
+    scheduler = startScheduler({
+      db: instance.db,
+      cfg,
+      log,
+      collect: () => collectRunner?.runOnce() ?? null,
+    });
+  } catch (err) {
+    log.error({ event: 'scheduler.start.failed', err: (err as Error).message }, 'scheduler failed');
+  }
+
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
   // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
@@ -194,6 +210,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   const shutdown = async (signal: string): Promise<void> => {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');
     // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
+    scheduler?.stop();
     runner?.stop();
     schemaRunner?.stop();
     communityRunner?.stop();

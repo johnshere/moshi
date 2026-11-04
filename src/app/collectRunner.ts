@@ -1,10 +1,10 @@
 /**
- * 采集扫描的后台驱动（P2-21 的生产调用点）。
+ * 采集扫描的后台驱动（P2-21 / P2-17 收口）。
  *
- * 台账 P2-21 的产出写的是"挂到 P2-17 调度器"，但 P2-17 还没开工。为了不让
- * 扫描器继续当死代码（DoD 第 6 条），这里先用一个自足的定时器接上：与
- * `harvestRunner` 同一套路（`setInterval` + `wake()` + 单轮不重入），
- * 等 P2-17 落地后再把驱动换成调度器，扫描逻辑不用动。
+ * P2-17 起由 `app/jobs/scheduler.ts` 持有扫描节奏（按 `collect.interval_ms` 在
+ * 串行队列里触发 `runOnce()`），本 runner **默认不再自装定时器**——否则 daemon
+ * 日志里同一个采集任务会出现两条调度链。只有显式传 `intervalMs > 0` 时才自调度
+ * （独立使用/测试）。扫描逻辑本身不变。
  *
  * 职责边界：
  * - 只负责"定时跑一遍 `scanAllSources`"，解析/入队/预算全在 `core/collect/scanner.ts`；
@@ -66,7 +66,8 @@ export function collectConfigOf(cfg: Config) {
 
 export function startCollectRunner(opts: CollectRunnerOptions): CollectRunner {
   const { db, cfg, log } = opts;
-  const intervalMs = opts.intervalMs ?? cfg.collect.interval_ms;
+  // 默认 0：节奏由 P2-17 调度器持有（避免两条调度链）
+  const intervalMs = opts.intervalMs ?? 0;
   const sources = opts.sources ?? cfg.ingest.sources;
 
   const st: CollectRunnerState = {
