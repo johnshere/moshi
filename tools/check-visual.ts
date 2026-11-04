@@ -93,8 +93,7 @@ function matchesInLine(line: string): string[] {
 }
 
 function displayPath(abs: string, root: string): string {
-  const relCwd = path.relative(process.cwd(), abs);
-  if (!relCwd.startsWith('..') && !path.isAbsolute(relCwd)) return toSlashes(relCwd);
+  // 始终相对扫描根：结果与 cwd 无关（TEMP 位于工程内时也能稳定断言）。
   return toSlashes(path.relative(root, abs));
 }
 
