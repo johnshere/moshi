@@ -94,6 +94,12 @@ export interface SchedulerOptions {
   jobs?: readonly SchedulerJob[];
   /** collectRunner.runOnce 的注入点；不传则不驱动采集扫描 */
   collect?: () => Promise<unknown> | unknown;
+  /**
+   * harvestRunner.runOnce 的注入点：cron 到点时复用 daemon 里那一个 runner，
+   * 让「唤醒 / 15s 兜底 / 03:00 cron」三条触发源共用同一条单飞链路（P2-17 收口）。
+   * 不传则直接调核心 `harvest()`（测试与独立进程用）。
+   */
+  harvest?: () => Promise<unknown> | unknown;
   /** 覆盖单任务超时（测试用） */
   timeoutMs?: number;
   /** 自动 tick 周期；0 = 不装定时器（测试用） */
@@ -239,7 +245,10 @@ function pruneBackups(backupsDir: string, keep: number, roots: readonly string[]
   return stale.length;
 }
 
-function buildDefaultJobs(cfg: Config): SchedulerJob[] {
+function buildDefaultJobs(
+  cfg: Config,
+  harvestRun?: () => Promise<unknown> | unknown,
+): SchedulerJob[] {
   return [
     {
       name: 'backup',
@@ -259,7 +268,10 @@ function buildDefaultJobs(cfg: Config): SchedulerJob[] {
       cron: cfg.ingest.harvest_cron,
       priority: 10,
       async run({ db, cfg: c }) {
-        const res = await harvest(db, { batchSize: c.ingest.harvest_batch, maxBatches: 8 });
+        const res =
+          harvestRun !== undefined
+            ? await harvestRun()
+            : await harvest(db, { batchSize: c.ingest.harvest_batch, maxBatches: 8 });
         // 详设 §8.6：meta.last_harvest_at 必须更新，/api/diag 与首次引导页都读它
         setMeta(db, 'last_harvest_at', nowIso());
         return res;
@@ -315,7 +327,7 @@ const TIMEOUT = Symbol('timeout');
 export function startScheduler(opts: SchedulerOptions): Scheduler {
   const { db, cfg, log } = opts;
   const jobs = new Map<string, SchedulerJob>();
-  for (const job of opts.jobs ?? buildDefaultJobs(cfg)) jobs.set(job.name, job);
+  for (const job of opts.jobs ?? buildDefaultJobs(cfg, opts.harvest)) jobs.set(job.name, job);
   const specs = new Map<string, CronSpec>();
   for (const job of jobs.values()) {
     if (job.cron !== undefined) specs.set(job.name, parseCron(job.cron));

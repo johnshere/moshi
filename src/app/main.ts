@@ -180,6 +180,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       cfg,
       log,
       collect: () => collectRunner?.runOnce() ?? null,
+      harvest: () => runner?.runOnce() ?? null,
     });
   } catch (err) {
     log.error({ event: 'scheduler.start.failed', err: (err as Error).message }, 'scheduler failed');
