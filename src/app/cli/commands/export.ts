@@ -1,45 +1,20 @@
 /**
- * `moshi export`（详设 §9.1–§9.4；台账 P1-21）。
+ * `moshi export`（详设 §9.1–§9.4；台账 P1-21 / P2-15）。
  *
- * 把 `core/archive` 的归档结果落到 `storage.archive_dir`：一个主题一个 `<slug>.md`，
- * 内容是 frontmatter（topic_id / slug / revision / derived_at / content_hash / 统计）
- * 加渲染正文。只有 `content_hash` 变了的主题才写盘——增量语义在 `archiveAll` 里，
- * 这里只负责把 `changedDocs` 落文件。
+ * 本命令只做参数解析、打开库、调 `archiveAll` 与打印：渲染/判定/落盘全在
+ * `core/archive`（guard + writer）。这样 CLI 与调度器（P2-17）走同一条写盘路径，
+ * 人工编辑保护不会因为入口不同而漏掉。
  *
- * 主题为 0 不是错误：`selectTopics` 要求社区划分（P2-11）产出 `community_id`，
- * 没划分时真实库必然导出 0 篇，命令如实打印并退出 0。
+ * 输出首行保持旧契约：`导出 N 篇（写盘 W、未变 U）→ outDir，Xms`；
+ * 有待合并主题时另起一行，但首行字段不受影响（旧测试与外部脚本依赖）。
  */
-import path from 'node:path';
 import { archiveAll } from '../../../core/archive/index.js';
-import type { ArchiveDoc } from '../../../core/archive/render.js';
+import { writeArchiveLedger } from '../../../core/archive/topic.js';
 import { expandHome } from '../../config.js';
-import { safeEnsureDir, safeWriteFile } from '../../../infra/fs/safeWrite.js';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { ensureDataDirs } from '../../lifecycle.js';
 import type { Command } from '../types.js';
-
-/** frontmatter；`derived_at` 每次导出都变，但它不进 content_hash（P1-15） */
-export function frontmatterOf(doc: ArchiveDoc): string {
-  return [
-    '---',
-    `topic_id: ${doc.topicId}`,
-    `slug: ${doc.slug}`,
-    `title: ${doc.title}`,
-    `revision: ${doc.revision}`,
-    `derived_at: ${doc.derivedAt}`,
-    `content_hash: ${doc.contentHash}`,
-    `fact_count: ${doc.factCount}`,
-    `edge_count: ${doc.edgeCount}`,
-    `confidence_avg: ${doc.confidenceAvg.toFixed(3)}`,
-    `strength_avg: ${doc.strengthAvg.toFixed(3)}`,
-    '---',
-  ].join('\n');
-}
-
-export function archiveFileName(doc: ArchiveDoc): string {
-  return `${doc.slug}.md`;
-}
 
 export const exportCommand: Command = {
   name: 'export',
@@ -57,24 +32,28 @@ export const exportCommand: Command = {
     try {
       migrate(db, { backupsDir: paths.backups });
       const started = Date.now();
-      const res = archiveAll(db);
+      // 白名单：只允许写 archive_dir 与数据根；`--out` 指到别处会在 writer 里被拒（E_ACCESS）
+      const roots = [ctx.cfg.storage.archive_dir, paths.root];
+      const res = archiveAll(db, { archiveDir: outDir, roots });
+      const elapsed = Date.now() - started;
 
       if (res.docs.length === 0) {
         ctx.stdout('导出 0 篇：没有达标主题（社区未划分时 selectTopics 为空，属预期）\n');
         return 0;
       }
 
-      // 白名单：只允许写 archive_dir 与数据根；`--out` 指到别处会在这里被拒（E_ACCESS）
-      const roots = [ctx.cfg.storage.archive_dir, paths.root];
-      safeEnsureDir(outDir, roots);
-      for (const doc of res.changedDocs) {
-        safeWriteFile(path.join(outDir, archiveFileName(doc)), `${frontmatterOf(doc)}\n\n${doc.body}\n`, roots);
-      }
-
-      const unchanged = res.docs.length - res.changedDocs.length;
+      const unchanged = res.docs.length - res.changedDocs.length - res.proposedDocs.length;
       ctx.stdout(
-        `导出 ${res.docs.length} 篇（写盘 ${res.changedDocs.length}、未变 ${unchanged}）→ ${outDir}，${Date.now() - started}ms\n`,
+        `导出 ${res.docs.length} 篇（写盘 ${res.changedDocs.length}、未变 ${unchanged}）→ ${outDir}，${elapsed}ms\n`,
       );
+      if (res.proposed > 0) {
+        ctx.stdout(`待合并 ${res.proposed} 篇（已写 .proposed.md，等待三选一）→ ${outDir}\n`);
+      }
+      // 台账（详设 §9.6）：以 DB 为准重建；旧台账与 DB 的差异提示出来供 doctor 消费
+      const ledger = writeArchiveLedger(db, { archiveDir: outDir, roots });
+      if (!ledger.consistent) {
+        ctx.stdout(`台账与 DB 有 ${ledger.differences.length} 处差异（以 DB 为准，已重建）→ ${ledger.path}\n`);
+      }
       return 0;
     } finally {
       closeDb(db);
