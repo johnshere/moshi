@@ -32,8 +32,8 @@
     "accept:ui": "tsx tools/accept-ui.ts",
     "bench": "tsx tools/bench.ts",
     "seed:devdb": "tsx tools/seed-devdb.ts",
-    "setup:sidecar": "node scripts/setup-sidecar.mjs --force",
-    "postinstall": "node scripts/setup-sidecar.mjs --hook"
+    "setup:env": "node scripts/setup-env.mjs --force",
+    "postinstall": "node scripts/setup-env.mjs --hook"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",

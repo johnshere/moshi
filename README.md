@@ -14,12 +14,13 @@
 | Python | **>=3.11**，**可选** | 最低版本 | 只有 sidecar（embedding 编码 / GAT 前向）需要；不装则退纯符号模式，测试里相关用例自动 skip，不阻塞 `pnpm verify` |
 | 磁盘 | 任意 | — | 库是 SQLite + FTS5，10k 事实约 5MB；机械盘可用（WAL + `synchronous=NORMAL`） |
 
-python 依赖见 `sidecar/requirements.txt`（`pywin32` / `onnxruntime` / `tokenizers` / `numpy`），模型权重不进 git。
+sidecar 依赖见 `sidecar/requirements.txt`（torch CPU / sentence-transformers / numpy / pywin32），由 `pnpm setup:env` 构建（建 venv + 装依赖 + 拉模型权重，权重不进 git）。
 
 ## 快速开始
 
 ```bash
-pnpm install          # 装依赖（会按 pnpm-workspace.yaml 的 onlyBuiltDependencies 只编译白名单里的包）
+pnpm install          # 装依赖（postinstall 自动判定 sidecar 环境，不合格才构建；失败不红，可稍后手动补）
+pnpm setup:env        # 构建 sidecar 环境（venv + 依赖 + 模型权重）；--check 只判定、--force 强制重建
 pnpm build            # tsc 编译 + 拷贝静态资源到 dist/
 pnpm verify           # typecheck + 四条 lint + 全部测试，提交前必过
 node dist/app/main.js init   # 建 ~/.moshi、初始化库、打印 MCP 配置、拉起界面
@@ -35,6 +36,7 @@ node dist/app/main.js init   # 建 ~/.moshi、初始化库、打印 MCP 配置�
 | `moshi eval run` | 跑 golden set 评估（需要 `~/.moshi/golden/golden.jsonl`） |
 | `moshi export --all` | 导出主题归档文档 |
 | `moshi version` | 打印版本 |
+| `pnpm setup:env` | 构建/重建 sidecar 环境（venv + 依赖 + 模型权重）；`--check` 只判定、`--force` 强制重建（`pnpm install` 的 postinstall 已自动做初次判定） |
 
 数据目录默认 `~/.moshi`（可用 `MOSHI_CONFIG` 指到别的配置文件）。配置模板见 `config.example.toml`。
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * sidecar 开发环境供给 CLI（P3-A8）。
+ * 开发环境供给 CLI（P3-A3 遗留；B-7 / I-55 并入本卡）。后续新增环境（如训练）沿用本脚本。
  *
  * 语义（用户 2026-11-05 拍板）：
  *   - 默认（无参数）：初次判定——venv 合格就跳过，不合格就重建；失败硬退出（exit 1）
- *   - --force      ：无条件删掉重建（`pnpm setup:sidecar` 用）
+ *   - --force      ：无条件删掉重建（`pnpm setup:env` 用）
  *   - --hook       ：初次判定，但失败只警告不红（`pnpm install` 的 postinstall 用）
  *   - --check      ：只判定输出，不构建
  *
@@ -36,8 +36,8 @@ const REQ_FILE = path.join(MODULE_DIR, 'requirements.txt');
 const FETCH_MODEL = path.join(MODULE_DIR, 'fetch_model.py');
 const PLATFORM = process.platform;
 
-const say = (m) => console.log(`[setup-sidecar] ${m}`);
-const warn = (m) => console.error(`[setup-sidecar][警告] ${m}`);
+const say = (m) => console.log(`[setup-env] ${m}`);
+const warn = (m) => console.error(`[setup-env][警告] ${m}`);
 
 /** 跑命令；退出码 0 返回 stdout，否则返回 { code, stdout, stderr } */
 function run(cmd, args, { inherit = false, timeout = 600_000 } = {}) {
@@ -134,12 +134,12 @@ function main() {
   }
   if (args.help) {
     console.log([
-      '用法：node scripts/setup-sidecar.mjs [--force | --hook | --check]',
+      '用法：node scripts/setup-env.mjs [--force | --hook | --check]',
       '',
-      'sidecar 开发环境供给（P3-A8）：建/检 sidecar/.venv、装依赖、拉模型权重。',
+      '开发环境供给（P3-A3 遗留）：建/检 sidecar/.venv、装依赖、拉模型权重。',
       '',
       '  （默认） 初次判定：venv 合格跳过，不合格重建；失败退出码 1',
-      '  --force  无条件删掉重建（pnpm setup:sidecar）',
+      '  --force  无条件删掉重建（pnpm setup:env）',
       '  --hook   初次判定；失败只警告、退出码 0（pnpm install postinstall）',
       '  --check  只判定输出，不构建；不合格退出码 3',
       '  --help   显示本帮助',
@@ -178,7 +178,7 @@ function main() {
     });
 
     if (args.check) {
-      console.log(`[setup-sidecar][check] ${verdict.ok ? '合格' : `不合格：${verdict.reason}（${verdict.detail}）`}`);
+      console.log(`[setup-env][check] ${verdict.ok ? '合格' : `不合格：${verdict.reason}（${verdict.detail}）`}`);
       return verdict.ok ? 0 : 3;
     }
 

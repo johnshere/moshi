@@ -1,6 +1,6 @@
 # P3-A3 嵌入改回 torch（sentence-transformers）
 
-状态：WIP（2026-11-05 19:55 开工；21:35 代码提交，收口被 B-7 阻断）
+状态：WIP（2026-11-05 19:55 开工；21:35 代码提交，收口被 B-7 阻断；23:35 环境供给遗留落盘，23:50 改名 setup-env 并归位本卡）
 
 ## 已落盘
 
@@ -33,9 +33,16 @@
 - 详见 `docs/待处理-sidecar-venv低完整性标签.md`。
 - vec-sync 真 sidecar 全链路 3/3 通过（临时目录在工程内，同为低完整性，所以不受影响）。
 
-## 剩余（B-7 解决后）
+## 环境供给遗留（2026-11-05 并入本卡，B-7 按工程缺陷处理，D-149）
 
-1. 本机库重编码 `fact_vec`（期望 478/478）；
+- 已落盘：`scripts/setup-lib.mjs`（纯逻辑）+ `setup-lib.d.mts`、`scripts/setup-env.mjs`（CLI，默认初次判定 / --force / --hook / --check）、`tests/unit/setup-env.test.ts`（13 例）、package.json 的 `setup:env`（--force）与 `postinstall`（--hook）、README 用法。
+- 判定 = venv 存在 + 写主目录探测 + import 编码栈 + 模型权重 + 依赖声明 hash（锁文件优先，锁文件工具选型待定）。
+- 本机实测 `--check`：写探测通过、缺 torch、缺模型、hash 不一致 → `E_MODULE_MISSING` exit 3；verify 全绿（115 files / 1384 passed / 3 skipped）。
+- 待办：运行时侧接线（resolvePython 写探测 + 原因码 + server.py --selftest，I-55）；低完整性 fixture 回归（`icacls /setintegritylevel L` 迷你 venv）；锁文件工具选型。
+
+## 剩余（依赖装好后）
+
+1. `pnpm setup:env` 装 torch 单栈 → 本机库重编码 `fact_vec`（60 条）；
 2. `eval --golden v1 --vector` 四类通过，复核地板 0.6；
 3. `sidecar.test.ts` 不再 skip（探测超时问题见 I-55）；
 4. verify + build；台账收口，改名 `.done.md`。
