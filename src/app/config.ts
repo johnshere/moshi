@@ -117,7 +117,8 @@ const RetrievalSchema = z
     vector_topk: positiveInt.default(20),
     // 向量召回地板：低于该 cos 的邻居不进候选（P1-29；实测拒答句对库内事实最高 0.445，
     // 相关问句 0.73~0.89，0.5 是两者之间的自然分界）
-    vector_min_sim: prob.default(0.5),
+    // 地板按真模型标定（D-148）：torch 原版权重下拒答负例最高 cos 0.520、正例最低 0.692
+    vector_min_sim: prob.default(0.6),
     bm25_topk: positiveInt.default(20),
     ppr_topk: positiveInt.default(20),
     ppr_damping: prob.default(0.85),
@@ -165,7 +166,8 @@ const SidecarSchema = z
     socket_path: z.string().default('~/.moshi/sidecar.sock'),
     idle_unload_min: z.number().min(0).default(5),
     idle_exit_min: z.number().min(0).default(30),
-    startup_timeout_ms: positiveInt.default(5000),
+    // 首次拉起要 import torch 栈（实测 ~11.3s，D-147）；放宽到 20s 才等得到就绪文件
+    startup_timeout_ms: positiveInt.default(20_000),
     encode_timeout_ms: positiveInt.default(2000),
     score_timeout_ms: positiveInt.default(120),
     max_restarts_per_hour: positiveInt.default(3),

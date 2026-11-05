@@ -37,7 +37,7 @@ const resolved = resolvePython({
 });
 const pythonOk = resolved !== null;
 const pythonPath: string = resolved?.path ?? '';
-const modelOk = existsSync(path.join(MODEL_DIR, 'onnx', 'model.onnx'));
+const modelOk = existsSync(path.join(MODEL_DIR, 'model.safetensors'));
 
 const dirs: string[] = [];
 afterEach(() => {

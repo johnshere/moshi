@@ -67,7 +67,7 @@ export interface SearchParams {
 
 export const DEFAULT_PARAMS: SearchParams = {
   vectorTopK: 20,
-  vectorMinSim: 0.5,
+  vectorMinSim: 0.6,
   bm25TopK: 20,
   pprTopK: 20,
   pprDamping: 0.85,

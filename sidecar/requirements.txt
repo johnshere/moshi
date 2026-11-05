@@ -13,8 +13,5 @@ numpy>=1.26
 torch>=2.5
 sentence-transformers>=3.0
 torch_geometric>=2.5
-# 过渡：encode.py 当前仍走 ONNX，P3-A3 改回 torch 后删除这两行
-onnxruntime>=1.20
-tokenizers>=0.20
 # 测试（sidecar/tests 契约测试，P3-00 起）
 pytest>=8

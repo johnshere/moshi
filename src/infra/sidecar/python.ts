@@ -38,8 +38,8 @@ export interface ResolvePythonOptions {
 export const SIDECAR_BASE_MODULES: readonly string[] =
   process.platform === 'win32' ? ['win32pipe', 'win32file'] : [];
 
-/** 嵌入编码栈（encode.py 当前实现；P3-A3 改回 torch 时同步改这里） */
-export const SIDECAR_ENCODE_MODULES: readonly string[] = ['onnxruntime', 'tokenizers'];
+/** 嵌入编码栈（encode.py：torch 单栈，D-143） */
+export const SIDECAR_ENCODE_MODULES: readonly string[] = ['torch', 'sentence_transformers'];
 
 const defaultRun: ProbeRunner = (cmd, args) => {
   const r = spawnSync(cmd, args, { encoding: 'utf8', timeout: 15_000, windowsHide: true });

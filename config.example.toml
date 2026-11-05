@@ -65,6 +65,7 @@ ppr_damping = 0.85
 ppr_iters = 20
 ppr_max_nodes = 400
 rrf_k = 60
+vector_min_sim = 0.6        # 向量召回相关性地板（真模型标定：拒答负例上限 0.520、正例下限 0.692）
 entity_bonus = 0.25
 temporal_bonus = 0.20
 
@@ -90,7 +91,7 @@ python_path = ""            # 空 = 自动探测：MOSHI_PYTHON → sidecar/.ven
 socket_path = "~/.moshi/sidecar.sock"
 idle_unload_min = 5
 idle_exit_min = 30
-startup_timeout_ms = 5000
+startup_timeout_ms = 20000  # 首次拉起要 import torch 栈（实测 ~11.3s）
 encode_timeout_ms = 2000
 score_timeout_ms = 120
 max_restarts_per_hour = 3
