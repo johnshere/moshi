@@ -15,29 +15,22 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/app/config.js';
 import { EMBED_DIM } from '../../src/domain/embedding.js';
 import { SidecarClient } from '../../src/infra/sidecar/client.js';
+import { resolvePython, SIDECAR_BASE_MODULES, SIDECAR_ENCODE_MODULES } from '../../src/infra/sidecar/python.js';
 
 // P1-28 起 sidecar 要真跑 ONNX（onnxruntime + tokenizers + 模型权重），
 // 优先用工程内 venv（sidecar/.venv，见 sidecar/requirements.txt）；缺栈/缺权重整组跳过。
 // 注意：沙箱 shim（Get-Command python 的 Source）对 Node spawn 不可见（ENOENT），
 // 候选必须是真实 python.exe。
 const REPO_ROOT = path.resolve(import.meta.dirname ?? process.cwd(), '../..');
-const VENV_PYTHON = path.join(REPO_ROOT, 'sidecar', '.venv', 'Scripts', 'python.exe');
 const MODEL_DIR = path.join(REPO_ROOT, 'sidecar', 'models', 'bge-small-zh-v1.5');
-const USER_PYTHON = 'C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
-const CANDIDATES = [VENV_PYTHON, process.env.PYTHON ?? '', USER_PYTHON, 'python'].filter((s) => s !== '');
-
-let pythonOk = false;
-let pythonPath: string = VENV_PYTHON;
-for (const cand of CANDIDATES) {
-  try {
-    execSync(`"${cand}" -c "import win32pipe, win32file, onnxruntime, tokenizers"`, { stdio: 'ignore' });
-    pythonPath = cand;
-    pythonOk = true;
-    break;
-  } catch {
-    // 下一个候选
-  }
-}
+// P3-A2：与 daemon 同一套运行时探测，不再写死某台机器的路径
+const resolved = resolvePython({
+  configured: '',
+  moduleDir: path.join(REPO_ROOT, 'sidecar'),
+  modules: [...SIDECAR_BASE_MODULES, ...SIDECAR_ENCODE_MODULES],
+});
+const pythonOk = resolved !== null;
+const pythonPath: string = resolved?.path ?? '';
 const modelOk = existsSync(path.join(MODEL_DIR, 'onnx', 'model.onnx'));
 
 const dirs: string[] = [];

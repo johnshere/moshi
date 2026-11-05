@@ -18,6 +18,8 @@ import { countFts, syncMissingFts } from '../../../infra/sqlite/ftsRepo.js';
 import { closeReversedSupersedes, rebuildDegree, rebuildFts } from '../../../infra/sqlite/maintenance.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { countFact } from '../../../infra/vec/index.js';
+import { resolvePython } from '../../../infra/sidecar/python.js';
+import { defaultSidecarModuleDir } from '../../../infra/sidecar/spawn.js';
 import { collectDiagReport } from '../../../core/diag/collect.js';
 import { invariantFailures } from '../../../core/diag/invariants.js';
 import { dataPaths } from '../../config.js';
@@ -169,6 +171,12 @@ export const doctorCommand: Command = {
         weights_path: ctx.cfg.model.gat_weights,
       });
       printReport(ctx.stdout, report);
+      const py = resolvePython({ configured: ctx.cfg.sidecar.python_path, moduleDir: defaultSidecarModuleDir() });
+      ctx.stdout(
+        py === null
+          ? 'Python   未找到可用解释器（纯符号模式）\n'
+          : `Python   ${py.path}（来源 ${py.source}）\n`,
+      );
       return doctorExitCode(report);
     } finally {
       closeDb(db);

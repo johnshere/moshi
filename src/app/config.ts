@@ -157,7 +157,8 @@ const ReadSchema = z
 
 const SidecarSchema = z
   .object({
-    python_path: z.string().default('~/.moshi/python/bin/python'),
+    // 空 = 运行时探测（infra/sidecar/python.ts：MOSHI_PYTHON → sidecar/.venv → py -3 → PATH）
+    python_path: z.string().default(''),
     // 命名管道名。同一台机跑多个实例（daemon + 测试 / 双仓库）时各用各的，
     // 否则会连到别人的 sidecar 上（P1-28 期间实测到）。
     pipe_name: z.string().default(SIDECAR_PIPE_NAME),
@@ -388,7 +389,8 @@ export function loadConfig(opts: LoadOptions = {}): Config {
   for (const { section, key } of PATH_KEYS) {
     const bag = cfg[section] as unknown as Record<string, unknown>;
     const value = bag[key];
-    if (typeof value === 'string') bag[key] = expandHome(value, home);
+    // 空串是「未配置」（如 python_path 走探测），不能被 resolve 成 cwd
+    if (typeof value === 'string' && value !== '') bag[key] = expandHome(value, home);
   }
 
   return cfg;

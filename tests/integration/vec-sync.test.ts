@@ -6,7 +6,6 @@
  *    KNN 查询命中近邻（依赖 python，缺了 skipIf 整组跳过）
  * C. 降级：meta.vector_disabled → knn 返回空、sync 跳过（doctor I9 口径）
  */
-import { execSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -15,6 +14,7 @@ import { loadConfig } from '../../src/app/config.js';
 import { closeDb, openDb } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { SidecarClient } from '../../src/infra/sidecar/client.js';
+import { resolvePython, SIDECAR_BASE_MODULES, SIDECAR_ENCODE_MODULES } from '../../src/infra/sidecar/python.js';
 import {
   countFact,
   countVec,
@@ -28,23 +28,15 @@ import {
 
 // P1-28 起编码走真 ONNX 模型：优先工程内 venv；缺栈/缺权重则跳过真进程用例。
 const REPO_ROOT = path.resolve(import.meta.dirname ?? process.cwd(), '../..');
-const VENV_PYTHON = path.join(REPO_ROOT, 'sidecar', '.venv', 'Scripts', 'python.exe');
 const MODEL_DIR = path.join(REPO_ROOT, 'sidecar', 'models', 'bge-small-zh-v1.5');
-const USER_PYTHON = 'C:\\Users\\john\\AppData\\Local\\Programs\\Python\\Python313\\python.exe';
-const CANDIDATES = [VENV_PYTHON, process.env.PYTHON ?? '', USER_PYTHON, 'python'].filter((s) => s !== '');
-
-let pythonOk = false;
-let pythonPath: string = VENV_PYTHON;
-for (const cand of CANDIDATES) {
-  try {
-    execSync(`"${cand}" -c "import win32pipe, win32file, onnxruntime, tokenizers"`, { stdio: 'ignore' });
-    pythonPath = cand;
-    pythonOk = true;
-    break;
-  } catch {
-    // 下一个候选
-  }
-}
+// P3-A2：与 daemon 同一套运行时探测，不再写死某台机器的路径
+const resolved = resolvePython({
+  configured: '',
+  moduleDir: path.join(REPO_ROOT, 'sidecar'),
+  modules: [...SIDECAR_BASE_MODULES, ...SIDECAR_ENCODE_MODULES],
+});
+const pythonOk = resolved !== null;
+const pythonPath: string = resolved?.path ?? '';
 const modelOk = existsSync(path.join(MODEL_DIR, 'onnx', 'model.onnx'));
 
 const dirs: string[] = [];

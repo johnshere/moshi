@@ -1,12 +1,20 @@
-# moshi sidecar 依赖（详设 §7.1：不引 FastAPI，标准库 + pywin32 + ONNX 推理栈）
+# moshi sidecar 依赖（详设 §7.1：不引 FastAPI；推理统一 torch 单栈，D-143）
 # Windows 命名管道需要 pywin32；unix 平台可去掉。
 #
-# 装法（独立 venv，别污染全局解释器）：
-#   py -3 -m venv sidecar/.venv
-#   sidecar/.venv/Scripts/python.exe -m pip install -r sidecar/requirements.txt
+# 装法（工程内独立 venv，别污染全局解释器；Python 3.13 x64）：
+#   py -m venv sidecar/.venv
+#   sidecar/.venv/Scripts/python.exe -m pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r sidecar/requirements.txt
 #   sidecar/.venv/Scripts/python.exe sidecar/fetch_model.py
-# 模型权重不进 git（见 .gitignore 的 sidecar/models/）。
+# daemon / 测试会自动探测这个 venv（src/infra/sidecar/python.ts），不需要配置 python_path。
+# 模型权重与 venv 都不进 git（见 .gitignore）。
 pywin32>=312
+numpy>=1.26
+# 推理栈：嵌入（sentence-transformers）与 GAT（PyG）共用一份 torch（Windows PyPI 轮子即 CPU 版）
+torch>=2.5
+sentence-transformers>=3.0
+torch_geometric>=2.5
+# 过渡：encode.py 当前仍走 ONNX，P3-A3 改回 torch 后删除这两行
 onnxruntime>=1.20
 tokenizers>=0.20
-numpy>=1.26
+# 测试（sidecar/tests 契约测试，P3-00 起）
+pytest>=8

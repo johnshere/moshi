@@ -25,6 +25,7 @@ import {
   type ReadyInfo,
   type SpawnedSidecar,
 } from './spawn.js';
+import { resolvePython } from './python.js';
 
 export type SidecarState = 'stopped' | 'starting' | 'ready' | 'unloaded' | 'failed';
 export type SidecarMode = 'on' | 'off';
@@ -62,6 +63,8 @@ export interface SidecarClientDeps {
     startupTimeoutMs: number;
   }) => SpawnedSidecar;
   now?: () => number;
+  /** 测试注入点：解释器探测 */
+  resolvePython?: typeof resolvePython;
 }
 
 const HOUR_MS = 3_600_000;
@@ -76,6 +79,7 @@ export class SidecarClient {
   private restartWindowStart = 0;
   private lastActivityAt: number | null = null;
   private startingPromise: Promise<void> | null = null;
+  private resolvedPython: string | null = null;
   private readonly idleTimer: NodeJS.Timeout;
 
   constructor(private readonly deps: SidecarClientDeps) {
@@ -225,10 +229,29 @@ export class SidecarClient {
     return this.deps.createTransport ? this.deps.createTransport(target) : connectTransport(target);
   }
 
+  /** 首次拉起时探测一次并缓存；找不到解释器 → 抛错，按启动失败计数（最终熔断为纯符号） */
+  private pythonPath(moduleDir: string): string {
+    if (this.resolvedPython === null) {
+      const found = (this.deps.resolvePython ?? resolvePython)({
+        configured: this.deps.cfg.sidecar.python_path,
+        moduleDir,
+      });
+      if (found === null) throw new Error('未找到可用的 Python 解释器（纯符号模式）');
+      this.resolvedPython = found.path;
+      this.deps.logger.info({ event: 'sidecar.python', path: found.path, source: found.source }, 'sidecar python');
+    }
+    return this.resolvedPython;
+  }
+
   private spawnSidecarProcess(): SpawnedSidecar {
+    const moduleDir = defaultSidecarModuleDir();
     const opts = {
-      pythonPath: this.deps.cfg.sidecar.python_path,
-      moduleDir: defaultSidecarModuleDir(),
+      // 注入了假 spawn（单测）且没注入探测时不真探测，避免单测去跑本机解释器
+      pythonPath:
+        this.deps.spawn !== undefined && this.deps.resolvePython === undefined
+          ? this.deps.cfg.sidecar.python_path
+          : this.pythonPath(moduleDir),
+      moduleDir,
       readyPath: path.join(this.deps.cfg.storage.data_dir, 'sidecar.ready'),
       pipeName: this.deps.cfg.sidecar.pipe_name,
       model: this.deps.cfg.model.embed_model,
