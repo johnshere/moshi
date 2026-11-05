@@ -9,7 +9,6 @@ coverage/
 .claude/
 .workbuddy-ai/
 # 测试用临时目录
-/temp
 .tmp/
 .tmp-smoke/
 # 构建/验证时的工程内 TEMP 重定向（AGENTS.md DoD 要求，产物不落系统 temp）
