@@ -371,6 +371,7 @@ export function startScheduler(opts: SchedulerOptions): Scheduler {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
   let lastCollectAt = 0;
+  let lastLayoutAt = clock().getTime();
 
   const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
     state.queued += 1;
@@ -476,6 +477,13 @@ export function startScheduler(opts: SchedulerOptions): Scheduler {
     return now.getTime() - lastCollectAt >= cfg.collect.interval_ms;
   };
 
+  const layoutDue = (now: Date): boolean => {
+    if (!jobs.has('layout') || !cfg.layout.enabled) return false;
+    if (cfg.layout.interval_ms <= 0) return false;
+    if (now.getTime() - lastLayoutAt < cfg.layout.interval_ms) return false;
+    return countUnlaidFacts(db) > 0;
+  };
+
   const runDue = (now: Date = clock()): Promise<JobRunResult[]> => {
     if (stopped) return Promise.resolve([]);
     const minute = Math.floor(now.getTime() / 60_000);
@@ -484,6 +492,15 @@ export function startScheduler(opts: SchedulerOptions): Scheduler {
     const names = dueNames(now);
     const collect = collectDue(now);
     if (collect) lastCollectAt = now.getTime();
+    if (names.includes('layout')) {
+      // export 链已经带上 layout：只记本轮时间，不重复追加周期任务。
+      lastLayoutAt = now.getTime();
+    } else if (layoutDue(now)) {
+      names.push('layout');
+      names.sort((a, b) => (jobs.get(a)!.priority - jobs.get(b)!.priority) || a.localeCompare(b));
+      // 排队即记录：成功/失败共用同一节奏，失败后下个周期重试。
+      lastLayoutAt = now.getTime();
+    }
     if (names.length === 0 && !collect) return Promise.resolve([]);
     return enqueue(async () => {
       const out: JobRunResult[] = [];

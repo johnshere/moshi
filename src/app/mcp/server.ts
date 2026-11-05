@@ -127,9 +127,15 @@ export function createMcpServer(deps: McpDeps): McpServer {
   return server;
 }
 
-/** 把 MCP 面挂成一个 `http.RequestListener`，交给 `boot()` 的 `handlerFactory` */
-export function createMcpHttpHandler(deps: McpDeps): http.RequestListener {
-  return (req, res) => {
+export type McpHttpHandler = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  parsedBody?: unknown,
+) => void;
+
+/** 把 MCP 面挂成 Node 处理器；Fastify 可透传已解析 body，独立 Node 入口仍自读流。 */
+export function createMcpHttpHandler(deps: McpDeps): McpHttpHandler {
+  return (req, res, parsedBody) => {
     void (async (): Promise<void> => {
       const url = new URL(req.url ?? '/', 'http://127.0.0.1');
       if (url.pathname !== MCP_PATH) {
@@ -143,10 +149,12 @@ export function createMcpHttpHandler(deps: McpDeps): http.RequestListener {
         return;
       }
 
-      let body: unknown;
+      let body = parsedBody;
       try {
-        const text = await readBody(req);
-        body = text === '' ? undefined : JSON.parse(text);
+        if (body === undefined) {
+          const text = await readBody(req);
+          body = text === '' ? undefined : JSON.parse(text);
+        }
       } catch (err) {
         rpcError(res, 400, -32700, `parse error: ${(err as Error).message}`);
         return;

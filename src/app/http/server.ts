@@ -155,7 +155,7 @@ export async function buildHttpApp(deps: HttpDeps) {
   const mcpHandler = createMcpHttpHandler(mcpDeps);
   app.post('/mcp', async (req, reply) => {
     await new Promise<void>((resolve) => {
-      mcpHandler(req.raw, reply.raw);
+      mcpHandler(req.raw, reply.raw, req.body);
       reply.raw.on('finish', resolve);
       reply.raw.on('close', resolve);
     });

@@ -200,8 +200,8 @@ export const PROPOSAL_ACTIONS: readonly ProposalActionMeta[] = [
   },
   {
     action: 'promote_human',
-    label: '人工版转正为基线，后续自动增量叠加',
-    consequence: '把当前人工版记为新基线、清掉待决状态，之后按正常导出流程继续。',
+    label: '人工版转正，后续自动更新进入提案',
+    consequence: '人工正文保持不变；后续自动更新只刷新 .proposed.md，需再次三选一后才会覆盖。',
   },
 ];
 

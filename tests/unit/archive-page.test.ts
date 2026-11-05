@@ -157,6 +157,10 @@ describe('详情态 / 重建 / 提案文案', () => {
       expect(action.label.length).toBeGreaterThan(0);
       expect(action.consequence.length).toBeGreaterThan(0);
     }
+    const promote = PROPOSAL_ACTIONS.find((a) => a.action === 'promote_human')!;
+    expect(promote.label).toBe('人工版转正，后续自动更新进入提案');
+    expect(promote.consequence).toContain('只刷新 .proposed.md');
+    expect(promote.consequence).toContain('需再次三选一');
   });
 
   it('formatProposalError 带 reason 时拼进括号', () => {

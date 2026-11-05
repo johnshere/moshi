@@ -258,12 +258,12 @@ export function applyProposal(db: Db, input: ApplyProposalInput): ApplyProposalR
 
   if (input.action === 'promote_human') {
     const contentHash = bodyHashOfDocument(mainText);
-    updateArchiveMetaState(db, meta.topicId, { contentHash, humanEdited: 0, dirty: 0 });
+    updateArchiveMetaState(db, meta.topicId, { contentHash, humanEdited: 1, dirty: 0 });
     return {
       slug: meta.slug,
       topicId: meta.topicId,
       action: input.action,
-      humanEdited: 0,
+      humanEdited: 1,
       revision: meta.revision,
       contentHash,
       path: mainFile,

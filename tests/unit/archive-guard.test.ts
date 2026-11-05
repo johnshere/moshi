@@ -286,7 +286,7 @@ describe('归档增量与人工编辑保护（P2-15）', () => {
     expect(statSync(proposed).mtimeMs).toBe(proposedMtime);
   });
 
-  it('promote_human：human_edited=0，content_hash=人工版 hash', () => {
+  it('promote_human：人工正文受保护，后续新事实只进提案，accept_auto 后才覆盖', () => {
     const { db, archiveDir, roots, main, slug } = setupEnv();
     const original = readFileSync(main, 'utf8');
     writeFileSync(main, original.replace('\n\n## 本次更新\n\n', '\n\n人工版转正。\n\n## 本次更新\n\n'));
@@ -295,17 +295,33 @@ describe('归档增量与人工编辑保护（P2-15）', () => {
 
     const before = getArchiveMeta(db, '1')!;
     const mainText = readFileSync(main, 'utf8');
-    const res = applyProposal(db, { slug, action: 'promote_human', archiveDir, roots });
+    const promoted = applyProposal(db, { slug, action: 'promote_human', archiveDir, roots });
+    const mtimeAfterPromote = statSync(main).mtimeMs;
 
-    expect(res.humanEdited).toBe(0);
-    expect(res.revision).toBe(before.revision);
-    expect(res.contentHash).toBe(bodyHashOfDocument(mainText));
+    expect(promoted.humanEdited).toBe(1);
+    expect(promoted.revision).toBe(before.revision);
+    expect(promoted.contentHash).toBe(bodyHashOfDocument(mainText));
 
-    const meta = getArchiveMeta(db, '1')!;
-    expect(meta.humanEdited).toBe(0);
-    expect(meta.contentHash).toBe(bodyHashOfDocument(mainText));
-    expect(meta.revision).toBe(before.revision);
+    addFact(db, 'c1_f9', { community: 1, content: '新增事实：转正后自动提案' });
+    const automatic = archiveAll(db, { archiveDir, roots });
+    expect(automatic.written).toBe(0);
+    expect(automatic.proposed).toBe(1);
     expect(readFileSync(main, 'utf8')).toBe(mainText);
+    expect(statSync(main).mtimeMs).toBe(mtimeAfterPromote);
+
+    const protectedMeta = getArchiveMeta(db, '1')!;
+    expect(protectedMeta.humanEdited).toBe(1);
+    expect(protectedMeta.contentHash).toBe(bodyHashOfDocument(mainText));
+    expect(protectedMeta.revision).toBe(before.revision);
+    expect(protectedMeta.lastExportedAt).toBe(before.lastExportedAt);
+
+    const proposedText = readFileSync(proposedFilePath(main, slug), 'utf8');
+    expect(proposedText).toContain('新增事实：转正后自动提案');
+    const accepted = applyProposal(db, { slug, action: 'accept_auto', archiveDir, roots });
+    expect(accepted.humanEdited).toBe(0);
+    expect(accepted.revision).toBe(before.revision + 1);
+    expect(readFileSync(main, 'utf8')).toBe(proposedText);
+    expect(getArchiveMeta(db, '1')!.humanEdited).toBe(0);
   });
 
   it('revision 每 5 版写 _history/<slug>@<date>.md', () => {

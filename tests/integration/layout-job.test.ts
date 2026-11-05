@@ -17,10 +17,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runCli } from '../../src/app/cli/index.js';
 import { dataPaths, loadConfig, type Config } from '../../src/app/config.js';
 import { runLayoutJob } from '../../src/app/jobs/layout.job.js';
+import { startScheduler } from '../../src/app/jobs/scheduler.js';
 import { startLayoutRunner } from '../../src/app/layoutRunner.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { countUnlaidFacts, listLayoutCoords, maxLayoutVersion } from '../../src/infra/sqlite/layoutRepo.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
+import * as annotationRepo from '../../src/infra/sqlite/annotationRepo.js';
 import { insertEdge, insertFact } from '../fixtures/factories.js';
 
 const TIMEOUT = 60_000;
@@ -311,6 +313,49 @@ describe('布局 job', () => {  it(
 
         runner.stop();
         expect(runner.state().running).toBe(false);
+      } finally {
+        b.close();
+      }
+    },
+    TIMEOUT,
+  );
+
+  it(
+    'H. scheduler 在 harvest 产生新事实后按周期驱动真实 layout worker',
+    async () => {
+      const b = bench();
+      try {
+        annotationRepo.insert(b.db, {
+          dedupKey: 'p2-28-layout-harvest',
+          payloadJson: JSON.stringify({
+            tool: 'bash', cmd: 'npm install', exitCode: 0, output: '+ p2-layout-pkg@1.0.0\n',
+          }),
+          channel: 'tool_parse',
+        });
+        const base = new Date(2026, 10, 4, 3, 0, 0);
+        const sched = startScheduler({
+          db: b.db,
+          cfg: { ...b.cfg, layout: { ...b.cfg.layout, interval_ms: 1000 } },
+          log: { info: () => undefined, warn: () => undefined, error: () => undefined },
+          timerMs: 0,
+          now: () => base,
+        });
+        try {
+          const harvested = await sched.runDue(base);
+          expect(harvested.map((r) => r.name)).toContain('harvest');
+          expect(harvested.map((r) => r.name)).not.toContain('layout');
+          expect(countUnlaidFacts(b.db)).toBeGreaterThan(0);
+
+          const laid = await sched.runDue(new Date(base.getTime() + 60_000));
+          expect(laid.map((r) => [r.name, r.status])).toEqual([['layout', 'ok']]);
+          const rows = listLayoutCoords(b.db);
+          expect(rows.length).toBeGreaterThan(0);
+          expect(rows.every((r) => Number.isFinite(r.x) && Number.isFinite(r.y) && Number.isFinite(r.z))).toBe(true);
+          expect(countUnlaidFacts(b.db)).toBe(0);
+          expect(maxLayoutVersion(b.db)).toBe(1);
+        } finally {
+          sched.stop();
+        }
       } finally {
         b.close();
       }

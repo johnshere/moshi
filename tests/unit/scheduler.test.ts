@@ -14,6 +14,7 @@ import { getMeta } from '../../src/infra/sqlite/metaRepo.js';
 import { loadConfig, type Config } from '../../src/app/config.js';
 import { startCollectRunner } from '../../src/app/collectRunner.js';
 import { startLayoutRunner } from '../../src/app/layoutRunner.js';
+import { insertFact } from '../fixtures/factories.js';
 import {
   createRateLimiter,
   cronMatches,
@@ -325,6 +326,112 @@ describe('限速与联动', () => {
     // 周日 05:00：独立 cron 兜底触发（图没变时走脏检查跳过，仍算一次触发）
     const sun = await sched.runDue(new Date(2026, 10, 8, 5, 0, 0));
     expect(sun.map((r) => r.name)).toContain('community');
+    sched.stop();
+  });
+});
+
+describe('周期 layout 合流（P2-28 / Z-2）', () => {
+  it('到期且有新事实才运行；未到期、零脏事实与同分钟去重均不运行', async () => {
+    const { db, cfg } = makeEnv();
+    const base = new Date(2026, 10, 4, 3, 0, 0);
+    const fast = { ...cfg, layout: { ...cfg.layout, interval_ms: 120_000 } };
+    let runs = 0;
+    const sched = startScheduler({
+      db, cfg: fast, log: fakeLog(), timerMs: 0, now: () => base,
+      jobs: [fakeJob('layout', { onRun: () => { runs += 1; } })],
+    });
+
+    expect(await sched.runDue(new Date(base.getTime() + 60_000))).toEqual([]);
+    expect(await sched.runDue(new Date(base.getTime() + 120_000))).toEqual([]);
+    expect(runs).toBe(0);
+
+    insertFact(db, { id: 'layout-dirty', content: '待布局事实' });
+    const due = await sched.runDue(new Date(base.getTime() + 180_000));
+    expect(due.map((r) => r.name)).toEqual(['layout']);
+    expect(await sched.runDue(new Date(base.getTime() + 180_000))).toEqual([]);
+    expect(runs).toBe(1);
+    sched.stop();
+  });
+
+  it('layout.enabled=false 或 interval_ms=0 时不触发', async () => {
+    const { db, cfg } = makeEnv();
+    insertFact(db, { id: 'layout-dirty', content: '待布局事实' });
+    const base = new Date(2026, 10, 4, 3, 0, 0);
+    for (const layout of [
+      { ...cfg.layout, enabled: false, interval_ms: 1000 },
+      { ...cfg.layout, enabled: true, interval_ms: 0 },
+    ]) {
+      let runs = 0;
+      const sched = startScheduler({
+        db, cfg: { ...cfg, layout }, log: fakeLog(), timerMs: 0, now: () => base,
+        jobs: [fakeJob('layout', { onRun: () => { runs += 1; } })],
+      });
+      expect(await sched.runDue(new Date(base.getTime() + 60_000))).toEqual([]);
+      expect(runs).toBe(0);
+      sched.stop();
+    }
+  });
+
+  it('export 链已含 layout 时不重复，并从 export 轮重新计算周期', async () => {
+    const { db, cfg } = makeEnv();
+    insertFact(db, { id: 'layout-dirty', content: '待布局事实' });
+    const base = new Date(2026, 10, 4, 3, 59, 0);
+    const order: string[] = [];
+    const sched = startScheduler({
+      db,
+      cfg: { ...cfg, layout: { ...cfg.layout, interval_ms: 120_000 } },
+      log: fakeLog(), timerMs: 0, now: () => base,
+      jobs: [
+        fakeJob('export', { cron: '0 4 * * *', priority: 40, onRun: () => void order.push('export') }),
+        fakeJob('layout', { after: 'export', priority: 50, onRun: () => void order.push('layout') }),
+      ],
+    });
+
+    const exported = await sched.runDue(new Date(2026, 10, 4, 4, 0, 0));
+    expect(exported.map((r) => r.name)).toEqual(['export', 'layout']);
+    expect(await sched.runDue(new Date(2026, 10, 4, 4, 1, 0))).toEqual([]);
+    const next = await sched.runDue(new Date(2026, 10, 4, 4, 2, 0));
+    expect(next.map((r) => r.name)).toEqual(['layout']);
+    expect(order).toEqual(['export', 'layout', 'layout']);
+    sched.stop();
+  });
+
+  it('layout 失败不阻塞后续任务，下周期重试且全链并发仍为 1', async () => {
+    const { db, cfg } = makeEnv();
+    insertFact(db, { id: 'layout-dirty', content: '待布局事实' });
+    const base = new Date(2026, 10, 4, 3, 0, 0);
+    let attempts = 0;
+    let active = 0;
+    let maxActive = 0;
+    const runExclusive = async (): Promise<void> => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      active -= 1;
+    };
+    const sched = startScheduler({
+      db,
+      cfg: { ...cfg, layout: { ...cfg.layout, interval_ms: 1000 } },
+      log: fakeLog(), timerMs: 0, now: () => base,
+      jobs: [
+        fakeJob('layout', {
+          priority: 10,
+          onRun: async () => {
+            attempts += 1;
+            await runExclusive();
+            if (attempts === 1) throw new Error('layout boom');
+          },
+        }),
+        fakeJob('other', { cron: '* * * * *', priority: 20, onRun: runExclusive }),
+      ],
+    });
+
+    const first = await sched.runDue(new Date(base.getTime() + 60_000));
+    expect(first.map((r) => [r.name, r.status])).toEqual([['layout', 'failed'], ['other', 'ok']]);
+    const second = await sched.runDue(new Date(base.getTime() + 120_000));
+    expect(second.map((r) => [r.name, r.status])).toEqual([['layout', 'ok'], ['other', 'ok']]);
+    expect(attempts).toBe(2);
+    expect(maxActive).toBe(1);
     sched.stop();
   });
 });
