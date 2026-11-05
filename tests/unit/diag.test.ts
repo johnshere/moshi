@@ -274,6 +274,19 @@ describe('不变量判定', () => {
     expect(reportOf(db).invariants.I8).toBe(true);
   });
 
+  it('I8：已关闭的反向 supersedes 边不参与判定（doctor --fix 后转绿）', () => {
+    const db = freshDb();
+    const t = '2026-02-01T00:00:00.000Z';
+    const old = insertFact(db, { id: 'fact_old', validAt: '2026-01-01T00:00:00.000Z', validTo: t });
+    const neu = insertFact(db, { id: 'fact_new', validAt: t, validTo: '2026-03-01T00:00:00.000Z' });
+    insertEdge(db, old, neu, 'supersedes');
+    insertEdge(db, neu, old, 'supersedes'); // 旧规则 4 的反向重复边
+    syncIndexes(db);
+    expect(reportOf(db).invariants.I8).toBe(false);
+    expect(applyDoctorFixes(db).reversed_supersedes_closed).toBe(1);
+    expect(reportOf(db).invariants.I8).toBe(true);
+  });
+
   it('I9：fact_vec 存在但 0 行（无 sidecar）按降级算——I9 绿、退出码 4', () => {
     const db = freshDb();
     if (!tableExistsIn(db, 'fact_vec')) return; // 本机无 sqlite-vec 时该路径不可达

@@ -6,7 +6,9 @@
  * 索引与度数就会与真相偏离。重建是"把派生数据按事实重算一遍"，
  * 相当于给数据库做一次对账。
  */
+import { nowIso } from '../../domain/time.js';
 import type { Db } from './db.js';
+import { closeEdge } from './edgeRepo.js';
 import { withTransaction } from './tx.js';
 
 /** FTS5 外部内容表的重建：`INSERT INTO fact_fts(fact_fts) VALUES('rebuild')` */
@@ -32,6 +34,31 @@ export function rebuildDegree(db: Db): number {
       )
       .run();
     return info.changes;
+  });
+}
+
+/**
+ * 关闭反向重复的 `supersedes` 边（I-52）：旧版边抽取规则 4 建的是 `新 → 旧`，
+ * 与写入冲突建的 `旧 → 新` 成对出现。只关「已有正向孪生边」的反向边（只设
+ * valid_to、不删行），没有孪生的反向边不动——关掉它会丢掉唯一的取代证据。
+ */
+export function closeReversedSupersedes(db: Db, ts: string = nowIso()): number {
+  return withTransaction(db, () => {
+    const ids = db
+      .prepare(
+        `SELECT r.id FROM edge r
+           JOIN fact s ON s.id = r.src
+           JOIN fact d ON d.id = r.dst
+          WHERE r.etype = 'supersedes' AND r.valid_to IS NULL
+            AND s.valid_at > d.valid_at
+            AND EXISTS (SELECT 1 FROM edge f
+                         WHERE f.etype = 'supersedes' AND f.valid_to IS NULL
+                           AND f.src = r.dst AND f.dst = r.src)
+          ORDER BY r.id`,
+      )
+      .all() as { id: string }[];
+    for (const { id } of ids) closeEdge(db, id, ts);
+    return ids.length;
   });
 }
 

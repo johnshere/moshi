@@ -15,7 +15,7 @@ import { existsSync } from 'node:fs';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
 import type { Db } from '../../../infra/sqlite/db.js';
 import { countFts, syncMissingFts } from '../../../infra/sqlite/ftsRepo.js';
-import { rebuildDegree, rebuildFts } from '../../../infra/sqlite/maintenance.js';
+import { closeReversedSupersedes, rebuildDegree, rebuildFts } from '../../../infra/sqlite/maintenance.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { countFact } from '../../../infra/vec/index.js';
 import { collectDiagReport } from '../../../core/diag/collect.js';
@@ -29,22 +29,24 @@ const USAGE = [
   '',
   '  检查不变量 I1–I10、DB 完整性、索引 / 度数 / 归档 / 图质量，并打印自检报告。',
   '',
-  '  --fix   只修派生数据：degree 对账 + FTS 补齐（不动事实数据）',
+  '  --fix   只修派生数据：关闭反向重复 supersedes 边 + degree 对账 + FTS 补齐（不动事实数据）',
   '',
   '退出码：0 通过 · 3 不变量失败 · 4 降级但可用 · 1 一般错误 · 2 参数错误',
 ].join('\n');
 
 export interface DoctorFixResult {
+  reversed_supersedes_closed: number;
   degree_fixed: number;
   fts_added: number;
   fts_rebuilt: boolean;
 }
 
 /**
- * 修复派生索引：degree 按活跃边重算；FTS 补缺失行（行数仍不符时再整体 rebuild）。
- * 只写 fact.degree 与 fact_fts，不写 fact.content / attrs.
+ * 修复派生数据：先关反向重复的 supersedes 边（I-52，只设 valid_to），再按活跃边重算
+ * degree；FTS 补缺失行（行数仍不符时再整体 rebuild）。不写 fact.content / attrs.
  */
 export function applyDoctorFixes(db: Db): DoctorFixResult {
+  const reversedClosed = closeReversedSupersedes(db);
   const degreeFixed = rebuildDegree(db);
   const ftsAdded = syncMissingFts(db);
   let ftsRebuilt = false;
@@ -52,7 +54,12 @@ export function applyDoctorFixes(db: Db): DoctorFixResult {
     rebuildFts(db);
     ftsRebuilt = true;
   }
-  return { degree_fixed: degreeFixed, fts_added: ftsAdded, fts_rebuilt: ftsRebuilt };
+  return {
+    reversed_supersedes_closed: reversedClosed,
+    degree_fixed: degreeFixed,
+    fts_added: ftsAdded,
+    fts_rebuilt: ftsRebuilt,
+  };
 }
 
 /** 详设 §4.8 退出码：不变量失败（3）> DB 完整性异常（1）> 降级可用（4）> 通过（0） */
@@ -150,7 +157,8 @@ export const doctorCommand: Command = {
       if (fix) {
         const fixed = applyDoctorFixes(db);
         ctx.stdout(
-          `修复：degree 重建 ${fixed.degree_fixed} 行 · FTS 补齐 ${fixed.fts_added} 行` +
+          `修复：反向 supersedes 关闭 ${fixed.reversed_supersedes_closed} 条 · ` +
+            `degree 重建 ${fixed.degree_fixed} 行 · FTS 补齐 ${fixed.fts_added} 行` +
             `${fixed.fts_rebuilt ? ' · FTS 整体 rebuild' : ''}\n`,
         );
       }

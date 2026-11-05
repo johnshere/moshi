@@ -12,6 +12,12 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import { EDGE_QUOTA, extractEdges, totalCreated } from '../../src/core/write/edges.js';
+import { insertEdge as insertEdgeRow } from '../../src/infra/sqlite/edgeRepo.js';
+import { closeReversedSupersedes } from '../../src/infra/sqlite/maintenance.js';
+
+function insertEdge(db: Db, src: string, dst: string, etype: 'supersedes'): void {
+  insertEdgeRow(db, { id: `edge_${src}_${dst}`, src, dst, etype, validAt: T(20) });
+}
 
 const opened: Db[] = [];
 afterEach(() => {
@@ -133,7 +139,7 @@ describe('P2-22 规则 3：同实体共现', () => {
 });
 
 describe('P2-22 规则 4：时间序取代', () => {
-  it('同实体+谓词、旧值已收口 → 新事实 supersedes 旧事实，置信 0.9', () => {
+  it('同实体+谓词、旧值已收口 → 旧事实 supersedes 新事实（旧 → 新），置信 0.9', () => {
     const db = freshDb();
     addFact(db, {
       id: 'f_old',
@@ -147,7 +153,39 @@ describe('P2-22 规则 4：时间序取代', () => {
     const res = extractEdges(db, { facts: factsByIds(db, ['f_new']) });
     expect(res.created.supersedes).toBe(1);
     const row = edges(db).find((e) => e.etype === 'supersedes');
-    expect(row).toMatchObject({ src: 'f_new', dst: 'f_old', provenance: 'rule:supersedes' });
+    expect(row).toMatchObject({ src: 'f_old', dst: 'f_new', provenance: 'rule:supersedes' });
+  });
+
+  it('写入冲突已建同向 supersedes 时不再建第二条（I-52）', () => {
+    const db = freshDb();
+    addFact(db, { id: 'f_old', entityId: 'en_port', predicate: 'value', validAt: T(0), validTo: T(20) });
+    addFact(db, { id: 'f_new', entityId: 'en_port', predicate: 'value', validAt: T(20) });
+    insertEdge(db, 'f_old', 'f_new', 'supersedes');
+    const res = extractEdges(db, { facts: factsByIds(db, ['f_new']) });
+    expect(res.created.supersedes).toBe(0);
+    expect(edges(db).filter((e) => e.etype === 'supersedes')).toHaveLength(1);
+  });
+
+  it('closeReversedSupersedes 只关有正向孪生的反向边，只设 valid_to 不删行', () => {
+    const db = freshDb();
+    addFact(db, { id: 'f_a', entityId: 'en_1', predicate: 'value', validAt: T(0), validTo: T(10) });
+    addFact(db, { id: 'f_b', entityId: 'en_1', predicate: 'value', validAt: T(10) });
+    addFact(db, { id: 'f_c', entityId: 'en_2', predicate: 'value', validAt: T(0), validTo: T(10) });
+    addFact(db, { id: 'f_d', entityId: 'en_2', predicate: 'value', validAt: T(10) });
+    insertEdge(db, 'f_a', 'f_b', 'supersedes'); // 正向
+    insertEdge(db, 'f_b', 'f_a', 'supersedes'); // 反向、有孪生 → 关
+    insertEdge(db, 'f_d', 'f_c', 'supersedes'); // 反向、无孪生 → 保留
+    expect(closeReversedSupersedes(db, T(30))).toBe(1);
+    const rows = edges(db).filter((e) => e.etype === 'supersedes');
+    expect(rows).toHaveLength(3);
+    const open = db
+      .prepare("SELECT src, dst FROM edge WHERE etype='supersedes' AND valid_to IS NULL ORDER BY src")
+      .all();
+    expect(open).toEqual([
+      { src: 'f_a', dst: 'f_b' },
+      { src: 'f_d', dst: 'f_c' },
+    ]);
+    expect(closeReversedSupersedes(db, T(31))).toBe(0); // 幂等
   });
 
   it('supersedes 不受 7 条配额限制', () => {

@@ -210,6 +210,7 @@ export function readInvariantInputs(db: Db): DiagInvariantInputs {
          JOIN fact s ON s.id = e.src
          JOIN fact d ON d.id = e.dst
         WHERE e.etype = 'supersedes'
+          AND e.valid_to IS NULL
           AND s.valid_to IS NOT NULL
           AND d.valid_at < s.valid_to`,
     ),

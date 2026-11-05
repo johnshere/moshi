@@ -144,12 +144,11 @@ export function extractEdges(db: Db, input: ExtractEdgesInput): ExtractEdgesResu
     const predicate = frozenPredicate(fact);
 
     // ── 规则 4：时间序取代（不受配额限制，先做）
+    // 方向 旧 → 新（概设 §3.6 ③、详设 §5.7.2，与 conflict.ts 同向）；只连最近的一条旧值，
+    // 多代旧值之间不连边，否则图会变成链。写入冲突已建过同一条边时跳过（I-52）。
     if (entityId !== null && predicate !== null) {
-      for (const old of factRepo.listSupersedeCandidates(db, { id: fact.id, entityId, predicate, before: fact.validAt })) {
-        if (addEdge(db, created, fact.id, old.id, 'supersedes', RULE_CONFIDENCE.supersedes, 'supersedes', 1.0, ts)) {
-          // 取代边只写一条就够：多代旧值之间不连边，否则图会变成链
-          break;
-        }
+      const [old] = factRepo.listSupersedeCandidates(db, { id: fact.id, entityId, predicate, before: fact.validAt });
+      if (old !== undefined && !addEdge(db, created, old.id, fact.id, 'supersedes', RULE_CONFIDENCE.supersedes, 'supersedes', 1.0, ts)) {
         skipped += 1;
       }
     }
