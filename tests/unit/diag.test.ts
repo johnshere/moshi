@@ -26,6 +26,7 @@ import { computeModularity, computeNearDupRatio } from '../../src/core/diag/qual
 import type { DiagReport } from '../../src/core/diag/types.js';
 import { insertEdge, insertFact, makeEntity } from '../fixtures/factories.js';
 import { addAlias } from '../../src/infra/sqlite/entityRepo.js';
+import { setConfidence } from '../../src/infra/sqlite/factRepo.js';
 
 const MODEL = { embed: 'test-embed', gat: 'off' as const, weights_path: 'Z:/definitely/missing.pt' };
 
@@ -264,6 +265,26 @@ describe('不变量判定', () => {
     expect(reportOf(db).invariants.I8).toBe(false);
   });
 
+  it('I8：写入侧半开区间（新.valid_at == 旧.valid_to）不算违规', () => {
+    const db = freshDb();
+    const t = '2026-02-01T00:00:00.000Z';
+    const src = insertFact(db, { id: 'fact_old', validAt: '2026-01-01T00:00:00.000Z', validTo: t });
+    const dst = insertFact(db, { id: 'fact_new', validAt: t, validTo: null });
+    insertEdge(db, src, dst, 'supersedes');
+    expect(reportOf(db).invariants.I8).toBe(true);
+  });
+
+  it('I9：fact_vec 存在但 0 行（无 sidecar）按降级算——I9 绿、退出码 4', () => {
+    const db = freshDb();
+    if (!tableExistsIn(db, 'fact_vec')) return; // 本机无 sqlite-vec 时该路径不可达
+    insertFact(db, { id: 'fact_1' });
+    syncMissingFts(db);
+    const report = reportOf(db);
+    expect(report.indexes.vec).toBe('stale');
+    expect(report.invariants.I9).toBe(true);
+    expect(doctorExitCode(report)).toBe(4);
+  });
+
   it('I10：confidence 审计行的 JSON 形状参与抽样判定', () => {
     const db = freshDb();
     db.prepare(
@@ -277,7 +298,19 @@ describe('不变量判定', () => {
     ).run();
     expect(reportOf(db).invariants.I10).toBe(false);
   });
+
+  it('I10：生产写入的对象形状 {confidence, confidence_source} 判为有效', () => {
+    const db = freshDb();
+    const factId = insertFact(db, { id: 'fact_c', confidence: 0.5 });
+    setConfidence(db, factId, { value: 0.7, source: 'tool_obs', reason: 'test' });
+    const sample = reportOf(db);
+    expect(sample.invariants.I10).toBe(true);
+  });
 });
+
+function tableExistsIn(db: Db, name: string): boolean {
+  return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name) !== undefined;
+}
 
 describe('质量指标', () => {
   it('孤立比 / stale 链 / 关键实体覆盖按 SQL 口径计算', () => {

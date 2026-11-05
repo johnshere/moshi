@@ -127,7 +127,12 @@ export interface DiagInvariantInputs {
 function parseConfidence(json: string | null): number | null {
   if (json === null) return null;
   try {
-    const value = JSON.parse(json) as unknown;
+    const parsed = JSON.parse(json) as unknown;
+    // factRepo.setConfidence 写的是 {confidence, confidence_source} 对象；裸数字为旧形状
+    const value =
+      typeof parsed === 'object' && parsed !== null
+        ? (parsed as { confidence?: unknown }).confidence
+        : parsed;
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   } catch {
     return null;
@@ -206,7 +211,7 @@ export function readInvariantInputs(db: Db): DiagInvariantInputs {
          JOIN fact d ON d.id = e.dst
         WHERE e.etype = 'supersedes'
           AND s.valid_to IS NOT NULL
-          AND d.valid_at <= s.valid_to`,
+          AND d.valid_at < s.valid_to`,
     ),
     fts_rows: indexes.fts_rows,
     vec_rows: indexes.vec_rows,

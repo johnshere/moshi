@@ -26,10 +26,13 @@ export interface InvariantInputs {
 /**
  * I9 的口径：FTS 行数必须与 fact 行数一致；向量路若被标记降级（sqlite-vec
  * 缺席 / 无 sidecar），只要求"没有假装索引过"，不要求行数相等。
+ * `fact_vec` 在但 0 行 = 从未编码过（扩展在、sidecar 不在）：同样没有假装索引，
+ * 按降级处理（退出码 4 由 indexes.vec='stale' 给出），不算不变量失败。
  */
 function indexRowsConsistent(input: InvariantInputs): boolean {
   if (input.fts_rows === null || input.fts_rows !== input.fact_rows) return false;
   if (input.vector_disabled) return input.vec_rows === null;
+  if (input.vec_rows === 0) return true;
   return input.vec_rows !== null && input.vec_rows === input.fact_rows;
 }
 
