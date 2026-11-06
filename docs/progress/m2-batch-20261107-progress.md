@@ -19,9 +19,9 @@
 | # | 任务 | 设计/验收文档 | 状态 | 实施轮次 | 验收轮次 | commit |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | P3-A8 | `docs/progress/m2-batch-20261107/p3-a8-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 67687a7 |
-| 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 本任务提交 |
-| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | PENDING | 0 | 0 | - |
-| 4 | P3-A4 m2 | `.../p3-a4-design.md` / `...-acceptance.md` | PENDING | 0 | 0 | - |
+| 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | d3ced7b |
+| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | FAILED | 1 | 2（均 FAIL：AC-2） | - |
+| 4 | P3-A4 m2 | `.../p3-a4-design.md` / `...-acceptance.md` | PENDING（批次终止，未启动） | 0 | 0 | - |
 
 图例：`PENDING` 未开始；`IMPLEMENTING` 实施中；`VERIFYING` 待/在验收；`PASS` 验收通过待 commit；`DONE` 已 commit；`FAILED` 二次验收不通过，批次终止。
 
@@ -37,4 +37,5 @@
 ## 当前状态
 
 - 2026-11-07：批次创建，P3-A8 实施子代理已派发。
-- 2026-11-07 02:00：P1-16 m2 验收 PASS（AC-1..AC-9），已 commit；下一项 P3-A3 m2。
+- 2026-11-07 02:26：P3-A3 m2 返工报告 BLOCKED（确认无代码改动下没有自然退出路径；预存缺陷需新任务 P3-A9）。按规则进行第二次独立验收。
+- 2026-11-07 02:30：P3-A3 m2 第二次独立验收 **FAIL（仅 AC-2）**：结果 11.5s 打印完，181.8s 进程树仍活；HEAD 仍 `d3ced7b`、src/sidecar/tests 零改动；AC-1/3/4 复跑 PASS。按批次规则**终止本批次**，P3-A4 未启动；等用户裁决 B-8（P3-A9 或 P3-A3 口径）。
