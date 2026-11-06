@@ -18,8 +18,8 @@
 
 | # | 任务 | 设计/验收文档 | 状态 | 实施轮次 | 验收轮次 | commit |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | P3-A8 | `docs/progress/m2-batch-20261107/p3-a8-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 本任务提交 |
-| 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | PENDING | 0 | 0 | - |
+| 1 | P3-A8 | `docs/progress/m2-batch-20261107/p3-a8-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 67687a7 |
+| 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 本任务提交 |
 | 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | PENDING | 0 | 0 | - |
 | 4 | P3-A4 m2 | `.../p3-a4-design.md` / `...-acceptance.md` | PENDING | 0 | 0 | - |
 
@@ -37,4 +37,4 @@
 ## 当前状态
 
 - 2026-11-07：批次创建，P3-A8 实施子代理已派发。
-- 2026-11-07 01:50：P3-A8 验收 PASS（AC-1..AC-10），已 commit；下一项 P1-16 m2 待派发。
+- 2026-11-07 02:00：P1-16 m2 验收 PASS（AC-1..AC-9），已 commit；下一项 P3-A3 m2。

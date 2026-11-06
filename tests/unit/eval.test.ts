@@ -12,6 +12,12 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { insertFact } from '../../src/infra/sqlite/factRepo.js';
 import { evaluateItem, loadGolden, type GoldenItem } from '../../src/app/cli/commands/eval.js';
+import {
+  GOLDEN_TYPES,
+  MIN_GOLDEN_PER_TYPE,
+  validateGoldenSet,
+  type GoldenType,
+} from '../../src/core/ops/eval.js';
 import { runCli } from '../../src/app/cli/index.js';
 import { loadConfig } from '../../src/app/config.js';
 import type { McpDeps } from '../../src/app/mcp/deps.js';
@@ -40,6 +46,56 @@ function addFact(db: Db, id: string, content: string): void {
     sourceEpisode: null, span: null, createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z',
   });
 }
+
+/** 按题型条数造 golden 题（只关心 type，判题细节与本组用例无关） */
+function makeGolden(perType: Record<GoldenType, number>): GoldenItem[] {
+  const items: GoldenItem[] = [];
+  for (const type of GOLDEN_TYPES) {
+    for (let i = 0; i < perType[type]; i += 1) {
+      items.push({ id: `${type}_${i}`, type, query: `${type} 题 ${i}` });
+    }
+  }
+  return items;
+}
+
+const FULL_COUNTS: Record<GoldenType, number> = {
+  single_hop: 8,
+  multi_hop: 8,
+  temporal: 8,
+  refusal: 8,
+};
+
+describe('validateGoldenSet（P1-16 m2 四类完整性）', () => {
+  it('四类各 8 条 → ok，计数正确', () => {
+    const validation = validateGoldenSet(makeGolden(FULL_COUNTS));
+    expect(MIN_GOLDEN_PER_TYPE).toBe(8);
+    expect(validation.ok).toBe(true);
+    expect(validation.problems).toEqual([]);
+    expect(validation.counts).toEqual(FULL_COUNTS);
+  });
+
+  it('temporal 只有 7 条 → not ok，problems 指向 temporal', () => {
+    const validation = validateGoldenSet(makeGolden({ ...FULL_COUNTS, temporal: 7 }));
+    expect(validation.ok).toBe(false);
+    expect(validation.counts.temporal).toBe(7);
+    expect(validation.problems.some((p) => p.includes('temporal'))).toBe(true);
+  });
+
+  it('缺 multi_hop → not ok，problems 指向 multi_hop', () => {
+    const validation = validateGoldenSet(makeGolden({ ...FULL_COUNTS, multi_hop: 0 }));
+    expect(validation.ok).toBe(false);
+    expect(validation.counts.multi_hop).toBe(0);
+    expect(validation.problems.some((p) => p.includes('multi_hop'))).toBe(true);
+  });
+
+  it('未知题型 → not ok，problems 含「未知题型」', () => {
+    const items = makeGolden(FULL_COUNTS);
+    items.push({ id: 'g_foo', type: 'foo' as GoldenType, query: 'x' });
+    const validation = validateGoldenSet(items);
+    expect(validation.ok).toBe(false);
+    expect(validation.problems.some((p) => p.includes('未知题型'))).toBe(true);
+  });
+});
 
 describe('golden set 与运行器（P1-16）', () => {
   it('loadGolden：解析 + 非法行跳过', () => {
@@ -102,7 +158,7 @@ describe('golden set 与运行器（P1-16）', () => {
     );
 
     const out: string[] = [];
-    const code = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    const code = await runCli(['eval', 'run', '--allow-partial'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
     expect(code).toBe(1);
     expect(out.join('\n')).toContain('FAIL g_bad_refusal');
 
@@ -115,7 +171,7 @@ describe('golden set 与运行器（P1-16）', () => {
       ].join('\n'),
       'utf8',
     );
-    const code2 = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    const code2 = await runCli(['eval', 'run', '--allow-partial'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
     expect(code2).toBe(0);
   });
 
@@ -136,7 +192,7 @@ describe('golden set 与运行器（P1-16）', () => {
     );
 
     const out: string[] = [];
-    const code = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    const code = await runCli(['eval', 'run', '--allow-partial'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
     expect(code).toBe(0);
     expect(out.join('\n')).toContain('临时副本');
 
@@ -147,11 +203,51 @@ describe('golden set 与运行器（P1-16）', () => {
     expect(n1).toBe(0);
 
     // --in-place 就在原库上跑，query_log 会增长
-    const code2 = await runCli(['eval', 'run', '--in-place'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    const code2 = await runCli(['eval', 'run', '--in-place', '--allow-partial'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
     expect(code2).toBe(0);
     const { db: check2 } = openDb({ file: dbFile });
     const n2 = (check2.prepare('SELECT COUNT(*) AS n FROM query_log').get() as { n: number }).n;
     closeDb(check2);
     expect(n2).toBeGreaterThan(0);
+  });
+
+  it('完整性：题集不完整 → exit 2（查询前失败）；--allow-partial 跳过校验但门禁照旧', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'moshi-home-'));
+    const goldenDir = path.join(home, '.moshi', 'golden');
+    mkdirSync(goldenDir, { recursive: true });
+    const dbFile = path.join(home, '.moshi', 'moshi.db');
+    const { db: cliDb } = openDb({ file: dbFile });
+    migrate(cliDb, { backupsDir: path.join(home, '.moshi', 'backups') });
+    addFact(cliDb, 'f_8080', '8080 端口被 dev-server 占用');
+    closeDb(cliDb);
+
+    // 8 条 single_hop + 8 条 refusal：缺 multi_hop / temporal
+    const lines: string[] = [];
+    for (let i = 0; i < 8; i += 1) {
+      lines.push(JSON.stringify({ id: `g_s${i}`, type: 'single_hop', query: '8080', expect_facts: ['f_8080'] }));
+      lines.push(JSON.stringify({ id: `g_r${i}`, type: 'refusal', query: '这台机器装过 memcached 吗' }));
+    }
+    writeFileSync(path.join(goldenDir, 'golden.jsonl'), lines.join('\n'), 'utf8');
+
+    const out: string[] = [];
+    const code = await runCli(['eval', 'run'], { home, stdout: (s) => out.push(s), stderr: (s) => out.push(s) });
+    expect(code).toBe(2);
+    const denied = out.join('');
+    expect(denied).toContain('golden set 不完整');
+    expect(denied).toContain('multi_hop');
+    expect(denied).toContain('temporal');
+    // 校验在查询前：没有评估输出，用户库 query_log 也没被动过
+    expect(denied).not.toContain('golden 评估');
+    const { db: check } = openDb({ file: dbFile });
+    const logged = (check.prepare('SELECT COUNT(*) AS n FROM query_log').get() as { n: number }).n;
+    closeDb(check);
+    expect(logged).toBe(0);
+
+    // --allow-partial：跳过完整性校验，16 条照跑且全过 → 0（门禁仍只由 temporal/refusal 触发）
+    const out2: string[] = [];
+    const code2 = await runCli(['eval', 'run', '--allow-partial'], { home, stdout: (s) => out2.push(s), stderr: (s) => out2.push(s) });
+    expect(code2).toBe(0);
+    expect(out2.join('')).toContain('16/16');
+    expect(out2.join('')).not.toContain('golden 题型');
   });
 });

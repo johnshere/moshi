@@ -48,6 +48,50 @@ export const EVAL_TOP_K = 8;
 /** 门禁题型：这两类失败算阻断（详设 §11.3 / 台账 P1-16） */
 export const EVAL_GATE_TYPES: readonly GoldenType[] = ['temporal', 'refusal'];
 
+/** golden set 必须齐全的四类题型（P1-16 m2） */
+export const GOLDEN_TYPES: readonly GoldenType[] = ['single_hop', 'multi_hop', 'temporal', 'refusal'];
+
+/** 每类至少多少条（数据面 40 条 / 四类各 10 的下限；退化成 2 条要报警） */
+export const MIN_GOLDEN_PER_TYPE = 8;
+
+export interface GoldenValidation {
+  ok: boolean;
+  counts: Record<GoldenType, number>;
+  /** 人类可读，逐条（缺类/条数不足/未知题型） */
+  problems: string[];
+}
+
+/**
+ * 校验 golden set 四类齐全且每类 ≥ `MIN_GOLDEN_PER_TYPE`。
+ *
+ * 只校验题型数量，不校验 `expect_facts` 是否存在于库（那是判题/数据面的事，
+ * 归 P1-20）；不抛异常，由调用方决定退出码。
+ */
+export function validateGoldenSet(items: readonly GoldenItem[]): GoldenValidation {
+  const counts: Record<GoldenType, number> = {
+    single_hop: 0,
+    multi_hop: 0,
+    temporal: 0,
+    refusal: 0,
+  };
+  const unknown: string[] = [];
+  for (const item of items) {
+    if ((GOLDEN_TYPES as readonly string[]).includes(item.type)) {
+      counts[item.type] += 1;
+    } else {
+      unknown.push(`未知题型 ${String(item.type)}（${String(item.id)}）`);
+    }
+  }
+  const problems: string[] = [];
+  for (const type of GOLDEN_TYPES) {
+    if (counts[type] < MIN_GOLDEN_PER_TYPE) {
+      problems.push(`${type} 只有 ${counts[type]} 条（要求 ≥${MIN_GOLDEN_PER_TYPE}）`);
+    }
+  }
+  problems.push(...unknown);
+  return { ok: problems.length === 0, counts, problems };
+}
+
 /** 读 golden.jsonl；行非法 JSON 跳过但计数（保持 P1-16 行为） */
 export function loadGolden(file: string): { items: GoldenItem[]; skipped: number } {
   let text: string;

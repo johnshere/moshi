@@ -13,6 +13,8 @@
  *   拒答：confidence_summary === 'none' 且 evidence.length === 0
  *
  * **门禁**：时态题与拒答题任一失败 → 退出码非 0（阻断发布）。
+ * **题集完整性**（P1-16 m2）：默认要求四类齐全且每类 ≥8，否则退出码 2；
+ * 校验在开库/查询前完成，不写 query_log。`--allow-partial` 仅跳过该校验。
  * 坑：题目必须基于真实导入的数据写（凭想象写的题测不出问题）。
  */
 import { existsSync, mkdtempSync } from 'node:fs';
@@ -21,9 +23,11 @@ import path from 'node:path';
 import {
   evaluateItem as evaluateItemCore,
   formatByType,
+  GOLDEN_TYPES,
   loadGolden,
   resolveGoldenFile,
   runGoldenSet,
+  validateGoldenSet,
   type EvalOutcome,
   type EvalQueryFn,
   type GoldenItem,
@@ -62,7 +66,7 @@ export const evalCommand: Command = {
   async run(ctx) {
     const args = ctx.args;
     if (args[0] !== 'run') {
-      ctx.stderr(`用法：moshi eval run [--golden <v1|路径>] [--vector] [--in-place]\n`);
+      ctx.stderr(`用法：moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial]\n`);
       return 2;
     }
     const goldenArg = args.find((a, i) => a === '--golden' && args[i + 1] !== undefined);
@@ -73,6 +77,26 @@ export const evalCommand: Command = {
     );
     const useVector = args.includes('--vector');
     const inPlace = args.includes('--in-place');
+    // 仅测试/局部 golden 用：跳过四类完整性校验，门禁（temporal/refusal）照旧。
+    const allowPartial = args.includes('--allow-partial');
+
+    // 完整性校验必须在开库/查询之前：题集不完整时不能留下 query_log。
+    const { items, skipped } = loadGolden(goldenFile);
+    if (items.length === 0) {
+      ctx.stderr(`golden set 为空（${goldenFile}）\n`);
+      return 2;
+    }
+    if (!allowPartial) {
+      const validation = validateGoldenSet(items);
+      if (!validation.ok) {
+        ctx.stderr(`golden set 不完整：${goldenFile}\n`);
+        for (const problem of validation.problems) ctx.stderr(`  - ${problem}\n`);
+        return 2;
+      }
+      ctx.stdout(
+        `golden 题型：${GOLDEN_TYPES.map((t) => `${t}=${validation.counts[t]}`).join(' ')}\n`,
+      );
+    }
 
     const paths = ensureDataDirs(ctx.cfg);
     // B-4：默认在临时副本上跑。eval 会写 query_log / evidence_log，跑在用户库上
@@ -96,11 +120,6 @@ export const evalCommand: Command = {
     let sidecar: SidecarClient | undefined;
     try {
       migrate(db, { backupsDir: paths.backups });
-      const { items, skipped } = loadGolden(goldenFile);
-      if (items.length === 0) {
-        ctx.stderr(`golden set 为空（${goldenFile}）\n`);
-        return 2;
-      }
 
       // 默认不接模型：测的是"没有模型时这套记忆还能不能查对"（概设 §1.5），
       // 也让 CI 不依赖 sidecar 二进制。`--vector` 才补向量、走三路召回。
