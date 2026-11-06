@@ -12,7 +12,8 @@
  * - 不碰 sidecar、不改生命周期。
  */
 import { scanAllSources, type ScanAllOptions, type ScanStats } from '../core/collect/scanner.js';
-import type { Config } from './config.js';
+import os from 'node:os';
+import { resolveSources, type Config, type ResolvedSource } from './config.js';
 import type { Db } from '../infra/sqlite/db.js';
 
 /** 只用到 info/warn/error 三条，避免把 pino 类型拖进 app 层 */
@@ -26,9 +27,10 @@ export interface CollectRunnerOptions {
   db: Db;
   cfg: Config;
   cursorsFile: string;
-  home: string;
-  genericInbox: string;
-  sources?: string[];
+  /** 覆盖 home（测试用）；`sources` 未给时用它解析默认 source */
+  home?: string;
+  /** 已解析的 source 实例（P3-A8）；缺省 `resolveSources(cfg, home)` */
+  sources?: ResolvedSource[];
   log?: CollectRunnerLog;
   /** 有 annotation 入队时调（通常是 `harvestRunner.wake`） */
   onEnqueued?: () => void;
@@ -68,7 +70,8 @@ export function startCollectRunner(opts: CollectRunnerOptions): CollectRunner {
   const { db, cfg, log } = opts;
   // 默认 0：节奏由 P2-17 调度器持有（避免两条调度链）
   const intervalMs = opts.intervalMs ?? 0;
-  const sources = opts.sources ?? cfg.ingest.sources;
+  // P3-A8：源一律走配置解析出的实例（id/root/enabled/field_map 都生效）
+  const sources = opts.sources ?? resolveSources(cfg, opts.home ?? os.homedir());
 
   const st: CollectRunnerState = {
     runs: 0,
@@ -86,8 +89,6 @@ export function startCollectRunner(opts: CollectRunnerOptions): CollectRunner {
   const scanOpts: ScanAllOptions = {
     cfg: collectConfigOf(cfg),
     cursorsFile: opts.cursorsFile,
-    home: opts.home,
-    genericInbox: opts.genericInbox,
     sources,
     // 阶段 2 的 LLM 调用方尚未接入（P3 支路），生产侧不伪造一个本地归纳器
     onProgress: (line) => log?.info({ event: 'collect.scan' }, line.trimEnd()),

@@ -5,8 +5,8 @@ import { pathToFileURL } from 'node:url';
 import { MoshiError } from '../domain/errors.js';
 import { buildLogger, pruneLogs } from '../infra/log/logger.js';
 import { SidecarClient } from '../infra/sidecar/client.js';
-import { runCli } from './cli/index.js';
-import { dataPaths, loadConfig } from './config.js';
+import { runCli, extractConfigArgv } from './cli/index.js';
+import { dataPaths, loadConfig, resolveSources } from './config.js';
 import { startCollectRunner, type CollectRunner } from './collectRunner.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { removeLock } from './lock.js';
@@ -37,19 +37,27 @@ export function parseMode(argv: readonly string[]): Mode {
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
-  const mode = parseMode(argv);
+  // P3-A8：全局 `--config` 在 parseMode 之前剥离——否则 `--config x doctor`
+  // 会被当成命令名 `--config`，落进 runCli 报"未知命令"。
+  const global = extractConfigArgv(argv);
+  if (global.missingValue) {
+    process.stderr.write('--config 需要一个配置文件路径\n');
+    return 2;
+  }
+  const args = global.argv;
+  const mode = parseMode(args);
 
   if (mode === 'version') {
     process.stdout.write(`moshi ${VERSION}\n`);
     return 0;
   }
   if (mode === 'cli') {
-    return runCli(argv);
+    return runCli(args, global.file === undefined ? {} : { file: global.file });
   }
 
   let cfg;
   try {
-    cfg = loadConfig();
+    cfg = global.file === undefined ? loadConfig() : loadConfig({ file: global.file });
   } catch (err) {
     const e = err as MoshiError;
     process.stderr.write(`配置错误：${e.message}\n`);
@@ -142,12 +150,13 @@ export async function main(argv: readonly string[]): Promise<number> {
   // home 与配置同源（`os.homedir()`）——配置读一个 home、会话扫另一个，是 P0 踩过的坑。
   try {
     const paths = dataPaths(cfg);
+    // P3-A8：source 实例由配置解析（`[[ingest.sources]]` 的 id/root/enabled 都生效）
     collectRunner = startCollectRunner({
       db: instance.db,
       cfg,
       cursorsFile: paths.collectCursors,
       home: os.homedir(),
-      genericInbox: path.join(paths.root, 'inbox'),
+      sources: resolveSources(cfg, os.homedir()),
       log,
       onEnqueued: () => runner?.wake(),
     });

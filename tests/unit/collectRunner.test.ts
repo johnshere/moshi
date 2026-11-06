@@ -64,8 +64,7 @@ describe('P2-21 生产驱动 collectRunner', () => {
       cfg,
       cursorsFile,
       home,
-      genericInbox: path.join(home, 'inbox'),
-      intervalMs: 0, // 测试里手动驱动，不开定时器
+        intervalMs: 0, // 测试里手动驱动，不开定时器
       onEnqueued: () => {
         wakes += 1;
       },
@@ -99,8 +98,7 @@ describe('P2-21 生产驱动 collectRunner', () => {
       cfg,
       cursorsFile: path.join(home, 'cursors.blocks.json'),
       home,
-      genericInbox: path.join(home, 'inbox'),
-      intervalMs: 0,
+        intervalMs: 0,
     });
 
     expect(await runner.runOnce()).toBeNull();

@@ -8,6 +8,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
+import path from 'node:path';
 import { MoshiError } from '../domain/errors.js';
 import { safeEnsureDir } from '../infra/fs/safeWrite.js';
 import { closeDb, openDb, type Db } from '../infra/sqlite/db.js';
@@ -33,13 +34,20 @@ export interface DataPaths {
   lock: string;
   cursors: string;
   importCursors: string;
+  collectCursors: string;
   backups: string;
+  goldenDir: string;
 }
 
 /** 只建必需目录；`archive_dir` 不建——它可能在 U 盘/未挂载卷上，导出时才创建 */
 export function ensureDataDirs(cfg: Config): DataPaths {
   const paths = dataPaths(cfg);
-  for (const dir of [paths.root, paths.logs, paths.tmp, paths.backups]) {
+  const dirs = [paths.root, paths.logs, paths.tmp, paths.backups];
+  // goldenDir 跟着 eval.golden_set 走（P3-A8）：在 data_dir 之内就代建；
+  // 被显式配到 data_dir 之外时由用户/seed 自己保证（不越过 safeEnsureDir 的根）
+  const rel = path.relative(paths.root, paths.goldenDir);
+  if (rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)) dirs.push(paths.goldenDir);
+  for (const dir of dirs) {
     safeEnsureDir(dir, [paths.root]);
   }
   return paths;

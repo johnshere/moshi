@@ -19,7 +19,7 @@ import * as episodeRepo from '../../infra/sqlite/episodeRepo.js';
 import { getMeta, setMeta } from '../../infra/sqlite/metaRepo.js';
 import * as quarantine from '../../core/write/quarantine.js';
 import type { Cursor } from '../adapters/cursor.js';
-import { createSource } from '../adapters/index.js';
+import { createSourceFor, type ResolvedSource } from '../adapters/index.js';
 import type { SessionRef, SessionSource } from '../adapters/session-source.js';
 import { summaryOf } from '../write/ingest.js';
 import type { AnnotatePayload } from '../write/harvest.js';
@@ -530,9 +530,8 @@ export async function scanSessionSource(
 export interface ScanAllOptions extends ScanOptions {
   since?: string;
   cursorsFile: string;
-  home: string;
-  genericInbox: string;
-  sources: string[];
+  /** 已解析的 source 实例（P3-A8）；游标 key 用 `source.id`，不用适配器名 */
+  sources: ResolvedSource[];
   onProgress?: (line: string) => void;
 }
 
@@ -551,27 +550,28 @@ export async function scanAllSources(
   let sessions = 0;
   const unavailable: string[] = [];
 
-  for (const name of opts.sources) {
-    const source = createSource(name, { home: opts.home, genericRoot: opts.genericInbox });
+  for (const spec of opts.sources) {
+    const source = createSourceFor(spec);
     if (source === null) {
-      unavailable.push(name);
+      unavailable.push(spec.id);
       continue;
     }
     const det = await source.detect();
     if (!det.found) {
-      unavailable.push(name);
+      unavailable.push(spec.id);
       continue;
     }
 
     for await (const ref of source.listSessions(since)) {
       sessions += 1;
-      const cursor = store.get(name, ref.path);
+      // 游标 key 用实例 id：两个 claude-code 实例扫不同目录时互不踩游标
+      const cursor = store.get(spec.id, ref.path);
       const res = await scanSessionSource(db, source, ref, cursor, opts);
-      store.set(name, ref.path, res.nextCursor);
+      store.set(spec.id, ref.path, res.nextCursor);
       store.save();
       mergeStats(merged, res);
       opts.onProgress?.(
-        `scanned ${name}/${ref.sessionId}: blocks=${res.blocksFound}, ` +
+        `scanned ${spec.id}/${ref.sessionId}: blocks=${res.blocksFound}, ` +
           `ann=${res.blockAnnotationsCreated}, llm=${res.llmFacts}\n`,
       );
     }

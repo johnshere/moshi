@@ -167,13 +167,14 @@ export function formatByType(outcomes: readonly EvalOutcome[]): string {
 
 /**
  * `--golden` / 配置里的取值既可以是**版本令牌**（`v1` → `golden.v1.jsonl`）
- * 也可以是**路径**。HTTP 版本没有 CLI 的 home，用数据目录反推：默认
- * `storage.data_dir = <home>/.moshi`，因此 home = dirname(data_dir)。
+ * 也可以是**路径**。版本令牌按 golden set 所在目录解析（P3-A8）：配置了
+ * `eval.golden_set` 就与它同目录，否则退回 `<home>/.moshi/golden`。
  */
 export function resolveGoldenFile(value: string | undefined, home: string, fallback: string): string {
   if (value === undefined || value === '') return fallback;
   if (/^v\d+$/i.test(value)) {
-    return path.join(home, '.moshi', 'golden', `golden.${value.toLowerCase()}.jsonl`);
+    const dir = fallback === '' ? path.join(home, '.moshi', 'golden') : path.dirname(fallback);
+    return path.join(dir, `golden.${value.toLowerCase()}.jsonl`);
   }
   return value;
 }

@@ -17,6 +17,11 @@ import path from 'node:path';
 import TOML from '@iarna/toml';
 import { z } from 'zod';
 import { MoshiError } from '../domain/errors.js';
+import {
+  SOURCE_NAMES,
+  type ResolvedSource,
+  type SourceName,
+} from '../core/adapters/index.js';
 import { safeEnsureDir, safeWriteFile, type WriteRoots } from '../infra/fs/safeWrite.js';
 
 const LOOPBACK_HOSTS = ['127.0.0.1', '::1', 'localhost'] as const;
@@ -41,9 +46,30 @@ const StorageSchema = z
   })
   .strict();
 
+/**
+ * 会话源实例（P3-A8）：`[[ingest.sources]]` 写法。
+ *
+ * 旧写法 `sources = ["claude-code"]` 仍然支持——字符串归一成"只有一个默认实例"，
+ * 等价于 `{id: adapter, adapter: adapter, root: 默认根}`。两种写法可以混用。
+ */
+const SourceInstanceSchema = z
+  .object({
+    /** 实例 id，也是游标 key；缺省 = adapter 名 */
+    id: z.string().min(1).optional(),
+    adapter: z.string().min(1),
+    /** 会话根目录；缺省 claude-code = `<home>/.claude/projects`，generic-jsonl = `<data_dir>/inbox` */
+    root: z.string().optional(),
+    enabled: z.boolean().default(true),
+    /** 该实例的字段映射（仅 generic-jsonl 用） */
+    field_map: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+const SourceSpecSchema = z.union([z.string().min(1), SourceInstanceSchema]);
+
 const IngestSchema = z
   .object({
-    sources: z.array(z.string()).default(['claude-code']),
+    sources: z.array(SourceSpecSchema).default(['claude-code']),
     harvest_cron: z.string().default('0 3 * * *'),
     harvest_batch: positiveInt.default(200),
     import_batch: positiveInt.default(500),
@@ -300,6 +326,68 @@ export const ConfigSchema = z
 export type Config = z.infer<typeof ConfigSchema>;
 export type ConfigSection = keyof Config;
 
+/** 由 config 负责导出：调用方拿到 `resolveSources()` 结果时不必再引 core 层 */
+export type { ResolvedSource, SourceName };
+
+/** 配置里一条 source 声明的归一形态（新写法；旧字符串由 `resolveSourceSpecs` 补齐默认值） */
+function resolveSourceSpecs(
+  specs: Config['ingest']['sources'],
+  dataDir: string,
+  home: string,
+): ResolvedSource[] {
+  const out: ResolvedSource[] = [];
+  const seen = new Set<string>();
+  specs.forEach((spec, index) => {
+    const legacy = typeof spec === 'string';
+    const adapterRaw = legacy ? spec : spec.adapter;
+    if (!(SOURCE_NAMES as readonly string[]).includes(adapterRaw)) {
+      // 静默跳过只会让"采集不到"更难发现：配置错误就是配置错误
+      throw new MoshiError(
+        'E_CONFIG',
+        `ingest.sources[${String(index)}]：未知适配器 ${adapterRaw}（可用：${SOURCE_NAMES.join(' / ')}）`,
+        { index, adapter: adapterRaw },
+      );
+    }
+    const adapter = adapterRaw as SourceName;
+    const id = legacy ? adapter : (spec.id ?? adapter);
+    if (seen.has(id)) {
+      throw new MoshiError('E_CONFIG', `ingest.sources 中 id 重复：${id}（每个实例的 id 必须唯一）`, {
+        id,
+      });
+    }
+    seen.add(id);
+
+    const rootRaw = legacy ? undefined : spec.root;
+    const root =
+      rootRaw === undefined || rootRaw === ''
+        ? adapter === 'claude-code'
+          ? path.join(home, '.claude', 'projects')
+          : path.join(dataDir, 'inbox')
+        : expandHome(rootRaw, home);
+    const fieldMap = legacy ? undefined : spec.field_map;
+    out.push({
+      id,
+      adapter,
+      root,
+      enabled: legacy ? true : spec.enabled,
+      ...(fieldMap === undefined ? {} : { fieldMap }),
+    });
+  });
+  return out;
+}
+
+/**
+ * 把配置里的 source 声明解析成"可用的会话源实例"（P3-A8）。
+ *
+ * - 旧写法字符串 → `{id: adapter, enabled: true}`，根目录用适配器默认值；
+ * - `[[ingest.sources]]` 可自定义 id / root / enabled / field_map；
+ * - 未知 adapter、重复 id 抛 `E_CONFIG`（在 `loadConfig` 阶段就炸，不在扫描时静默跳过）；
+ * - `enabled = false` 的实例被过滤掉（解析结果即"要扫的源"）。
+ */
+export function resolveSources(cfg: Config, home: string = os.homedir()): ResolvedSource[] {
+  return resolveSourceSpecs(cfg.ingest.sources, cfg.storage.data_dir, home).filter((s) => s.enabled);
+}
+
 /** 需要展开 `~` 并转为绝对路径的键（其余字符串是模型名、cron 表达式，不碰） */
 const PATH_KEYS: readonly { section: ConfigSection; key: string }[] = [
   { section: 'storage', key: 'data_dir' },
@@ -395,6 +483,17 @@ export function loadConfig(opts: LoadOptions = {}): Config {
     if (typeof value === 'string' && value !== '') bag[key] = expandHome(value, home);
   }
 
+  // P3-A8：source 实例在加载期校验（未知 adapter / 重复 id 直接报 E_CONFIG），
+  // 而不是等到扫描时静默跳过。
+  resolveSourceSpecs(cfg.ingest.sources, cfg.storage.data_dir, home);
+
+  // P3-A8：golden set 没显式配置时跟随 data_dir——换库后 golden 不应还留在真实 home。
+  // 默认 data_dir = ~/.moshi 时，解析结果与旧默认 `~/.moshi/golden/golden.jsonl` 一致。
+  const rawEval = (raw as { eval?: { golden_set?: unknown } }).eval;
+  if (rawEval?.golden_set === undefined) {
+    cfg.eval.golden_set = path.join(cfg.storage.data_dir, 'golden', 'golden.jsonl');
+  }
+
   return cfg;
 }
 
@@ -409,6 +508,8 @@ export function dataPaths(cfg: Config): {
   importCursors: string;
   collectCursors: string;
   backups: string;
+  /** golden set 所在目录（seed 写 `<goldenDir>/golden.v1.jsonl`） */
+  goldenDir: string;
 } {
   const root = cfg.storage.data_dir;
   return {
@@ -423,6 +524,9 @@ export function dataPaths(cfg: Config): {
     // 块扫描游标（详设 §5.12.4）：与 import 游标分离
     collectCursors: path.join(root, 'cursors.blocks.json'),
     backups: path.join(root, 'backups'),
+    // P3-A8：golden 跟着 eval.golden_set 走；空串（理论上的未配置形态）退回 data_dir
+    goldenDir:
+      cfg.eval.golden_set === '' ? path.join(root, 'golden') : path.dirname(cfg.eval.golden_set),
   };
 }
 

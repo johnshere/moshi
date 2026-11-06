@@ -13,9 +13,8 @@
  * 退出码（详设 §4.7）：`0` 成功、`1` 一般错误、`2` 参数/配置错、`4` 降级但可用
  * （没找到任何会话源——不是错误，只是这台机器上没有可导入的东西）。
  */
-import path from 'node:path';
 import { MoshiError } from '../../../domain/errors.js';
-import { createSource } from '../../../core/adapters/index.js';
+import { createSourceFor, type ResolvedSource } from '../../../core/adapters/index.js';
 import { CursorStore } from '../../../core/adapters/cursor.js';
 import { ingestSession } from '../../../core/write/ingest.js';
 import { harvest } from '../../../core/write/harvest.js';
@@ -23,14 +22,24 @@ import { runSchemaInfer } from '../../../core/lifecycle/schema-infer.js';
 import { openDb, closeDb } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { rebuildDegree, rebuildFts, tableCounts } from '../../../infra/sqlite/maintenance.js';
-import { dataPaths } from '../../config.js';
+import { dataPaths, resolveSources } from '../../config.js';
 import type { Command, CommandContext } from '../types.js';
 
 export interface ImportOptions {
   since: string;
-  sources: string[];
+  /** 已解析的 source 实例（命令层 resolveSources 得到，再按 --source 过滤） */
+  sources: ResolvedSource[];
   batchSize: number;
   factsPerSecond: number;
+}
+
+/** `parseImportArgs` 的产物：`sources` 是过滤词（id 或 adapter 名），不是实例 */
+export interface ImportArgs {
+  since?: string;
+  sources?: string[];
+  batchSize?: number;
+  factsPerSecond?: number;
+  help?: boolean;
 }
 
 export interface ImportResult {
@@ -51,8 +60,8 @@ export interface ImportResult {
 const DEFAULT_SINCE = '1970-01-01T00:00:00.000Z';
 
 /** 极简参数解析：只认 `--key value` 与 `--key=value`，不引第三方库 */
-export function parseImportArgs(args: readonly string[]): Partial<ImportOptions> & { help?: boolean } {
-  const out: Partial<ImportOptions> & { help?: boolean } = {};
+export function parseImportArgs(args: readonly string[]): ImportArgs {
+  const out: ImportArgs = {};
   for (let i = 0; i < args.length; i += 1) {
     const a = args[i];
     if (a === undefined) break;
@@ -127,9 +136,6 @@ export class RateLimiter {
 export interface RunImportDeps {
   db: ReturnType<typeof openDb>['db'];
   opts: ImportOptions;
-  home: string;
-  /** generic-jsonl 的收件目录（`<dataDir>/inbox`） */
-  genericInbox: string;
   importCursorsFile: string;
   onProgress?: (line: string) => void;
 }
@@ -159,24 +165,22 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
   });
   const limiter = new RateLimiter(opts.factsPerSecond);
 
-  for (const name of opts.sources) {
-    const source = createSource(name, {
-      home: deps.home,
-      genericRoot: deps.genericInbox,
-    });
+  for (const spec of opts.sources) {
+    const source = createSourceFor(spec);
     if (source === null) {
-      result.unavailable.push(name);
+      result.unavailable.push(spec.id);
       continue;
     }
     const det = await source.detect();
     if (!det.found) {
-      result.unavailable.push(name);
+      result.unavailable.push(spec.id);
       continue;
     }
 
     for await (const ref of source.listSessions(opts.since)) {
       result.sessions += 1;
-      const cursor = store.get(name, ref.path);
+      // 游标 key 用 source.id（P3-A8）：两个同 adapter 的实例共用 adapter 名会互相踩
+      const cursor = store.get(spec.id, ref.path);
       const ing = await ingestSession(db, source, ref, cursor);
       if (ing.error !== undefined) {
         // 出错不推进游标：下次重跑会重读这个文件（episode/annotation 幂等兜底）
@@ -185,7 +189,7 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
         continue;
       }
       result.turns += ing.events;
-      store.set(name, ref.path, ing.nextCursor);
+      store.set(spec.id, ref.path, ing.nextCursor);
       store.save(); // 每个会话读完整就落盘：中断也只丢当前这一个文件
 
       // 一片一调用：限速与进度都有落点
@@ -229,7 +233,7 @@ export const importCommand: Command = {
           '用法：moshi import [--since 2025-01-01] [--source claude-code] [--batch 500] [--rate 20]',
           '',
           '  --since   起始时间（缺省 1970-01-01，即全部历史）',
-          '  --source  只导某个来源，可重复；缺省取配置 [ingest] sources',
+          '  --source  按 source id 过滤（也接受 adapter 名），可重复；缺省取配置 [ingest] sources',
           '  --batch   每批 annotation 数（默认取 [ingest] import_batch）',
           '  --rate    每秒最多写入多少条事实（默认 20，0 表示不限速）',
           '',
@@ -238,9 +242,20 @@ export const importCommand: Command = {
       return 0;
     }
 
+    // P3-A8：配置里的 source 声明解析成实例；`--source` 只做过滤（id 或 adapter 名）
+    const allSources = resolveSources(ctx.cfg, ctx.home);
+    const wanted = parsed.sources;
+    const sources =
+      wanted === undefined
+        ? allSources
+        : allSources.filter((s) => wanted.includes(s.id) || wanted.includes(s.adapter));
+    const unknown = (wanted ?? []).filter(
+      (w) => !allSources.some((s) => s.id === w || s.adapter === w),
+    );
+
     const opts: ImportOptions = {
       since: parsed.since ?? DEFAULT_SINCE,
-      sources: parsed.sources ?? ctx.cfg.ingest.sources,
+      sources,
       batchSize: parsed.batchSize ?? ctx.cfg.ingest.import_batch,
       factsPerSecond: parsed.factsPerSecond ?? 20,
     };
@@ -252,14 +267,13 @@ export const importCommand: Command = {
       const result = await runImport({
         db,
         opts,
-        // home 只从 ctx 拿：与 cfg 同源，否则「配置读真实 home、会话扫另一个 home」
-        home: ctx.home,
-        genericInbox: path.join(paths.root, 'inbox'),
         importCursorsFile: paths.importCursors,
         onProgress: (line) => {
           ctx.stdout(line);
         },
       });
+      // CLI 上写错的 --source 与"配置的源不可用"同样处理：跳过，不算失败
+      const unavailable = [...unknown, ...result.unavailable];
 
       const counts = tableCounts(db);
       ctx.stdout(
@@ -272,8 +286,8 @@ export const importCommand: Command = {
             .map(([k, v]) => `${k}=${String(v)}`)
             .join(' ')}\n`,
       );
-      if (result.unavailable.length > 0) {
-        ctx.stderr(`未找到可导入的会话源：${result.unavailable.join(', ')}（跳过，不算失败）\n`);
+      if (unavailable.length > 0) {
+        ctx.stderr(`未找到可导入的会话源：${unavailable.join(', ')}（跳过，不算失败）\n`);
         return 4;
       }
       return 0;

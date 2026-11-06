@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { dataPaths, expandHome, loadConfig } from '../../src/app/config.js';
+import { dataPaths, expandHome, loadConfig, resolveSources } from '../../src/app/config.js';
 import { EMBED_DIM, EMBED_MODEL } from '../../src/domain/embedding.js';
 import { isMoshiError } from '../../src/domain/errors.js';
 
@@ -127,5 +127,103 @@ describe('配置加载（详设 §3.6）', () => {
     expect(p.db.startsWith(cfg.storage.data_dir)).toBe(true);
     expect(p.db.endsWith('moshi.db')).toBe(true);
     expect(p.lock.endsWith('daemon.lock')).toBe(true);
+  });
+
+  it('dataPaths.goldenDir 跟着 eval.golden_set 走（默认跟随 data_dir）', () => {
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'golden.toml'), home: HOME });
+    const p = dataPaths(cfg);
+    // 没显式配 eval.golden_set → 跟着 data_dir，换库不会把 golden 留在真实 home
+    expect(cfg.eval.golden_set).toBe(path.join(cfg.storage.data_dir, 'golden', 'golden.jsonl'));
+    expect(p.goldenDir).toBe(path.join(cfg.storage.data_dir, 'golden'));
+  });
+
+  it('显式 eval.golden_set 不被 data_dir 覆盖', () => {
+    const file = withToml(
+      '[storage]\ndata_dir = "/data-x"\n[eval]\ngolden_set = "/elsewhere/golden.jsonl"\n',
+    );
+    const cfg = loadConfig({ file, home: HOME });
+    expect(cfg.eval.golden_set).toBe(path.resolve('/elsewhere/golden.jsonl'));
+    expect(dataPaths(cfg).goldenDir).toBe(path.resolve('/elsewhere'));
+  });
+});
+
+describe('resolveSources（P3-A8 source 实例）', () => {
+  it('旧字符串写法：id=adapter，claude-code 根 = <home>/.claude/projects', () => {
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'a.toml'), home: HOME });
+    expect(resolveSources(cfg, HOME)).toEqual([
+      {
+        id: 'claude-code',
+        adapter: 'claude-code',
+        root: path.join(HOME, '.claude', 'projects'),
+        enabled: true,
+      },
+    ]);
+  });
+
+  it('旧字符串里的 generic-jsonl 根 = <data_dir>/inbox', () => {
+    const file = withToml('[storage]\ndata_dir = "/data-legacy"\n[ingest]\nsources = ["claude-code", "generic-jsonl"]\n');
+    const cfg = loadConfig({ file, home: HOME });
+    const list = resolveSources(cfg, HOME);
+    expect(list.map((s) => s.id)).toEqual(['claude-code', 'generic-jsonl']);
+    expect(list[1]!.adapter).toBe('generic-jsonl');
+    expect(list[1]!.root).toBe(path.join(path.resolve('/data-legacy'), 'inbox'));
+  });
+
+  it('[[ingest.sources]] 实例：自定义 id/root，enabled=false 被过滤', () => {
+    const file = withToml(
+      [
+        '[storage]',
+        'data_dir = "/data-x"',
+        '',
+        '[[ingest.sources]]',
+        'id = "work"',
+        'adapter = "claude-code"',
+        'root = "~/work-projects"',
+        '',
+        '[[ingest.sources]]',
+        'id = "old"',
+        'adapter = "claude-code"',
+        'root = "/tmp/old"',
+        'enabled = false',
+        '',
+        '[[ingest.sources]]',
+        'id = "inbox"',
+        'adapter = "generic-jsonl"',
+        'root = "/tmp/inbox"',
+        'field_map = { text = "message" }',
+        '',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ file, home: HOME });
+    const list = resolveSources(cfg, HOME);
+    expect(list.map((s) => s.id)).toEqual(['work', 'inbox']);
+    expect(list[0]!.root).toBe(path.join(HOME, 'work-projects'));
+    expect(list[1]!.fieldMap).toEqual({ text: 'message' });
+  });
+
+  it('重复 id 在加载期报 E_CONFIG', () => {
+    const file = withToml(
+      [
+        '[[ingest.sources]]',
+        'id = "same"',
+        'adapter = "claude-code"',
+        'root = "/tmp/a"',
+        '[[ingest.sources]]',
+        'id = "same"',
+        'adapter = "claude-code"',
+        'root = "/tmp/b"',
+        '',
+      ].join('\n'),
+    );
+    const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
+    expect(msg).toContain('ingest.sources');
+    expect(msg).toContain('same');
+  });
+
+  it('未知 adapter 在加载期报 E_CONFIG（不静默跳过）', () => {
+    const file = withToml('[ingest]\nsources = ["cursor"]\n');
+    const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
+    expect(msg).toContain('ingest.sources');
+    expect(msg).toContain('cursor');
   });
 });

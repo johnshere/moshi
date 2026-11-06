@@ -12,7 +12,7 @@ import {
 } from '../../src/core/adapters/cursor.js';
 import { ClaudeCodeAdapter, parseClaudeLine } from '../../src/core/adapters/claude-code.js';
 import { GenericJsonlAdapter } from '../../src/core/adapters/generic-jsonl.js';
-import { createSource } from '../../src/core/adapters/index.js';
+import { createSource, createSourceFor } from '../../src/core/adapters/index.js';
 import {
   canonicalToolName,
   emptyStats,
@@ -489,6 +489,53 @@ describe('createSource', () => {
     expect(createSource('generic-jsonl', { genericRoot: '/tmp/inbox' })?.name).toBe('generic-jsonl');
     expect(createSource('generic-jsonl')).toBeNull(); // 没给 root
     expect(createSource('nope')).toBeNull();
+  });
+});
+
+describe('createSourceFor（P3-A8 实例）', () => {
+  const makeRoot = (name: string, sessionId: string): string => {
+    const root = tempDir();
+    const proj = path.join(root, name);
+    mkdirSync(proj, { recursive: true });
+    writeFileSync(
+      path.join(proj, 'sess.jsonl'),
+      `${JSON.stringify({ type: 'user', message: { role: 'user', content: sessionId }, timestamp: '2026-01-01T00:00:00Z', cwd: proj, sessionId })}\n`,
+      'utf8',
+    );
+    return root;
+  };
+
+  it('按实例的 root 建适配器，两个实例扫各自的目录', async () => {
+    const rootA = makeRoot('proj-a', 'sess-a');
+    const rootB = makeRoot('proj-b', 'sess-b');
+    const a = createSourceFor({ id: 'a', adapter: 'claude-code', root: rootA, enabled: true });
+    const b = createSourceFor({ id: 'b', adapter: 'claude-code', root: rootB, enabled: true });
+    expect(a?.name).toBe('claude-code');
+    expect(b?.name).toBe('claude-code');
+
+    const pathsOf = async (src: NonNullable<typeof a>): Promise<string[]> => {
+      const out: string[] = [];
+      for await (const ref of src.listSessions('1970-01-01T00:00:00Z')) out.push(ref.path);
+      return out;
+    };
+    const pa = await pathsOf(a!);
+    const pb = await pathsOf(b!);
+    expect(pa).toHaveLength(1);
+    expect(pb).toHaveLength(1);
+    expect(pa[0]!.startsWith(rootA)).toBe(true);
+    expect(pb[0]!.startsWith(rootB)).toBe(true);
+    expect(pa[0]).not.toBe(pb[0]);
+  });
+
+  it('generic-jsonl 实例带 fieldMap 时按映射建适配器', () => {
+    const src = createSourceFor({
+      id: 'inbox',
+      adapter: 'generic-jsonl',
+      root: '/data/inbox',
+      enabled: true,
+      fieldMap: { text: 'message' },
+    });
+    expect(src?.name).toBe('generic-jsonl');
   });
 });
 

@@ -85,6 +85,31 @@ function fakeHome(opts: { sessions: number; turnsPerSession: number; pkgBase?: n
   return { home, dataDir };
 }
 
+/** 造一个 generic-jsonl 源目录：一行工具调用（工具名 + 输出在同一记录里） */
+function writeGenericSession(root: string, file: string, pkg: string): void {
+  mkdirSync(root, { recursive: true });
+  const sessionId = file.replace(/\.jsonl$/, '');
+  const lines: string[] = [];
+  for (let t = 0; t < 3; t += 1) {
+    const ts = new Date(Date.UTC(2026, 0, 2, 0, 0, 0) + t * 1000).toISOString();
+    lines.push(
+      JSON.stringify({
+        ts,
+        role: 'assistant',
+        session_id: sessionId,
+        cwd: '/home/u/gen',
+        tool: {
+          name: 'Bash',
+          input: { command: 'npm install' },
+          output: `+ ${pkg}@1.0.0\n`,
+          exit_code: 0,
+        },
+      }),
+    );
+  }
+  writeFileSync(path.join(root, file), `${lines.join('\n')}\n`, 'utf8');
+}
+
 async function runImport(
   home: string,
   args: string[],
@@ -198,14 +223,58 @@ describe('moshi import（§5.11 验收）', () => {
     const home = tempDir();
     const dataDir = path.join(home, '.moshi');
     mkdirSync(dataDir, { recursive: true });
+    // 合法的 adapter 但缺省根目录不存在：源可用性按"扫不扫得到"判断，而不是按名字
     writeFileSync(
       path.join(dataDir, 'config.toml'),
-      `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n[ingest]\nsources = ["nope"]\n`,
+      `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n[ingest]\nsources = ["generic-jsonl"]\n`,
       'utf8',
     );
     const r = await runImport(home, ['--rate', '0']);
     expect(r.code).toBe(4);
     expect(r.err).toContain('未找到可导入的会话源');
+    expect(r.err).toContain('generic-jsonl');
+  });
+
+  it('两个 generic-jsonl 实例各导各的，游标 key 是 source id（P3-A8）', async () => {
+    const home = tempDir();
+    const dataDir = path.join(home, '.moshi');
+    const rootA = path.join(home, 'inbox-a');
+    const rootB = path.join(home, 'inbox-b');
+    mkdirSync(dataDir, { recursive: true });
+    writeGenericSession(rootA, 'alpha.jsonl', 'alpha-pkg');
+    writeGenericSession(rootB, 'beta.jsonl', 'beta-pkg');
+    writeFileSync(
+      path.join(dataDir, 'config.toml'),
+      [
+        '[storage]',
+        `data_dir = "${dataDir.replace(/\\/g, '/')}"`,
+        '',
+        '[[ingest.sources]]',
+        'id = "alpha"',
+        'adapter = "generic-jsonl"',
+        `root = "${rootA.replace(/\\/g, '/')}"`,
+        '',
+        '[[ingest.sources]]',
+        'id = "beta"',
+        'adapter = "generic-jsonl"',
+        `root = "${rootB.replace(/\\/g, '/')}"`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const r = await runImport(home, ['--rate', '0']);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('导入完成');
+    expect(factCount(dataDir)).toBeGreaterThan(0);
+
+    const cursors = JSON.parse(
+      readFileSync(path.join(dataDir, 'cursors.import.json'), 'utf8'),
+    ) as Record<string, Record<string, unknown>>;
+    // 游标按实例 id 分桶：两个实例都在，且各自只扫到自己的文件
+    expect(Object.keys(cursors).sort()).toEqual(['alpha', 'beta']);
+    expect(Object.keys(cursors['alpha'] ?? {})).toHaveLength(1);
+    expect(Object.keys(cursors['beta'] ?? {})).toHaveLength(1);
   });
 
   it('--help 打印用法并返回 0', async () => {

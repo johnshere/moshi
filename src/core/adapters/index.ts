@@ -21,6 +21,38 @@ export interface SourceFactoryOptions {
 export const SOURCE_NAMES = ['claude-code', 'generic-jsonl'] as const;
 export type SourceName = (typeof SOURCE_NAMES)[number];
 
+/**
+ * 配置解析后的会话源实例（P3-A8）。
+ *
+ * 旧配置 `sources = ["claude-code"]` 归一成 `{id:'claude-code', root:<home>/.claude/projects}`；
+ * `[[ingest.sources]]` 允许自定义 id/root/enabled/field_map。游标 key 用 `id`，
+ * 不再用适配器名——两个 claude-code 实例扫不同目录时必须互不踩游标。
+ */
+export interface ResolvedSource {
+  id: string;
+  adapter: SourceName;
+  /** 已展开为绝对路径的会话根目录 */
+  root: string;
+  enabled: boolean;
+  /** 该实例的字段映射（仅 generic-jsonl 有意义） */
+  fieldMap?: Record<string, string>;
+}
+
+/** 按已解析的实例创建适配器；未知 adapter 返回 null（配置层已拦截，这里只是兜底） */
+export function createSourceFor(source: ResolvedSource): SessionSource | null {
+  switch (source.adapter) {
+    case 'claude-code':
+      return new ClaudeCodeAdapter({ root: source.root });
+    case 'generic-jsonl':
+      return new GenericJsonlAdapter({
+        root: source.root,
+        ...(source.fieldMap === undefined ? {} : { fieldMap: source.fieldMap }),
+      });
+    default:
+      return null;
+  }
+}
+
 export function createSource(name: string, opts: SourceFactoryOptions = {}): SessionSource | null {
   switch (name) {
     case 'claude-code':

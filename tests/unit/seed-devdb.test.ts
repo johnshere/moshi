@@ -9,7 +9,7 @@
  *
  * 全部落在 `mkdtempSync(tmpdir())` 下的临时库，**不碰真实 home**（C:\Users\Administrator）。
  */
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -22,6 +22,7 @@ import {
   assertOwnedDb,
   generateSessions,
   parseImportSummary,
+  seedDevDb,
   PROJECT_DIR_NAME,
   SEED,
 } from '../../tools/seed-devdb.js';
@@ -39,8 +40,8 @@ function freshDb(): Db {
   return db;
 }
 
-/** 本工具写进库里的 episode 只会来自这个目录 */
-const OWNED_PREFIX = `C:\\Users\\Administrator\\.claude\\projects\\${PROJECT_DIR_NAME}`;
+/** 本工具写进库里的 episode 只会来自这个目录（P3-A8：不再硬编码某台机器的 home） */
+const OWNED_PREFIX = path.join(tmpdir(), 'moshi-seed-owned', PROJECT_DIR_NAME);
 
 describe('generateSessions：同种子同输出', () => {
   it('同种子两次调用逐字节一致', () => {
@@ -106,14 +107,21 @@ describe('assertOwnedDb：外来数据拒绝执行', () => {
       ts: '2026-10-21T01:00:00.000Z',
       rawHash: 'hash-owned',
       session: 'p3a4-00-0',
-      rawPath: `${OWNED_PREFIX}\\p3a4-00-0.jsonl`,
+      rawPath: path.join(OWNED_PREFIX, 'p3a4-00-0.jsonl'),
     });
     expect(assertOwnedDb(db, OWNED_PREFIX).empty).toBe(false);
   });
 
   it('库里已有别人的数据 → 抛 ForeignDataError，且一行都不删', () => {
     const db = freshDb();
-    const foreignPath = 'C:\\Users\\Administrator\\.claude\\projects\\some-real-project\\session.jsonl';
+    const foreignPath = path.join(
+      tmpdir(),
+      'moshi-seed-foreign-home',
+      '.claude',
+      'projects',
+      'some-real-project',
+      'session.jsonl',
+    );
     insertIfAbsent(db, { ts: '2026-10-21T01:00:00.000Z', rawHash: 'hash-foreign', rawPath: foreignPath });
     let caught: unknown = null;
     try {
@@ -148,5 +156,42 @@ describe('parseImportSummary', () => {
 
   it('缺字段时全 0（不抛）', () => {
     expect(parseImportSummary('nothing here').sessions).toBe(0);
+  });
+});
+
+describe('seedDevDb --config（P3-A8 统一配置）', () => {
+  it('dry-run：会话根/库/golden 都跟着配置走，临时 home 下不创建 ~/.moshi', async () => {
+    const tmp = mkdtempSync(path.join(tmpdir(), 'moshi-seed-cfg-'));
+    const home = path.join(tmp, 'home'); // 故意不创建
+    const dataDir = path.join(tmp, 'data');
+    const projectsRoot = path.join(tmp, 'projects');
+    const configFile = path.join(tmp, 'config.toml');
+    writeFileSync(
+      configFile,
+      [
+        '[storage]',
+        `data_dir = "${dataDir.replace(/\\/g, '/')}"`,
+        '',
+        '[[ingest.sources]]',
+        'id = "dev"',
+        'adapter = "claude-code"',
+        `root = "${projectsRoot.replace(/\\/g, '/')}"`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      const res = await seedDevDb({ configFile, dryRun: true, home });
+      // 会话根 = 配置里 source 的 root
+      expect(res.projectDir).toBe(path.join(projectsRoot, PROJECT_DIR_NAME));
+      expect(existsSync(res.projectDir)).toBe(true);
+      // golden 跟 data_dir 走，不再写真实 home
+      expect(res.goldenFile).toBe(path.join(dataDir, 'golden', 'golden.v1.jsonl'));
+      // 关键：配置没指向真实 home，就不该在临时 home 下留任何库文件
+      expect(existsSync(path.join(home, '.moshi'))).toBe(false);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });

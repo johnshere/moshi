@@ -12,7 +12,8 @@
  *    护栏 ⇒ 库里只要出现本工具目录之外的数据就报错退出，**绝不自动清空**。
  * 3. **零 Python**。全程纯符号模式：不碰向量路、不装依赖、不写 fact_vec。
  *
- * 用法：`pnpm seed:devdb`（可选 `--home <dir>` 覆盖家目录，测试/演练用）。
+ * 用法：`pnpm seed:devdb -- --config <dev.toml>`（P3-A8：配置源=dev 配置，可用
+ * `--dry-run` 只生成 jsonl 演练）。
  */
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -20,7 +21,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 
-import { dataPaths, loadConfig } from '../src/app/config.js';
+import { dataPaths, loadConfig, resolveSources } from '../src/app/config.js';
+import { ensureDataDirs } from '../src/app/lifecycle.js';
 import { runCli } from '../src/app/cli/index.js';
 import { callTool } from '../src/app/mcp/tools.js';
 import { closeDb, openDb, type Db } from '../src/infra/sqlite/db.js';
@@ -441,9 +443,12 @@ export interface SeedResult {
 
 // ── 主流程 ───────────────────────────────────────────────────────────────
 export interface SeedOptions {
-  home?: string;
+  /** 配置文件路径（`--config`）；不传走 `$MOSHI_CONFIG` / `<home>/.moshi/config.toml` */
+  configFile?: string;
   /** 只生成 jsonl 不导入（演练用） */
   dryRun?: boolean;
+  /** 覆盖 home（测试用）；会话根目录由配置 source 决定 */
+  home?: string;
 }
 
 function makeLogger(sink: string[]): (line: string) => void {
@@ -463,15 +468,24 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
   process.env['TEMP'] = TEMP_DIR;
   process.env['TMP'] = TEMP_DIR;
 
-  const cfg = loadConfig({ home });
+  const cfg =
+    options.configFile === undefined
+      ? loadConfig({ home })
+      : loadConfig({ file: options.configFile, home });
   const paths = dataPaths(cfg);
-  const projectsRoot = path.join(home, '.claude', 'projects');
+  // P3-A8：会话根目录由配置 source 实例决定（旧配置没写 root 时仍是 <home>/.claude/projects）
+  const sources = resolveSources(cfg, home);
+  const claudeSource = sources.find((s) => s.adapter === 'claude-code');
+  const projectsRoot = claudeSource?.root ?? path.join(home, '.claude', 'projects');
   const projectDir = path.join(projectsRoot, PROJECT_DIR_NAME);
   const ownedPrefix = `${projectDir}${path.sep}`;
+  const goldenFile = path.join(paths.goldenDir, 'golden.v1.jsonl');
 
   log(`[seed:devdb] home=${home}`);
+  log(`[seed:devdb] 配置=${options.configFile ?? '(默认/MOSHI_CONFIG)'}`);
   log(`[seed:devdb] 库=${paths.db}`);
   log(`[seed:devdb] 会话目录=${projectDir}`);
+  log(`[seed:devdb] golden=${goldenFile}`);
 
   // 0) 生成 jsonl（固定种子；已存在同内容文件不重写）
   const sessions = generateSessions(SEED);
@@ -496,11 +510,14 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
       queries: [],
       feedback: [],
       golden: [],
-      goldenFile: '',
+      goldenFile,
       doctorOutput: '',
       evalOutput: '',
     };
   }
+
+  // 数据目录（库/logs/tmp/backups/golden）由配置决定；dev 配置下绝不落真实 ~/.moshi
+  ensureDataDirs(cfg);
 
   // 1) 护栏：库与目录都必须是"本工具自己的"（不含外来数据）
   assertProjectsRootOwned(projectsRoot, PROJECT_DIR_NAME);
@@ -515,7 +532,12 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
     const out: string[] = [];
     const err: string[] = [];
     const started = Date.now();
-    const code = await runCli(argv, { home, stdout: (s) => out.push(s), stderr: (s) => err.push(s) });
+    const code = await runCli(
+      argv,
+      options.configFile === undefined
+        ? { home, stdout: (s) => out.push(s), stderr: (s) => err.push(s) }
+        : { file: options.configFile, home, stdout: (s) => out.push(s), stderr: (s) => err.push(s) },
+    );
     const step: StepResult = {
       name,
       argv,
@@ -655,7 +677,7 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
     // 5) golden：从库里**真实存在的事实**出题，四类各 8 题
     const facts = readFacts(db);
     const golden = buildGolden(facts);
-    const goldenFile = path.join(home, '.moshi', 'golden', 'golden.v1.jsonl');
+    // golden 路径由配置决定（P3-A8）：dev 配置下 = `<data_dir>/golden/golden.v1.jsonl`
     mkdirSync(path.dirname(goldenFile), { recursive: true });
     writeFileSync(goldenFile, golden.map((g) => JSON.stringify(g)).join('\n') + '\n', 'utf8');
     log(`[seed:devdb] golden：${golden.length} 题 → ${goldenFile}`);
@@ -817,18 +839,55 @@ export function isCliEntry(): boolean {
 
 if (isCliEntry()) {
   const argv = process.argv.slice(2);
-  const homeIdx = argv.indexOf('--home');
-  const home = homeIdx >= 0 ? argv[homeIdx + 1] : undefined;
-  const dryRun = argv.includes('--dry-run');
-  seedDevDb({ home, dryRun })
-    .then((res) => {
-      const out = path.join(TEMP_DIR, 'p3a4-seed-result.json');
-      writeFileSync(out, `${JSON.stringify({ ...res, queries: res.queries.slice(0, 5) }, null, 2)}\n`, 'utf8');
-      process.stdout.write(`\n[seed:devdb] 完成；摘要 ${out}\n`);
-    })
-    .catch((err: unknown) => {
-      const e = err as Error;
-      process.stderr.write(`\n[seed:devdb] 失败：${e.name}: ${e.message}\n${e.stack ?? ''}\n`);
-      process.exitCode = 1;
-    });
+  // P3-A8：只认 `--config <path>` / `--config=<path>`（`--home` 已移除：库与会话根都由配置决定）
+  let configFile: string | undefined;
+  let configError = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    const a = argv[i];
+    if (a === '--config') {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--')) {
+        configError = true;
+        break;
+      }
+      configFile = v;
+      i += 1;
+    } else if (a?.startsWith('--config=') === true) {
+      const v = a.slice('--config='.length);
+      if (v === '') {
+        configError = true;
+        break;
+      }
+      configFile = v;
+    } else if (a === '--home' || a?.startsWith('--home=') === true) {
+      process.stderr.write('--home 已移除：请用 --config 指定配置（库与会话根都跟着配置走）\n');
+      process.exitCode = 2;
+      configError = true;
+      break;
+    }
+  }
+  if (configError) {
+    process.stderr.write(
+      '用法：pnpm seed:devdb -- --config <path> [--dry-run]\n',
+    );
+  } else {
+    const dryRun = argv.includes('--dry-run');
+    seedDevDb({ ...(configFile === undefined ? {} : { configFile }), dryRun })
+      .then((res) => {
+        const out = path.join(TEMP_DIR, 'p3a4-seed-result.json');
+        writeFileSync(
+          out,
+          `${JSON.stringify({ ...res, queries: res.queries.slice(0, 5) }, null, 2)}\n`,
+          'utf8',
+        );
+        process.stdout.write(`\n[seed:devdb] 完成；摘要 ${out}\n`);
+      })
+      .catch((err: unknown) => {
+        const e = err as Error;
+        process.stderr.write(
+          `\n[seed:devdb] 失败：${e.name}: ${e.message}\n${e.stack ?? ''}\n`,
+        );
+        process.exitCode = 1;
+      });
+  }
 }

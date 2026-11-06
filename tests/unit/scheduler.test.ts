@@ -277,8 +277,7 @@ describe('限速与联动', () => {
       cfg: fast,
       cursorsFile: path.join(tmpdir(), 'never-written-cursors.json'),
       home: tmpdir(),
-      genericInbox: path.join(tmpdir(), 'never-inbox'),
-    });
+      });
     const layout = startLayoutRunner({ db, cfg: fast });
 
     expect(setIntervalSpy).not.toHaveBeenCalled();
