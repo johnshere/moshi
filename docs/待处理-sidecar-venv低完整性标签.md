@@ -125,3 +125,4 @@ icacls sidecar\.venv /setintegritylevel (OI)(CI)M /T
 
 - P3-A3 的代码改动已全部落盘并提交，包括 encode.py 改 torch、fetch_model.py 改拉 BAAI 原版、地板 0.6、启动超时 20s、概设三档预算重标。状态保持 **WIP**，等本问题解决后完成「本机库重编码 + eval --vector + 台账收口」再标 DONE。
 - 台账：阻塞记为 **B-7**；防御性改进记为 **I-55**；sidecar 就绪耗时 11.3s 的「服务状态管理」待办记为 **I-54**。
+- **2026-11-07 归属更正**：I-55 只属 **M1**（B-7 的 `E:\Workspace` 低完整性继承）；M2 未复现（写探测通过、重编码 60/60、`eval --vector` 10/10），M2 的 P3-A3 机器维度已达标，m2 收口不依赖 I-55；I-55 硬化仍按 P3-A7/M1 侧处理。

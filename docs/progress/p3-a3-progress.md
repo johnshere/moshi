@@ -1,6 +1,6 @@
 # P3-A3 嵌入改回 torch（sentence-transformers）
 
-状态：WIP（2026-11-05 19:55 开工；21:35 代码提交，收口被 B-7 阻断；23:35 环境供给遗留落盘，23:50 改名 setup-env 并归位本卡）
+状态：WIP（2026-11-05 19:55 开工；21:35 代码提交，收口被 B-7 阻断；23:35 环境供给遗留落盘，23:50 改名 setup-env 并归位本卡；2026-11-07 口径更正：I-55 归 M1 问题，M2 机器维度已达标，m2 收口不依赖 I-55）
 
 ## 已落盘
 
@@ -29,7 +29,7 @@
 
 ## 阻断（21:20）
 
-- 本机库重编码时，sidecar 写 `~/.moshi/sidecar.ready.tmp` 被拒：venv 的 python.exe 带低完整性标签（在 DSH 沙箱里创建所致），记 B-7。
+- 本机库重编码时，sidecar 写 `~/.moshi/sidecar.ready.tmp` 被拒：venv 的 python.exe 带低完整性标签（2026-11-06 更正：继承父目录 `E:\Workspace` 的 `Low (OI)(CI)` 标签，非 DSH 沙箱创建所致），记 B-7。
 - 详见 `docs/待处理-sidecar-venv低完整性标签.md`。
 - vec-sync 真 sidecar 全链路 3/3 通过（临时目录在工程内，同为低完整性，所以不受影响）。
 
@@ -38,11 +38,18 @@
 - 已落盘：`scripts/setup-lib.mjs`（纯逻辑）+ `setup-lib.d.mts`、`scripts/setup-env.mjs`（CLI，默认初次判定 / --force / --hook / --check）、`tests/unit/setup-env.test.ts`（13 例）、package.json 的 `setup:env`（--force）与 `postinstall`（--hook）、README 用法。
 - 判定 = venv 存在 + 写主目录探测 + import 编码栈 + 模型权重 + 依赖声明 hash（锁文件优先，锁文件工具选型待定）。
 - 本机实测 `--check`：写探测通过、缺 torch、缺模型、hash 不一致 → `E_MODULE_MISSING` exit 3；verify 全绿（115 files / 1384 passed / 3 skipped）。
-- 待办：运行时侧接线（resolvePython 写探测 + 原因码 + server.py --selftest，I-55）；低完整性 fixture 回归（`icacls /setintegritylevel L` 迷你 venv）；锁文件工具选型。
+- 待办（**M1 侧 / P3-A7 硬化，不阻塞 M2**）：运行时侧接线（resolvePython 写探测 + 原因码 + server.py --selftest，I-55）；低完整性 fixture 回归（**M1 条件回归**，`icacls /setintegritylevel L` 迷你 venv）；锁文件工具选型。
+
+## I-55 的归属（2026-11-07 用户裁定）
+
+- I-55 是 **M1 问题**：B-7 的低完整性标签继承只发生在 M1 的 `E:\Workspace`（根带可继承 `Low (OI)(CI)`）。
+- M2 未复现：`setup-env --check` 写探测通过、重编码 60/60 · 1.09s、sidecar ready 8.47s、`eval --vector` 拒答 10/10 / 单跳 10/10；M2 的 venv 能写 `~/.moshi`。
+- 因此低完整性 fixture 是 M1 条件回归，不是 M2 机器证据；I-55 的运行时写探测/原因码/selftest/锁文件硬化转 M1 侧/P3-A7（编号待定），不计 M2 缺项。
+- M2 的 P3-A3 机器维度已达标，m2 收口不依赖 I-55；M1 仍待 `fact_vec` 重编码。
 
 ## 剩余（依赖装好后）
 
 1. `pnpm setup:env` 装 torch 单栈 → 本机库重编码 `fact_vec`（60 条）；
 2. `eval --golden v1 --vector` 四类通过，复核地板 0.6；
-3. `sidecar.test.ts` 不再 skip（探测超时问题见 I-55）；
-4. verify + build；台账收口，改名 `.done.md`。
+3. `sidecar.test.ts`：M2 按 `skipIf(!pythonOk || !modelOk)` 条件应不 skip（venv/模型均齐）；M1 的整组 skip 是 15s 冷 import 超时（I-55），不属 M2；
+4. M2：verify + build 后按 `DONE.m2` 收口；M1 待 `fact_vec` 重编码。
