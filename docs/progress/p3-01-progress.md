@@ -1,6 +1,6 @@
 # P3-01 进度
 
-状态：DONE（独立验收 PASS，AC-1..AC-7；待 Lead commit）
+状态：DONE（独立验收 PASS，AC-1..AC-7；commit 0bc52c7）
 实施：impl-contract
 验收：verify-contract（复用 verify-p1-16）
 设计：`docs/progress/m2-p3-20261107/p3-01-design.md`
