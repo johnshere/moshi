@@ -362,7 +362,9 @@ function resolveSourceSpecs(
       rootRaw === undefined || rootRaw === ''
         ? adapter === 'claude-code'
           ? path.join(home, '.claude', 'projects')
-          : path.join(dataDir, 'inbox')
+          : adapter === 'dsh'
+            ? path.join(home, '.dsh', 'sessions')
+            : path.join(dataDir, 'inbox')
         : expandHome(rootRaw, home);
     const fieldMap = legacy ? undefined : spec.field_map;
     out.push({

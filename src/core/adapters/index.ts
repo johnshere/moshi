@@ -7,6 +7,7 @@
  */
 import path from 'node:path';
 import { ClaudeCodeAdapter } from './claude-code.js';
+import { DshAdapter } from './dsh.js';
 import { DEFAULT_FIELD_MAP, GenericJsonlAdapter, type FieldMap } from './generic-jsonl.js';
 import type { SessionSource } from './session-source.js';
 
@@ -18,7 +19,7 @@ export interface SourceFactoryOptions {
   fieldMap?: Partial<FieldMap>;
 }
 
-export const SOURCE_NAMES = ['claude-code', 'generic-jsonl'] as const;
+export const SOURCE_NAMES = ['claude-code', 'dsh', 'generic-jsonl'] as const;
 export type SourceName = (typeof SOURCE_NAMES)[number];
 
 /**
@@ -43,6 +44,8 @@ export function createSourceFor(source: ResolvedSource): SessionSource | null {
   switch (source.adapter) {
     case 'claude-code':
       return new ClaudeCodeAdapter({ root: source.root });
+    case 'dsh':
+      return new DshAdapter({ root: source.root });
     case 'generic-jsonl':
       return new GenericJsonlAdapter({
         root: source.root,
@@ -57,6 +60,8 @@ export function createSource(name: string, opts: SourceFactoryOptions = {}): Ses
   switch (name) {
     case 'claude-code':
       return new ClaudeCodeAdapter(opts.home === undefined ? {} : { root: claudeRoot(opts.home) });
+    case 'dsh':
+      return new DshAdapter(opts.home === undefined ? {} : { root: dshRoot(opts.home) });
     case 'generic-jsonl': {
       if (opts.genericRoot === undefined) return null;
       return new GenericJsonlAdapter({
@@ -71,6 +76,10 @@ export function createSource(name: string, opts: SourceFactoryOptions = {}): Ses
 
 export function claudeRoot(home: string): string {
   return path.join(home, '.claude', 'projects');
+}
+
+export function dshRoot(home: string): string {
+  return path.join(home, '.dsh', 'sessions');
 }
 
 export { DEFAULT_FIELD_MAP };
