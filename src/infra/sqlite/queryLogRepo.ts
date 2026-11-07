@@ -129,6 +129,27 @@ export function countQueryLogs(db: Db): number {
   return row.n;
 }
 
+/**
+ * 最近 `limit` 条**带 `stage_ms_json.subgraph_nodes` 埋点**的查询的平均子图节点数
+ * （详设 §7.6 门槛 2）。
+ *
+ * 只统计有埋点的行：P3-07 之前的查询没这个字段，把它算成 0 会凭空拉低密度。
+ */
+export function recentSubgraphNodeStats(
+  db: Db,
+  limit: number,
+): { avg: number | null; observed: number } {
+  const row = db
+    .prepare(
+      `SELECT AVG(json_extract(stage_ms_json, '$.subgraph_nodes')) AS avg, COUNT(*) AS n
+         FROM (SELECT stage_ms_json FROM query_log
+                WHERE json_extract(stage_ms_json, '$.subgraph_nodes') IS NOT NULL
+                ORDER BY ts DESC LIMIT ?)`,
+    )
+    .get(limit) as { avg: number | null; n: number };
+  return { avg: row.avg, observed: row.n };
+}
+
 export function markCited(db: Db, queryId: string, mIds: readonly number[]): void {
   if (mIds.length === 0) return;
   const placeholders = mIds.map(() => '?').join(',');

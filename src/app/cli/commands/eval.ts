@@ -37,10 +37,12 @@ import { migrate } from '../../../infra/sqlite/migrate.js';
 import { safeRemoveDir } from '../../../infra/fs/safeWrite.js';
 import { SidecarClient } from '../../../infra/sidecar/client.js';
 import { setVectorDisabled, syncFactVectors } from '../../../infra/vec/index.js';
+import { checkGatGate, evaluateGatGate, GATE_QUERY_WINDOW } from '../../../core/ops/gate.js';
+import { dataPaths } from '../../config.js';
 import { runMemoryQuery } from '../../mcp/query.js';
 import { encodeViaSidecar, type EncodeFn, type McpDeps } from '../../mcp/deps.js';
 import { ensureDataDirs } from '../../lifecycle.js';
-import type { Command } from '../types.js';
+import type { Command, CommandContext } from '../types.js';
 
 // P1-16 的单测/脚本从 CLI 模块直接 import 这两个函数与题型；实现已抽到
 // core/ops/eval（P2-19A-13b），这里保留同名转出，避免旧调用点被迫改路径。
@@ -60,13 +62,48 @@ export async function evaluateItem(deps: McpDeps, item: GoldenItem): Promise<Eva
   );
 }
 
+/**
+ * `moshi eval gate`（详设 §7.6 / P3-09）：打印双门槛判定 JSON，达标退出 0，
+ * 不达标退出 1。只读用户库，不迁移、不写任何表。
+ */
+function runGate(ctx: CommandContext): number {
+  const dbFile = dataPaths(ctx.cfg).db;
+  let result;
+  try {
+    if (!existsSync(dbFile)) {
+      // 没有库 = 什么都没有：按 0 计，不替用户建库（建库是 init/daemon 的事）
+      result = evaluateGatGate({
+        samples: 0,
+        avgSubgraphNodes: null,
+        observedQueries: 0,
+        window: GATE_QUERY_WINDOW,
+      });
+    } else {
+      const { db } = openDb({ file: dbFile, readonly: true });
+      try {
+        result = checkGatGate(db);
+      } finally {
+        closeDb(db);
+      }
+    }
+  } catch (err) {
+    ctx.stderr(`gate 读取失败：${(err as Error).message}\n`);
+    return 2;
+  }
+  ctx.stdout(`${JSON.stringify(result)}\n`);
+  return result.ok ? 0 : 1;
+}
+
 export const evalCommand: Command = {
   name: 'eval',
-  summary: '运行 golden set 评估（moshi eval run）',
+  summary: '运行 golden set 评估（moshi eval run）或 GAT 双门槛（moshi eval gate）',
   async run(ctx) {
     const args = ctx.args;
+    if (args[0] === 'gate') return runGate(ctx);
     if (args[0] !== 'run') {
-      ctx.stderr(`用法：moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial]\n`);
+      ctx.stderr(
+        '用法：moshi eval gate\n        moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial]\n',
+      );
       return 2;
     }
     const goldenArg = args.find((a, i) => a === '--golden' && args[i + 1] !== undefined);

@@ -18,6 +18,7 @@ import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
 import { startScheduler, type Scheduler } from './jobs/scheduler.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
+import { enforceGatGate } from '../core/ops/gate.js';
 import { VERSION } from './version.js';
 
 export { VERSION };
@@ -83,6 +84,22 @@ export async function main(argv: readonly string[]): Promise<number> {
     instance = await boot(cfg, {
       // Fastify 接管全部 HTTP 面：/ui、/api/*、/mcp 挂在同一个端口。
       handlerFactory: async ({ db, cfg: booted, token }) => {
+        // P3-09 双门槛硬门禁（详设 §7.6）：不达标的模式不许生效。
+        // 只压有效值、不改配置文件——数据攒够了下次启动自动放行。
+        const enforced = enforceGatGate(booted.model.gat_mode, db);
+        if (enforced.refused) {
+          log.warn(
+            {
+              event: 'model.gate_refused',
+              mode: booted.model.gat_mode,
+              reason: enforced.gate?.reason,
+              current: enforced.gate?.current,
+              required: enforced.gate?.required,
+            },
+            '双门槛未达标，拒绝启用 GAT（有效模式回退 off）',
+          );
+          booted.model.gat_mode = 'off';
+        }
         // P1-22 写入闭环：annotation 入队后由这个 runner 消费成事实。
         // 先起 runner 再建 app——/mcp 上线时 wake 必须已经可用，否则第一批
         // "记住"要等 15s 兜底扫描才生效。
