@@ -18,6 +18,7 @@ import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
 import { startScheduler, type Scheduler } from './jobs/scheduler.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
+import { Breaker } from '../core/read/breaker.js';
 import { enforceGatGate } from '../core/ops/gate.js';
 import { VERSION } from './version.js';
 
@@ -72,6 +73,15 @@ export async function main(argv: readonly string[]): Promise<number> {
 
   let instance;
   let sidecar: SidecarClient | undefined;
+  // P3-10 熔断：进程内单例，三个触发降档后不自动恢复（详设 §7.7）
+  const breaker = new Breaker({
+    onTrip: (trip) => {
+      log.warn(
+        { event: 'gat.breaker', reason: trip.reason, to: trip.to, at: new Date(trip.at).toISOString() },
+        `GAT 熔断（${trip.reason}）：降为 ${trip.to}，需人工确认后恢复`,
+      );
+    },
+  });
   let runner: HarvestRunner | undefined;
   let schemaRunner: SchemaInferRunner | undefined;
   let communityRunner: CommunityRunner | undefined;
@@ -120,6 +130,7 @@ export async function main(argv: readonly string[]): Promise<number> {
           cfg: booted,
           token,
           sidecar,
+          breaker,
           onEnqueued: () => runner?.wake(),
         });
         return server;

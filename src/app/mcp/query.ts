@@ -103,7 +103,8 @@ export async function runMemoryQuery(deps: McpDeps, input: QueryInput): Promise<
     {
       db: deps.db,
       params: searchParamsOf(deps.cfg),
-      gatMode: deps.cfg.model.gat_mode,
+      // 档位取配置与熔断的较低者（P3-10）：熔断后不自动恢复
+      gatMode: deps.breaker?.mode(deps.cfg.model.gat_mode) ?? deps.cfg.model.gat_mode,
       ...(deps.encode === undefined ? {} : { encode: deps.encode }),
       ...(deps.score === undefined ? {} : { score: deps.score }),
       deltaCap: deps.cfg.model.delta_cap,

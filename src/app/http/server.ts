@@ -24,7 +24,8 @@ import { countFact, countVec, vectorDisabled, VEC_DIM } from '../../infra/vec/in
 import { countFts } from '../../infra/sqlite/ftsRepo.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
-import { buildEvidenceCache, encodeViaSidecar, scoreViaSidecar, type McpDeps } from '../mcp/deps.js';
+import { buildEvidenceCache, encodeViaSidecar, scoreViaSidecar, scoreWithBreaker, type McpDeps } from '../mcp/deps.js';
+import type { Breaker } from '../../core/read/breaker.js';
 import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
 import { batchRoutes } from './routes/batch.js';
@@ -54,6 +55,8 @@ export interface HttpDeps {
   batchOpTtlMs?: number;
   /** 证据链 ring buffer（P2-24）：不传则本实例自建一份（daemon 里 MCP 采集与 HTTP 只读共用它） */
   traceStore?: TraceStore;
+  /** 模型熔断（P3-10）：daemon 注入进程内单例；不传则按配置档位、不熔断 */
+  breaker?: Breaker;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -143,12 +146,20 @@ export async function buildHttpApp(deps: HttpDeps) {
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──
   // 读取通路的两个注入位（P1-20）：向量编码走 sidecar（懒启动，不应答即降级），
   // 证据缓存整个进程一份（写库 → schema_rev 变 → 全清）。
+  const sidecar = deps.sidecar;
+  const breaker = deps.breaker;
+  const rawScore = sidecar === undefined ? undefined : scoreViaSidecar(sidecar);
+  // P3-10：打分外面套熔断观测；sidecar 自己判失败（重启额度用尽）时补崩溃信号
+  const score =
+    rawScore === undefined || breaker === undefined
+      ? rawScore
+      : scoreWithBreaker(rawScore, breaker, () => sidecar?.status().state === 'failed');
   const mcpDeps: McpDeps = {
     db: deps.db,
     cfg: deps.cfg,
-    ...(deps.sidecar === undefined
-      ? {}
-      : { encode: encodeViaSidecar(deps.sidecar), score: scoreViaSidecar(deps.sidecar) }),
+    ...(sidecar === undefined ? {} : { encode: encodeViaSidecar(sidecar) }),
+    ...(score === undefined ? {} : { score }),
+    ...(breaker === undefined ? {} : { breaker }),
     ...(deps.onEnqueued === undefined ? {} : { onEnqueued: deps.onEnqueued }),
     // P2-24：MCP 查询把证据链写进同一份 ring buffer，HTTP 只读接口从它取
     traceStore,

@@ -8,6 +8,7 @@
  * - `cache`：会话内证据缓存（详设 §6.11）。**每个进程一份**，`schema_rev` 变化即全清。
  */
 import { EvidenceCache } from '../../core/read/cache.js';
+import type { Breaker } from '../../core/read/breaker.js';
 import type { ModelScoreFn } from '../../core/read/search.js';
 import type { TraceStore } from '../../core/read/trace.js';
 import { schemaRev } from '../../infra/sqlite/metaRepo.js';
@@ -27,6 +28,11 @@ export interface McpDeps {
    * CLI / 测试不注入时 `gat_mode` 即使非 off 也不打分（只记 flags）。
    */
   score?: ModelScoreFn;
+  /**
+   * 模型熔断（P3-10，详设 §7.7）。daemon 注入进程内单例后，查询档位取
+   * `breaker.mode(cfg.model.gat_mode)`；不注入 = 一直按配置档位。
+   */
+  breaker?: Breaker;
   cache?: EvidenceCache;
   /**
    * `memory_annotate` 入队成功后的通知点（P1-22）。由 daemon 注入 harvest runner 的
@@ -54,6 +60,28 @@ export function scoreViaSidecar(sidecar: SidecarClient): ModelScoreFn {
   return async (payload) => {
     const outcome = await sidecar.score(payload);
     return { scores: outcome.scores, modelVersion: outcome.modelVersion, degraded: outcome.degraded };
+  };
+}
+
+/**
+ * 给打分加熔断观测（P3-10）：每次成功打分喂 δ 与耗时；sidecar 已判失败时补崩溃信号。
+ * `sidecarFailed` 由调用方注入（daemon = `status().state === 'failed'`），core 不碰客户端。
+ */
+export function scoreWithBreaker(
+  score: ModelScoreFn,
+  breaker: Breaker,
+  sidecarFailed?: () => boolean,
+): ModelScoreFn {
+  return async (payload) => {
+    const t0 = performance.now();
+    const outcome = await score(payload);
+    const latencyMs = performance.now() - t0;
+    // 降级/超时也是一次 /score 尝试：耗时要计入延迟窗口，否则持续超时永远不会熔断
+    breaker.recordScore(outcome.scores ?? [], latencyMs);
+    if (outcome.scores === null && sidecarFailed?.() === true) {
+      breaker.recordSidecarFailure();
+    }
+    return outcome;
   };
 }
 
