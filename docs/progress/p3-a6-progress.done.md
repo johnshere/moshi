@@ -17,4 +17,8 @@
 - 本机真实库：`doctor --fix` 关闭反向 supersedes 178 条、degree 重建 478 行；之后 `doctor` I1–I10 全绿，exit=4（降级：无 sidecar）。原文：`.dsh/temp/p3-a4/p3-a6-doctor-fix.txt`、`p3-a6-doctor.txt`。
 - 说明：--fix 关了 178 条，而不是 118 条。另外 60 条反向边虽然暂时不违反 I8（新事实尚未失效），但同样是重复边，一并关闭。
 - `pnpm verify`：113 files / 1364 passed / 3 skipped；`pnpm build` exit 0。
-- 生产接线：规则 4 在 harvest 的 `extractEdges` 里调用；`closeReversedSupersedes` 由 `moshi doctor --fix` 调用。
+## M2 收口（2026-11-07）
+
+- M2 `C:\Users\john\.moshi` 库：`fact=60 / edge=0`，无任何 supersedes 边；`doctor --fix` 关闭反向 supersedes **0 条**、degree 重建 60、FTS 0、I8 ✅；`edges.test.ts` 13/13。
+- 口径：按 D-04「本机无存量即通过」，0 条是该机的正确读数；代码有效性由 13/13 单测覆盖，M1 的 178 条正读数保留在 §9.3/m1。
+- 状态：`DONE.m1.m2`，M2 无 WIP；`docs/任务台账.md` v1.15。
