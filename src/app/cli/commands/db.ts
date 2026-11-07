@@ -29,6 +29,7 @@ import {
   extractProcedures,
 } from '../../../core/lifecycle/consolidate.js';
 import { applyStrength } from '../../../core/lifecycle/strength.js';
+import { extractEdges, totalCreated, type EdgeRuleStats } from '../../../core/write/edges.js';
 import { MoshiError } from '../../../domain/errors.js';
 import { safeEnsureDir, safeRemoveFile } from '../../../infra/fs/safeWrite.js';
 import { closeDb, openDb, type Db } from '../../../infra/sqlite/db.js';
@@ -48,6 +49,7 @@ import {
   TARGET_VERSION,
 } from '../../../infra/sqlite/migrate.js';
 import { degreeMismatches } from '../../../infra/sqlite/views.js';
+import { countEdges } from '../../../infra/sqlite/edgeRepo.js';
 import { dataPaths } from '../../config.js';
 import type { Command, CommandContext } from '../types.js';
 
@@ -65,6 +67,7 @@ const USAGE = [
   '  vacuum                                     回收空闲页并截断 WAL（打印前后大小）',
   '  migrate [--dry-run]                        迁移到本程序支持的版本（--dry-run 只列待执行文件）',
   '  rebuild-degree                             按活跃边重算 fact.degree（打印修正行数与对账差值）',
+  '  rebuild-edges                              对存量事实补抽边（extractEdges；只增不删、幂等）',
   '',
   '公共参数：',
   '  --dry-run  只统计不写库',
@@ -87,6 +90,7 @@ const SUBCOMMANDS = [
   'vacuum',
   'migrate',
   'rebuild-degree',
+  'rebuild-edges',
 ] as const;
 type Subcommand = (typeof SUBCOMMANDS)[number];
 
@@ -301,9 +305,52 @@ function runRebuildDegree(db: Db): { rows: number; before: number; after: number
   return { rows, before, after };
 }
 
+/**
+ * 存量补边（P1-20）：分页取全部事实重跑 `extractEdges`。
+ *
+ * 语义与 harvest 里"事实一落库就抽边"一致，只是补上历史库没有边的情况；
+ * 活跃边唯一索引保证幂等（连跑第二次 `created` 必为 0），且**只增不删**。
+ */
+function runRebuildEdges(db: Db): {
+  facts: number;
+  created: number;
+  created_by_rule: EdgeRuleStats;
+  skipped: number;
+  edges_before: number;
+  edges_after: number;
+} {
+  const edgesBefore = countEdges(db, false);
+  const created: EdgeRuleStats = { tool_seq: 0, procedure: 0, co_occur: 0, supersedes: 0 };
+  let skipped = 0;
+  let facts = 0;
+  let after = 0;
+  for (;;) {
+    const page = listFactsPage(db, after, BATCH);
+    const last = page[page.length - 1];
+    if (last === undefined) break;
+    after = last.rowid;
+    const rows = page.map((p) => p.fact);
+    facts += rows.length;
+    const res = extractEdges(db, { facts: rows });
+    created.tool_seq += res.created.tool_seq;
+    created.procedure += res.created.procedure;
+    created.co_occur += res.created.co_occur;
+    created.supersedes += res.created.supersedes;
+    skipped += res.skipped;
+  }
+  return {
+    facts,
+    created: totalCreated(created),
+    created_by_rule: created,
+    skipped,
+    edges_before: edgesBefore,
+    edges_after: countEdges(db, false),
+  };
+}
+
 export const dbCommand: Command = {
   name: 'db',
-  summary: '库维护（db rebuild-strength | consolidate | community | backup | vacuum | migrate | rebuild-degree）',
+  summary: '库维护（db rebuild-strength | consolidate | community | backup | vacuum | migrate | rebuild-degree | rebuild-edges）',
   async run(ctx) {
     const sub = ctx.args[0];
     if (sub === '--help' || sub === '-h' || sub === 'help') {
@@ -377,6 +424,12 @@ export const dbCommand: Command = {
         ctx.stdout(
           `degree 重建完成：${report.rows} 行；degree_mismatch ${report.before} → ${report.after}\n`,
         );
+        return 0;
+      }
+
+      if (sub === 'rebuild-edges') {
+        const report = runRebuildEdges(db);
+        ctx.stdout(`${JSON.stringify({ command: 'db rebuild-edges', ...report })}\n`);
         return 0;
       }
 

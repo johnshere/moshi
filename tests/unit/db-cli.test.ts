@@ -471,6 +471,76 @@ describe('db vacuum / rebuild-degree（P2-19A-03）', () => {
   });
 });
 
+describe('db rebuild-edges（P1-20）', () => {
+  it('对存量事实补边：首次 created>0，第二次 created=0，边只增不删', async () => {
+    const { home, dbFile } = fakeHome();
+    let entityId = '';
+    withDb(dbFile, (db) => {
+      entityId = makeEntity(db, 'svc-rebuild');
+      // 同实体同谓词：旧事实已收口（valid_to 非空），新事实更晚 → supersedes 边
+      insertFact(db, {
+        subject: { entity_id: entityId, name: 'svc-rebuild' },
+        predicate: 'port',
+        value: '3000',
+        validAt: '2026-11-01T00:00:00.000Z',
+        validTo: '2026-11-02T00:00:00.000Z',
+      });
+      insertFact(db, {
+        subject: { entity_id: entityId, name: 'svc-rebuild' },
+        predicate: 'port',
+        value: '4000',
+        validAt: '2026-11-03T00:00:00.000Z',
+      });
+    });
+
+    const first = await cli(home, ['db', 'rebuild-edges']);
+    expect(first.code).toBe(0);
+    const firstPayload = JSON.parse(first.out.trim()) as {
+      command: string;
+      facts: number;
+      created: number;
+      created_by_rule: Record<string, number>;
+      skipped: number;
+      edges_before: number;
+      edges_after: number;
+    };
+    expect(firstPayload.command).toBe('db rebuild-edges');
+    expect(firstPayload.facts).toBe(2);
+    expect(firstPayload.created).toBeGreaterThanOrEqual(1);
+    expect(firstPayload.created_by_rule['supersedes']).toBeGreaterThanOrEqual(1);
+    expect(firstPayload.skipped).toBe(0);
+    expect(firstPayload.edges_after).toBeGreaterThan(firstPayload.edges_before);
+
+    const second = await cli(home, ['db', 'rebuild-edges']);
+    expect(second.code).toBe(0);
+    const secondPayload = JSON.parse(second.out.trim()) as {
+      created: number;
+      edges_before: number;
+      edges_after: number;
+    };
+    expect(secondPayload.created).toBe(0);
+    expect(secondPayload.edges_after).toBe(secondPayload.edges_before);
+    expect(secondPayload.edges_after).toBe(firstPayload.edges_after);
+
+    // 只增不删：两次之后边仍全部有效，事实行未被改动
+    withDb(dbFile, (db) => {
+      const active = db.prepare('SELECT COUNT(*) AS n FROM edge WHERE valid_to IS NULL').get() as {
+        n: number;
+      };
+      expect(active.n).toBe(firstPayload.edges_after);
+      const facts = db.prepare('SELECT COUNT(*) AS n FROM fact').get() as { n: number };
+      expect(facts.n).toBe(2);
+    });
+  });
+
+  it('--help 打印 rebuild-edges 用法', async () => {
+    const { home } = fakeHome();
+    const run = await cli(home, ['db', 'rebuild-edges', '--help']);
+    expect(run.code).toBe(0);
+    expect(run.out).toContain('rebuild-edges');
+  });
+});
+
 describe('db --help', () => {
   it('db --help / db backup --help 打印用法并退出 0', async () => {
     const { home } = fakeHome();

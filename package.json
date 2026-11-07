@@ -32,6 +32,7 @@
     "accept:ui": "tsx tools/accept-ui.ts",
     "bench": "tsx tools/bench.ts",
     "seed:devdb": "tsx tools/seed-devdb.ts",
+    "dev:reset": "tsx tools/dev-db.ts",
     "setup:env": "node scripts/setup-env.mjs --force",
     "postinstall": "node scripts/setup-env.mjs --hook"
   },
