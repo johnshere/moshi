@@ -16,6 +16,7 @@ import path from 'node:path';
 import type { Config } from '../../app/config.js';
 import {
   connectTransport,
+  SidecarTimeoutError,
   type SidecarTransport,
   type TransportTarget,
 } from './transport.js';
@@ -46,6 +47,25 @@ export interface LoggerLike {
   error(obj: Record<string, unknown>, msg?: string): void;
 }
 
+/** `/score` 返回的单个节点打分（详设 §4.6）。 */
+export interface ScoreEntry {
+  fact_id: string;
+  delta: number;
+  overturn_prob: number;
+}
+
+/** `/score` 降级原因；证据包直接合并进 `degraded`。 */
+export type ScoreDegraded = 'no_sidecar' | 'timeout' | 'input_shape' | 'model_not_loaded' | 'error';
+
+export interface ScoreOutcome {
+  /** 成功时逐节点打分；任何降级都是 null。 */
+  scores: ScoreEntry[] | null;
+  modelVersion: string | null;
+  /** 服务端推理耗时（毫秒）；降级为 null。 */
+  ms: number | null;
+  degraded: ScoreDegraded[];
+}
+
 export interface SidecarClientDeps {
   cfg: Pick<Config, 'sidecar' | 'model' | 'storage'>;
   logger: LoggerLike;
@@ -68,6 +88,10 @@ export interface SidecarClientDeps {
 }
 
 const HOUR_MS = 3_600_000;
+
+function scoreFailure(reason: ScoreDegraded): ScoreOutcome {
+  return { scores: null, modelVersion: null, ms: null, degraded: [reason] };
+}
 
 export class SidecarClient {
   private state: SidecarState = 'stopped';
@@ -176,6 +200,61 @@ export class SidecarClient {
       );
       this.handleFailure();
       return null;
+    }
+  }
+
+  /**
+   * 给子图打分（详设 §4.6）。**永不抛错**，降级原因直接返回给调用方：
+   * - 未启动/启动中/停用 → `no_sidecar`（触发异步 ensureStarted，本次不阻塞）
+   * - 超过 `score_timeout_ms`（默认 120ms）→ `timeout`
+   * - 服务端 `E_INPUT_SHAPE` / `E_MODEL_NOT_LOADED` → 对应原因
+   * 超时由传输层销毁连接，不计入崩溃重启次数（那是熔断器 P3-10 的事）。
+   */
+  async score(payload: unknown): Promise<ScoreOutcome> {
+    this.lastActivityAt = this.now();
+    if (this.mode === 'off' || this.state === 'failed') return scoreFailure('no_sidecar');
+    if (this.state !== 'ready' && this.state !== 'unloaded') {
+      void this.ensureStarted();
+      return scoreFailure('no_sidecar');
+    }
+    if (this.transport === null) {
+      void this.ensureStarted();
+      return scoreFailure('no_sidecar');
+    }
+    try {
+      const res = (await this.transport.request(
+        '/score',
+        payload,
+        this.deps.cfg.sidecar.score_timeout_ms,
+      )) as {
+        scores?: ScoreEntry[];
+        model_version?: string;
+        ms?: number;
+        error?: { code: string; message?: string };
+      };
+      if (res.error !== undefined) {
+        if (res.error.code === 'E_INPUT_SHAPE') return scoreFailure('input_shape');
+        if (res.error.code === 'E_MODEL_NOT_LOADED') return scoreFailure('model_not_loaded');
+        return scoreFailure('error');
+      }
+      if (!Array.isArray(res.scores)) return scoreFailure('error');
+      return {
+        scores: res.scores,
+        modelVersion: res.model_version ?? null,
+        ms: res.ms ?? null,
+        degraded: [],
+      };
+    } catch (err) {
+      // instanceof 在跨 realm/降级编译时可能失效，名字兜底
+      if (err instanceof SidecarTimeoutError || (err as Error).name === 'SidecarTimeoutError') {
+        return scoreFailure('timeout');
+      }
+      this.deps.logger.warn(
+        { event: 'sidecar.score_failed', err: (err as Error).message },
+        'score 失败',
+      );
+      this.handleFailure();
+      return scoreFailure('no_sidecar');
     }
   }
 

@@ -12,6 +12,17 @@ export interface SidecarTransport {
   close(): void;
 }
 
+/**
+ * 单次请求超时（区别于连接级失败）。
+ * 客户端据此标 `degraded:["timeout"]`，不走崩溃重启计数（详设 §4.6）。
+ */
+export class SidecarTimeoutError extends Error {
+  constructor(path: string) {
+    super(`sidecar 请求超时（${path}）`);
+    this.name = 'SidecarTimeoutError';
+  }
+}
+
 export interface TransportTarget {
   /** Windows 命名管道名（`\\.\pipe\...`）；优先于 socketPath */
   pipeName: string | null;
@@ -119,7 +130,7 @@ class PipeTransport implements SidecarTransport {
         const p = this.active;
         this.active = null;
         clearTimeout(p.timer);
-        p.reject(new Error(`sidecar 请求超时（${item.path}）`));
+        p.reject(new SidecarTimeoutError(item.path));
       }
     }, item.timeoutMs);
     this.active = { resolve: item.resolve, reject: item.reject, timer };

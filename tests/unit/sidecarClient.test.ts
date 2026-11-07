@@ -14,6 +14,7 @@ import {
   type SidecarClientDeps,
 } from '../../src/infra/sidecar/client.js';
 import type { SidecarTransport } from '../../src/infra/sidecar/transport.js';
+import { SidecarTimeoutError } from '../../src/infra/sidecar/transport.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -26,13 +27,23 @@ function tempHome(): string {
   return d;
 }
 
-/** 可编程 fake 传输：默认正常响应；可切换为抛错（模拟断开） */
+/** 可编程 fake 传输：默认正常响应；可切换为抛错（模拟断开）或超时 */
 class FakeTransport implements SidecarTransport {
   fail = false;
+  scoreTimeout = false;
+  scoreResponse: unknown = {
+    scores: [{ fact_id: 'f1', delta: 0.01, overturn_prob: 0.2 }],
+    model_version: 'v1',
+    ms: 1.5,
+  };
   requests: Array<{ path: string; body: unknown }> = [];
   request(path: string, body: unknown, _timeoutMs: number): Promise<unknown> {
     this.requests.push({ path, body });
     if (this.fail) return Promise.reject(new Error('sidecar 连接已关闭'));
+    if (path === '/score') {
+      if (this.scoreTimeout) return Promise.reject(new SidecarTimeoutError('/score'));
+      return Promise.resolve(this.scoreResponse);
+    }
     if (path === '/health') return Promise.resolve({ status: 'ready', rss_mb: 42, loaded: true, pid: 777 });
     if (path === '/encode') return Promise.resolve({ vectors: [[0.1, 0.2]], dim: 2 });
     if (path === '/unload' || path === '/shutdown' || path === '/reload') return Promise.resolve({ ok: true });
@@ -190,6 +201,67 @@ describe('SidecarClient（P1-01）', () => {
     }
     expect(c.status().mode).toBe('off');
     expect(c.status().restartsThisHour).toBeGreaterThanOrEqual(3);
+    await c.terminate();
+  });
+});
+
+describe('SidecarClient /score（P3-04）', () => {
+  it('未启动：立即 degraded no_sidecar 并异步拉起', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps, spawnRec } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+
+    const out = await c.score({});
+    expect(out).toEqual({ scores: null, modelVersion: null, ms: null, degraded: ['no_sidecar'] });
+    expect(spawnRec.spawns).toBe(1);
+    await c.terminate();
+  });
+
+  it('ready：返回逐节点打分且 degraded 为空', async () => {
+    const home = tempHome();
+    const { deps } = makeDeps(home, new FakeTransport());
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+
+    const out = await c.score({ schema: 'moshi-subgraph/2', nodes: [], edges: [] });
+    expect(out.degraded).toEqual([]);
+    expect(out.scores).toEqual([{ fact_id: 'f1', delta: 0.01, overturn_prob: 0.2 }]);
+    expect(out.modelVersion).toBe('v1');
+    expect(out.ms).toBeCloseTo(1.5);
+    await c.terminate();
+  });
+
+  it('超时：degraded timeout，不计崩溃重启', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps, spawnRec } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+    t.scoreTimeout = true;
+
+    const out = await c.score({});
+    expect(out).toEqual({ scores: null, modelVersion: null, ms: null, degraded: ['timeout'] });
+    expect(spawnRec.kills).toBe(0);
+    expect(c.status().restartsThisHour).toBe(0);
+    await c.terminate();
+  });
+
+  it('形状错误 / 模型未加载：映射到对应 degraded 原因', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+
+    t.scoreResponse = { error: { code: 'E_INPUT_SHAPE', message: 'bad' } };
+    expect((await c.score({})).degraded).toEqual(['input_shape']);
+
+    t.scoreResponse = { error: { code: 'E_MODEL_NOT_LOADED', message: 'no weights' } };
+    expect((await c.score({})).degraded).toEqual(['model_not_loaded']);
+
+    t.scoreResponse = { error: { code: 'E_INTERNAL', message: 'boom' } };
+    expect((await c.score({})).degraded).toEqual(['error']);
     await c.terminate();
   });
 });
