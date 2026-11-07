@@ -24,7 +24,9 @@ export interface TrainingSampleInput {
   createdAt: string;
 }
 
-export interface TrainingSampleRow extends TrainingSampleInput {
+export interface TrainingSampleRow extends Omit<TrainingSampleInput, 'weight'> {
+  /** DDL 有 DEFAULT 1.0，读出来的行一定有值 */
+  weight: number;
   usedAt: string | null;
 }
 
@@ -191,4 +193,14 @@ export function listFeedbackForRank(db: Db, since?: string): FeedbackForRankRow[
     verdict: r.verdict,
     ts: r.ts,
   }));
+}
+
+// ============ 原料 3：查询文本（导出 query_vector 用） ============
+
+/** `query_log.query_text`；查不到返回 null（样本照常导出，只是 query_vector 为空） */
+export function getQueryText(db: Db, queryId: string): string | null {
+  const row = db.prepare('SELECT query_text FROM query_log WHERE id = ?').get(queryId) as
+    | { query_text: string }
+    | undefined;
+  return row === undefined ? null : row.query_text;
 }
