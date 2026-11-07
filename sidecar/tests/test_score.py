@@ -93,6 +93,20 @@ def test_score_loads_weights_from_data_dir(tmp_path):
     assert len(res["scores"]) == 3
 
 
+def test_cross_attn_false_ignores_query_vector():
+    """P4-02 消融：cross_attn=false 时丢掉查询向量，打分与开时不同。"""
+    state = make_state()
+    payload = load_payload()
+    payload["query_vector"] = [0.1] * 512
+    on = dispatch(state, "/score", payload)
+    off = dispatch(
+        state,
+        "/score",
+        {**payload, "options": {"self_attn": False, "cross_attn": False}},
+    )
+    assert [s["delta"] for s in on["scores"]] != [s["delta"] for s in off["scores"]]
+
+
 def test_unload_drops_scorer():
     state = make_state()
     assert state.scorer is not None

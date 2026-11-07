@@ -98,7 +98,17 @@ function toJson(pack: EvidencePackage, cached: boolean): EvidencePackJson {
   };
 }
 
-export async function runMemoryQuery(deps: McpDeps, input: QueryInput): Promise<EvidencePackJson> {
+/** 消融（P4-02）运行时覆盖：只影响本次查询，不写配置 */
+export interface QueryRuntimeOverrides {
+  channels?: { vector?: boolean; bm25?: boolean; ppr?: boolean };
+  modelOptions?: { selfAttn?: boolean; crossAttn?: boolean };
+}
+
+export async function runMemoryQuery(
+  deps: McpDeps,
+  input: QueryInput,
+  overrides: QueryRuntimeOverrides = {},
+): Promise<EvidencePackJson> {
   const { pack, cached } = await searchWithPipeline(
     {
       db: deps.db,
@@ -110,6 +120,8 @@ export async function runMemoryQuery(deps: McpDeps, input: QueryInput): Promise<
       deltaCap: deps.cfg.model.delta_cap,
       ...(deps.cache === undefined ? {} : { cache: deps.cache }),
       ...(deps.traceStore === undefined ? {} : { trace: deps.traceStore }),
+      ...(overrides.channels === undefined ? {} : { channels: overrides.channels }),
+      ...(overrides.modelOptions === undefined ? {} : { modelOptions: overrides.modelOptions }),
     },
     {
       query: input.query,

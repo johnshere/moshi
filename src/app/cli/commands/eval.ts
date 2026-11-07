@@ -43,6 +43,7 @@ import {
   packDiffRows,
   summarizePackDiff,
 } from '../../../core/ops/pack-diff.js';
+import { ABLATION_SPECS, formatAblations, summarizeSide, type AblationConfig, type AblationRow } from '../../../core/ops/ablation.js';
 import { dataPaths } from '../../config.js';
 import { runMemoryQuery } from '../../mcp/query.js';
 import { encodeViaSidecar, scoreViaSidecar, type EncodeFn, type McpDeps } from '../../mcp/deps.js';
@@ -125,15 +126,179 @@ export function orderedGatModes(modes: readonly GatMode[]): readonly GatMode[] {
   return ['off', ...modes.filter((m) => m !== 'off')];
 }
 
+/** 把只读源库整库备份到目标文件（Node 自带 backup，WAL 也安全） */
+async function backupDb(from: string, to: string): Promise<void> {
+  const src = openDb({ file: from, readonly: true });
+  try {
+    await src.db.backup(to);
+  } finally {
+    closeDb(src.db);
+  }
+}
+
+/**
+ * `moshi eval ablations`（P4-02）：七项消融，每项只变一个开关，产出对比数据。
+ *
+ * 每次运行都在独立副本上跑：`gat=on` 会按 δ 写回置信（P3-08），复用同一个库
+ * 会让前一项的写回污染后一项的基线。
+ * 只产出对比数据、不做门禁（退出码 0）；题集非法照旧退出 2。
+ */
+async function runAblations(ctx: CommandContext): Promise<number> {
+  const args = ctx.args;
+  const goldenArg = args.find((a, i) => a === '--golden' && args[i + 1] !== undefined);
+  const goldenFile = resolveGoldenFile(
+    goldenArg === undefined ? undefined : args[args.indexOf(goldenArg) + 1],
+    ctx.home,
+    ctx.cfg.eval.golden_set,
+  );
+  const allowPartial = args.includes('--allow-partial');
+
+  const { items, skipped } = loadGolden(goldenFile);
+  if (items.length === 0) {
+    ctx.stderr(`golden set 为空（${goldenFile}）\n`);
+    return 2;
+  }
+  if (!allowPartial) {
+    const validation = validateGoldenSet(items);
+    if (!validation.ok) {
+      ctx.stderr(`golden set 不完整：${goldenFile}\n`);
+      for (const problem of validation.problems) ctx.stderr(`  - ${problem}\n`);
+      return 2;
+    }
+  }
+
+  const paths = ensureDataDirs(ctx.cfg);
+  const tmpDir = mkdtempSync(path.join(os.tmpdir(), 'moshi-ablation-'));
+  const baseFile = path.join(tmpDir, 'base.db');
+  if (existsSync(paths.db)) {
+    await backupDb(paths.db, baseFile);
+  } else {
+    // 没有库也要在临时目录里建空的，别在用户 home 下留文件
+    const empty = openDb({ file: baseFile }).db;
+    try {
+      migrate(empty, { backupsDir: paths.backups });
+    } finally {
+      closeDb(empty);
+    }
+  }
+
+  let sidecar: SidecarClient | undefined;
+  try {
+    // 基线要“完整状态”：向量路与 GAT 都要可用，所以固定拉起 sidecar
+    const silent = { info: () => {}, warn: () => {}, error: () => {} };
+    sidecar = new SidecarClient({ cfg: ctx.cfg, logger: silent });
+    await sidecar.ensureStarted();
+    const encode = encodeViaSidecar(sidecar);
+    const score = scoreViaSidecar(sidecar);
+
+    // 向量索引在模板副本上做一次，后续每次运行直接复制
+    {
+      const base = openDb({ file: baseFile }).db;
+      try {
+        migrate(base, { backupsDir: paths.backups });
+        setVectorDisabled(base, false);
+        const synced = await syncFactVectors(base, { encode, batchSize: 200, concurrency: 4 });
+        ctx.stdout(
+          `向量索引（副本）：编码 ${synced.synced} 条，缺 ${synced.missing}，失败 ${synced.failed}\n`,
+        );
+      } finally {
+        closeDb(base);
+      }
+    }
+
+    const runSide = async (cfg: AblationConfig, name: string) => {
+      const runFile = path.join(tmpDir, `${name}.db`);
+      await backupDb(baseFile, runFile);
+      const db = openDb({ file: runFile }).db;
+      try {
+        migrate(db, { backupsDir: paths.backups });
+        const deps: McpDeps = {
+          db,
+          cfg: { ...ctx.cfg, model: { ...ctx.cfg.model, gat_mode: cfg.gat } },
+          encode,
+          score,
+        };
+        const latencies: number[] = [];
+        const packs: string[][] = [];
+        const degraded = new Map<string, number>();
+        const query: EvalQueryFn = async (q, topK) => {
+          const t0 = performance.now();
+          const pack = await runMemoryQuery(
+            deps,
+            { query: q, top_k: topK, scope: 'global', include_history: false, format: 'json' },
+            {
+              ...(cfg.channels === undefined ? {} : { channels: cfg.channels }),
+              ...(cfg.modelOptions === undefined ? {} : { modelOptions: cfg.modelOptions }),
+            },
+          );
+          latencies.push(performance.now() - t0);
+          packs.push(pack.evidence.map((e) => e.fact_id));
+          for (const d of pack.degraded) degraded.set(d, (degraded.get(d) ?? 0) + 1);
+          // 扁平变体：只保留平铺事实，去掉结构字段（multi_hop 依赖的结构信息就此消失）
+          return cfg.flat === true ? { ...pack, conflicts: [], dependency_summary: [] } : pack;
+        };
+        const result = await runGoldenSet(items, query, skipped);
+        return { result, packs, latencies, degraded };
+      } finally {
+        closeDb(db);
+      }
+    };
+
+    const rows: AblationRow[] = [];
+    const degradedNotes: string[] = [];
+    for (const spec of ABLATION_SPECS) {
+      const base = await runSide(spec.baseline, `${spec.axis}-baseline`);
+      const variant = await runSide(spec.variant, `${spec.axis}-variant`);
+      const packDiff =
+        spec.axis === 'structured'
+          ? null
+          : summarizePackDiff(
+              packDiffRows(
+                items.map((i) => i.id),
+                variant.packs,
+                base.packs,
+              ),
+            ).meanRate;
+      rows.push({
+        axis: spec.axis,
+        label: spec.label,
+        change: spec.change,
+        baseline: summarizeSide(base.result.outcomes, base.latencies),
+        variant: summarizeSide(variant.result.outcomes, variant.latencies),
+        packDiff,
+      });
+      const degraded = new Map<string, number>();
+      for (const [code, n] of [...base.degraded, ...variant.degraded]) {
+        degraded.set(code, (degraded.get(code) ?? 0) + n);
+      }
+      if (degraded.size > 0) {
+        const text = [...degraded].map(([code, n]) => `${code}×${String(n)}`).join(',');
+        degradedNotes.push(`${spec.axis}: ${text}`);
+      }
+      ctx.stdout(`完成 ${spec.axis}（${base.result.passed}/${base.result.total} → ${variant.result.passed}/${variant.result.total}）\n`);
+    }
+
+    ctx.stdout(`${formatAblations(rows)}\n`);
+    if (degradedNotes.length > 0) {
+      ctx.stdout(`降级题次（同一题可多个码；拒答题空子图会出 no_model、低相似会出 no_vector）：${degradedNotes.join('；')}\n`);
+    }
+    return 0;
+  } finally {
+    safeRemoveDir(tmpDir, [os.tmpdir()]);
+    await sidecar?.terminate();
+  }
+}
+
 export const evalCommand: Command = {
   name: 'eval',
-  summary: '运行 golden set 评估（moshi eval run）或 GAT 双门槛（moshi eval gate）',
+  summary: '运行 golden set 评估（run）、GAT 双门槛（gate）或七项消融（ablations）',
   async run(ctx) {
     const args = ctx.args;
     if (args[0] === 'gate') return runGate(ctx);
+    if (args[0] === 'ablations') return runAblations(ctx);
     if (args[0] !== 'run') {
       ctx.stderr(
-        '用法：moshi eval gate\n        moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial] [--flags gat=on,gat=off]\n',
+        '用法：moshi eval gate\n        moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial] [--flags gat=on,gat=off]\n        moshi eval ablations [--golden <v1|路径>] [--allow-partial]\n',
       );
       return 2;
     }

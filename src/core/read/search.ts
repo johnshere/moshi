@@ -124,6 +124,13 @@ export interface SearchRuntime {
   /** GAT 模型版本（P3）；缺省 null。P2 恒 null——模型未生效（§4.7） */
   modelVersion?: string | null;
   /**
+   * 召回通道开关（P4-02 消融）：缺省 = 全开。显式关闭的通道既不出结果，
+   * 也如实体现在 `flags_json` 里（消融数据要能按开关归组）。
+   */
+  channels?: { vector?: boolean; bm25?: boolean; ppr?: boolean };
+  /** 模型结构开关（P4-02 消融）：缺省 self_attn=off、cross_attn=on */
+  modelOptions?: { selfAttn?: boolean; crossAttn?: boolean };
+  /**
    * GAT 打分注入点（P3-07）。`shadow`/`on` 时查询会组 payload 调它；
    * 不注入 = 完全不打分（行为与 P3-07 之前一致）。
    * 用结构化类型而不是 import 具体客户端：core 不依赖 infra 实现。
@@ -155,14 +162,19 @@ function round4(v: number): number {
 }
 
 /** 开关快照（§6.12：没有它 A/B 数据无法归组） */
-function flagsSnapshot(vectorOn: boolean, gatMode: string): Record<string, string> {
+function flagsSnapshot(
+  vectorOn: boolean,
+  gatMode: string,
+  channels: SearchRuntime['channels'] = {},
+  modelOptions: SearchRuntime['modelOptions'] = {},
+): Record<string, string> {
   return {
     gat: gatMode,
-    self_attn: 'off',
-    cross_attn: 'off',
-    vector: vectorOn ? 'on' : 'off',
-    bm25: 'on',
-    ppr: 'on',
+    self_attn: modelOptions.selfAttn === true ? 'on' : 'off',
+    cross_attn: modelOptions.crossAttn === false ? 'off' : 'on',
+    vector: vectorOn && channels.vector !== false ? 'on' : 'off',
+    bm25: channels.bm25 === false ? 'off' : 'on',
+    ppr: channels.ppr === false ? 'off' : 'on',
   };
 }
 
@@ -339,7 +351,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
         queryText: input.query,
         queryHash,
         route: 'global',
-        flags: flagsSnapshot(false, rt.gatMode ?? 'off'),
+        flags: flagsSnapshot(false, rt.gatMode ?? 'off', rt.channels, rt.modelOptions),
         latencyMs: pack.stats.latency_ms,
         stageMs,
         degraded: pack.degraded,
@@ -361,8 +373,8 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   const entities: RecognizedEntity[] = recognizeEntities(db, input.query, { limit: 8 });
   mark('recognize');
 
-  const vectorOn = rt.encode !== undefined && !vectorDisabled(db);
-  const flags = flagsSnapshot(vectorOn, rt.gatMode ?? 'off');
+  const vectorOn = rt.encode !== undefined && !vectorDisabled(db) && rt.channels?.vector !== false;
+  const flags = flagsSnapshot(vectorOn, rt.gatMode ?? 'off', rt.channels, rt.modelOptions);
 
   // 查询向量：有 encode 才算。缓存的余弦命中判定（§6.11）也要同一个向量，
   // 所以只编一次（memoize）。
@@ -452,7 +464,9 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
 
   // ── 4) 三路召回（§6.4）──
   let vectorIds: string[] = [];
-  if (rt.encode === undefined) {
+  if (rt.channels?.vector === false) {
+    // 消融显式关闭：不编向量、不出结果，也不标降级（这是预期行为）
+  } else if (rt.encode === undefined) {
     signals.push('sidecar_unavailable');
   } else if (vectorDisabled(db)) {
     signals.push('vector_error');
@@ -475,10 +489,12 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   mark('recall_vector');
 
   let bm25Ids: string[] = [];
-  try {
-    bm25Ids = recallBm25(db, input.query, params.bm25TopK).map((h) => h.fact_id);
-  } catch {
-    signals.push('bm25_error');
+  if (rt.channels?.bm25 !== false) {
+    try {
+      bm25Ids = recallBm25(db, input.query, params.bm25TopK).map((h) => h.fact_id);
+    } catch {
+      signals.push('bm25_error');
+    }
   }
   mark('recall_bm25');
 
@@ -487,7 +503,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   const seeds = (vectorIds.length > 0 ? vectorIds : bm25Ids).slice(0, 3);
   let pprIds: string[] = [];
   let pprResult: PprResult | null = null;
-  if (seeds.length > 0) {
+  if (rt.channels?.ppr !== false && seeds.length > 0) {
     try {
       const ppr = recallPpr(db, seeds, {
         maxNodes: params.pprMaxNodes,
@@ -551,7 +567,12 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     const scoreStarted = performance.now();
     try {
       const vec = await queryVector();
-      const bridged = buildPayloadFromSubgraph(db, sub, vec === null ? null : Array.from(vec));
+      const bridged = buildPayloadFromSubgraph(
+        db,
+        sub,
+        vec === null ? null : Array.from(vec),
+        rt.modelOptions,
+      );
       if (bridged.missing.length > 0) {
         signals.push('gat_unavailable');
       } else {

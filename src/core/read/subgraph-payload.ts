@@ -28,6 +28,7 @@ export function buildPayloadFromSubgraph(
   db: Db,
   sub: Subgraph,
   queryVector: readonly number[] | null,
+  options?: { selfAttn?: boolean; crossAttn?: boolean },
 ): PayloadBridgeResult {
   const missing: string[] = [];
   const nodes = [];
@@ -64,7 +65,12 @@ export function buildPayloadFromSubgraph(
     }));
 
   return {
-    payload: buildSubgraphPayload({ queryVector, nodes, edges }),
+    payload: buildSubgraphPayload({
+      queryVector,
+      nodes,
+      edges,
+      ...(options === undefined ? {} : { options }),
+    }),
     missing,
   };
 }

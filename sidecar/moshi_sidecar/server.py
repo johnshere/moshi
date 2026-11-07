@@ -168,6 +168,9 @@ def dispatch(state: State, path: str, body: dict) -> dict:
                 else None
             )
             options = body.get("options") or {}
+            # 消融（P4-02）：cross_attn=false 时显式丢掉查询向量，模型走无查询条件化的分支
+            if options.get("cross_attn", True) is False:
+                query_vector = None
             with torch.no_grad():
                 delta, logit = scorer(
                     x,
