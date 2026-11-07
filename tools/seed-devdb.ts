@@ -13,7 +13,8 @@
  * 3. **零 Python**。全程纯符号模式：不碰向量路、不装依赖、不写 fact_vec。
  *
  * 用法：`pnpm seed:devdb -- --config <dev.toml>`（P3-A8：配置源=dev 配置，可用
- * `--dry-run` 只生成 jsonl 演练）。
+ * `--dry-run` 只生成 jsonl 演练；`--sessions <N>` 放大数据面，默认 75，用于
+ * P3-12 攒够 GAT 双门槛样本）。
  */
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -39,7 +40,13 @@ export const SESSIONS_PER_DAY = 5;
 export const START_MS = Date.UTC(2026, 9, 20, 1, 0, 0);
 export const PROJECT_DIR_NAME = 'p3-a4-devdb';
 const DAY_MS = 86_400_000;
+/** 默认 15 天窗口的末端（放大会话数时起点往前铺，数据面整体落在过去，不把 valid_at 推到未来） */
+export const END_MS = START_MS + DAYS * DAY_MS;
 const MIN_MS = 60_000;
+/** 查询套件重复遍数：rank 头要 ≥2000 条反馈样本才会开训（P3-12）。
+ *  反馈行的 ts 都是"现在"、裁决 outcome 是历史时间，时间切分把尾部 20% 全分给
+ * val/test，所以总数要留够：4 遍 ≈3200 条反馈 → train 侧 ~2400 条 ≥ 阈值。 */
+const QUERY_PASSES = 4;
 
 // ── 合成素材 ─────────────────────────────────────────────────────────────
 interface RepoSpec {
@@ -48,13 +55,13 @@ interface RepoSpec {
   port: number;
   node: string;
   tool: string;
-  toolV0: string;
-  toolV1: string;
+  /** 版本号主段（次/修订段由当天日期生成，见 `versionOn`） */
+  toolBase: string;
   branch0: string;
   branch1: string | null;
   syncCommits: number;
   head: string;
-  pkgs: Array<{ name: string; v0: string; v1: string }>;
+  pkgs: Array<{ name: string; base: string }>;
   files: Array<{ sub: string; entries: Array<{ name: string; size: number; mtime: string }> }>;
   proc: { name: string; pid: number };
   proc2: { name: string; pid: number } | null;
@@ -91,22 +98,31 @@ function sha1(input: string): string {
   return createHash('sha1').update(input).digest('hex');
 }
 
+/**
+ * 每日一版：`<主段>.<day>.<salt>`。
+ *
+ * 同一 subject 每天换一次值 ⇒ 每次观察到新值都产生取代链与裁决（P3-12 要攒
+ * 500 条非循环样本）。用 day 而不是往返切换：值只增不复用，避免"值复活"
+ * 插出重复行（I3 口径，见下方构建耗时的注释）。
+ */
+function versionOn(base: string, day: number, salt: number): string {
+  return `${base.split('.')[0] ?? '1'}.${day}.${salt}`;
+}
+
 export const REPOS: readonly RepoSpec[] = REPO_NAMES.map((name, i) => ({
   name,
   dir: `E:\\Workspace\\00-learning\\devdb\\${name}`,
   port: 4100 + i + 1,
   node: '22.11.0',
   tool: TOOLS[i]!,
-  toolV0: `${5 + (i % 3)}.${i}.${(i + 2) % 9}`,
-  toolV1: `${6 + (i % 3)}.0.${i % 5}`,
+  toolBase: `${5 + (i % 3)}.${i}.${(i + 2) % 9}`,
   branch0: 'main',
   branch1: i % 2 === 0 ? `feature/p3-a4-${i}` : null,
   syncCommits: 1 + (i % 8),
   head: sha1(`p3-a4:${name}`),
   pkgs: PKG_NAMES[i]!.map((pkg, k) => ({
     name: pkg,
-    v0: `${2 + ((i + k) % 4)}.${(k * 3 + i) % 10}.${(k + i) % 9}`,
-    v1: `${3 + ((i + k) % 4)}.0.${k % 5}`,
+    base: `${2 + ((i + k) % 4)}.${(k * 3 + i) % 10}.${(k + i) % 9}`,
   })),
   files: [
     ...['src', 'tests'].map((sub) => ({
@@ -159,8 +175,17 @@ interface Turn {
   isError?: boolean;
 }
 
-function tsAt(day: number, slot: number, turn: number): string {
-  const ms = START_MS + day * DAY_MS + slot * 150 * MIN_MS + turn * 4 * MIN_MS;
+/**
+ * 会话数对应的起点：末端固定（`END_MS`），天数按会话数向上取整后往前铺。
+ * 默认 75 个会话 → 15 天，与 `START_MS` 完全一致（存量单测/数据面不漂移）。
+ * 放大（`--sessions 300`）时数据整体更早，不会出现未来时间戳。
+ */
+export function startMsFor(sessionCount: number): number {
+  return END_MS - Math.ceil(sessionCount / SESSIONS_PER_DAY) * DAY_MS;
+}
+
+function tsAt(startMs: number, day: number, slot: number, turn: number): string {
+  const ms = startMs + day * DAY_MS + slot * 150 * MIN_MS + turn * 4 * MIN_MS;
   return new Date(ms).toISOString();
 }
 
@@ -203,12 +228,16 @@ function renderTurn(sessionId: string, cwd: string, t: Turn): [string, string] {
  */
 export function generateSessions(seed: number, sessionCount = DAYS * SESSIONS_PER_DAY): SessionFile[] {
   const rnd = mulberry32(seed);
+  const startMs = startMsFor(sessionCount);
   const out: SessionFile[] = [];
 
   for (let s = 0; s < sessionCount; s += 1) {
     const day = Math.floor(s / SESSIONS_PER_DAY);
     const slot = s % SESSIONS_PER_DAY;
-    const repo = REPOS[(day * 3 + slot) % REPOS.length]!;
+    // 同一天相邻两个会话回到同一仓库：第二次观察到的是同一批版本值（refresh），
+    // 把 open 裁决回填成 upheld；构建/测试仍每次新值 → overturned。
+    // 这样两条标签都有足够样本（P3-12 训练集平衡，单一标签训不出有区分度的头）。
+    const repo = REPOS[(day * 3 + Math.floor(slot / 2)) % REPOS.length]!;
     // 第 8 天起进入"变更期"：版本升级、分支切换、端口换人占
     const phase = day < 8 ? 0 : 1;
     const sessionId = `p3a4-${String(day).padStart(2, '0')}-${slot}`;
@@ -217,7 +246,7 @@ export function generateSessions(seed: number, sessionCount = DAYS * SESSIONS_PE
     const turns: Turn[] = [];
     const add = (command: string, output: string, isError = false): void => {
       turns.push({
-        ts: tsAt(day, slot, turns.length),
+        ts: tsAt(startMs, day, slot, turns.length),
         id: `toolu_${day}_${slot}_${turns.length}`,
         command,
         output,
@@ -232,25 +261,29 @@ export function generateSessions(seed: number, sessionCount = DAYS * SESSIONS_PE
     );
     // 2) node 版本（8 个仓库同一台机器，值恒定，只刷新不新增）
     add('node -v', `v${repo.node}\n`);
-    // 3) 构建工具版本（每仓库一个独有 subject；变更期升级 ⇒ 取代链）
-    add(`${repo.tool} --version`, `${repo.tool} v${phase === 1 ? repo.toolV1 : repo.toolV0}\n`);
+    // 3) 构建工具版本（每仓库一个独有 subject；每天一版 ⇒ 取代链）
+    add(`${repo.tool} --version`, `${repo.tool} v${versionOn(repo.toolBase, day, 0)}\n`);
     // 4) 隔天打一次 commit（head 恒定 ⇒ 刷新）
     if (day % 2 === 0 && slot === 0) {
       add('git log --oneline -1', `${repo.head} feat(${repo.name}): sync ${day}\n`);
     }
-    // 5) 装包（每会话 2 个，按会话序号轮转 6 个包；变更期给升级版本）
-    const first = (day * SESSIONS_PER_DAY + slot) % repo.pkgs.length;
-    const picked = [repo.pkgs[first]!, repo.pkgs[(first + 3) % repo.pkgs.length]!];
+    // 5) 装包：整组 6 个包每天一版 ⇒ 每会话 6 条取代链
+    const picked = repo.pkgs;
     add(
       `pnpm add ${picked.map((p) => p.name).join(' ')}`,
-      `dependencies:\n${picked.map((p) => `+ ${p.name} ${phase === 1 ? p.v1 : p.v0}`).join('\n')}\n`,
+      `dependencies:\n${picked.map((p, k) => `+ ${p.name} ${versionOn(p.base, day, k)}`).join('\n')}\n`,
     );
-    // 6) 文件清单：两个子目录轮转，size/mtime 恒定 ⇒ 只刷新
-    const dir = repo.files[slot % repo.files.length]!;
-    add(
-      `ls -l ${dir.sub}`,
-      dir.entries.map((e) => `-rw-r--r--  1 dev dev ${String(e.size).padStart(5)} ${e.mtime} ${e.name}`).join('\n') + '\n',
-    );
+    // 6) 文件清单：三个子目录全列，size 每天变化 ⇒ 每次观察都是新事实。
+    // 每会话多产 16 条 exists 事实并串进本 episode 的工具序列，把子图撑到 30+ 节点
+    // （P3-12 密度门槛）；值随 day 单调，不会复活旧值（I3）。
+    for (const dir of repo.files) {
+      add(
+        `ls -l ${dir.sub}`,
+        dir.entries
+          .map((e) => `-rw-r--r--  1 dev dev ${String(e.size + day * 7).padStart(5)} ${e.mtime} ${e.name}`)
+          .join('\n') + '\n',
+      );
+    }
     // 7) 构建：耗时每会话都不同 ⇒ 单值谓词触发 invalidate + supersedes + 裁决
     // 耗时按会话序号单调递增：**同一仓库的值绝不复用**，否则"值复活"会插出重复行（I3 口径）
     const dur = (2.1 + s * 0.05 + rnd() * 0.001).toFixed(3);
@@ -432,6 +465,8 @@ export interface SeedResult {
     confidence: string;
     dependencies: number;
     m_ids: number[];
+    /** 与 `m_ids` 对齐的入包事实正文（判"这条是否回答了问题"用） */
+    m_texts: string[];
     error?: string;
   }>;
   feedback: Array<{ query_id: string; m_ids: number[]; verdict: string; ok: boolean; error?: string }>;
@@ -447,6 +482,11 @@ export interface SeedOptions {
   configFile?: string;
   /** 只生成 jsonl 不导入（演练用） */
   dryRun?: boolean;
+  /**
+   * 会话数（P3-12 验收放大用）。默认 75；数据面整体按比例前移，
+   * 用来攒够 GAT 双门槛需要的裁决与子图密度。
+   */
+  sessions?: number;
   /** 覆盖 home（测试用）；会话根目录由配置 source 决定 */
   home?: string;
 }
@@ -488,7 +528,7 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
   log(`[seed:devdb] golden=${goldenFile}`);
 
   // 0) 生成 jsonl（固定种子；已存在同内容文件不重写）
-  const sessions = generateSessions(SEED);
+  const sessions = generateSessions(SEED, options.sessions ?? DAYS * SESSIONS_PER_DAY);
   const lines = sessions.reduce((n, s) => n + s.lines.length, 0);
   mkdirSync(projectDir, { recursive: true });
   for (const s of sessions) {
@@ -552,7 +592,7 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
   };
 
   // 2) 真实导入（走 moshi import：适配器 → ingest → harvest → 冲突策略 → 派生）
-  const since = new Date(START_MS - DAY_MS).toISOString();
+  const since = new Date(startMsFor(sessions.length) - DAY_MS).toISOString();
   const imported = await runStep('moshi import', [
     'import',
     '--since',
@@ -586,6 +626,7 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
         confidence: 'unknown',
         dependencies: 0,
         m_ids: [],
+        m_texts: [],
       };
       try {
         const res = await callTool({ db, cfg }, 'memory_query', {
@@ -610,7 +651,9 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
         rec.dependencies = (pack.dependency_summary ?? []).length;
         // numbered_list 是已经 join 好的字符串（`[M1] ...`），M 编号即反馈时要用的 m_id
         const numbered = pack.numbered_list ?? '';
-        rec.m_ids = [...numbered.matchAll(/\[M(\d+)\]/g)].map((m) => Number(m[1]));
+        const entries = [...numbered.matchAll(/\[M(\d+)\]\s*([^\n]*)/g)];
+        rec.m_ids = entries.map((m) => Number(m[1]));
+        rec.m_texts = entries.map((m) => m[2] ?? '');
       } catch (err) {
         rec.error = (err as Error).message;
       }
@@ -618,33 +661,45 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
       return rec;
     };
 
-    // 4.1 单跳：包版本 / 工具版本 / 分支
-    for (let i = 0; i < 8; i += 1) {
-      const repo = REPOS[i]!;
-      await ask('single_hop', `${repo.pkgs[0]!.name} 的安装版本为`);
-      await ask('single_hop', `${repo.pkgs[1]!.name} 的安装版本为`);
-    }
-    for (const repo of REPOS.slice(0, 4)) await ask('single_hop', `${repo.tool} 的版本为`);
-    // 4.1b 单跳：git 分支（切换期之后取最终值）
-    for (const repo of REPOS) await ask('single_hop', `${repo.dir} 的当前分支为`);
-    // 4.2 多跳：同一回合里的构建 + 测试（tool_seq 关联）
-    for (let i = 0; i < 8; i += 1) {
-      await ask('multi_hop', `${REPOS[i]!.dir} 的构建结果与测试结果`);
-    }
-    for (const repo of REPOS.slice(0, 4)) await ask('multi_hop', `${repo.name} 构建结果 测试结果`);
-    // 4.3 时态：端口占用换人 / 分支切换
-    for (const repo of REPOS) await ask('temporal', `${repo.port} 的占用进程为`);
-    for (const repo of REPOS.slice(0, 4)) await ask('temporal', `${repo.dir} 的当前分支为`);
-    // 4.4 拒答：纯生造 token，库里不可能有
-    const nonsense = ['zxqwg', 'plorbix', 'qufflat', 'vintram', 'yolthar'];
-    for (let i = 0; i < 24; i += 1) {
-      await ask('refusal', `${nonsense[i % nonsense.length]} ${nonsense[(i + 2) % nonsense.length]} 的量子隧穿阈值是多少`);
-    }
+    // 4.0 查询套件跑多遍：同一批问题重复问（用户会反复确认同一件事），
+    // 每遍都是新的 query_id/证据包，用来给 rank 头攒够 ≥2000 条反馈样本
+    // （冷启动期 λ 恒 0 的阈值，见 sidecar/train.py `MIN_RANK_SAMPLES`）。
+    const askSuite = async (): Promise<void> => {
+      // 4.1 单跳：包版本 / 工具版本 / 分支（覆盖全部 48 个包，P3-12 用查询量凑满密度窗口）
+      for (const repo of REPOS) {
+        for (const pkg of repo.pkgs) await ask('single_hop', `${pkg.name} 的安装版本为`);
+      }
+      for (const repo of REPOS) await ask('single_hop', `${repo.tool} 的版本为`);
+      // 4.1b 单跳：git 分支（切换期之后取最终值）
+      for (const repo of REPOS) await ask('single_hop', `${repo.dir} 的当前分支为`);
+      // 4.1c 单跳：仓库目录级事实（子图最密的一类，P3-12 密度窗口要够 20 节点）
+      for (const repo of REPOS) {
+        await ask('single_hop', `${repo.dir} 的同步状态为`);
+        await ask('single_hop', `${repo.dir} 的构建结果`);
+        await ask('single_hop', `${repo.dir} 的测试结果`);
+        await ask('single_hop', `${repo.dir} 的类型检查结果`);
+        await ask('single_hop', `${repo.name} 的构建结果`);
+      }
+      // 4.2 多跳：同一回合里的构建 + 测试（tool_seq 关联）
+      for (let i = 0; i < 8; i += 1) {
+        await ask('multi_hop', `${REPOS[i]!.dir} 的构建结果与测试结果`);
+      }
+      for (const repo of REPOS.slice(0, 4)) await ask('multi_hop', `${repo.name} 构建结果 测试结果`);
+      // 4.3 时态：端口占用换人 / 分支切换
+      for (const repo of REPOS) await ask('temporal', `${repo.port} 的占用进程为`);
+      for (const repo of REPOS.slice(0, 4)) await ask('temporal', `${repo.dir} 的当前分支为`);
+      // 4.4 拒答：纯生造 token，库里不可能有。只占 1/12：拒答题子图节点为 0，
+      // 比例过高会把窗口均值拖到门槛以下（P3-12 数据面口径，见进度文件）
+      const nonsense = ['zxqwg', 'plorbix', 'qufflat', 'vintram', 'yolthar'];
+      for (let i = 0; i < 8; i += 1) {
+        await ask('refusal', `${nonsense[i % nonsense.length]} ${nonsense[(i + 2) % nonsense.length]} 的量子隧穿阈值是多少`);
+      }
+    };
+    for (let pass = 0; pass < QUERY_PASSES; pass += 1) await askSuite();
 
-    // 4.5 反馈：adopt / correct / reject 三种都要有，且只针对真实返回的 M 编号
+    // 4.5 反馈：每条可用查询的前 4 条 M 当采纳、其余当否决（rank 头要有正负对），
+    // 再补几条 correct 保持三种 verdict 都出现
     const usable = queries.filter((q) => q.query_id !== null && q.m_ids.length > 0);
-    const singles = usable.filter((q) => q.type === 'single_hop');
-    const multi = usable.filter((q) => q.type === 'multi_hop');
     const temporals = usable.filter((q) => q.type === 'temporal');
 
     const send = async (rec: SeedResult['queries'][number], m_ids: number[], verdict: string): Promise<void> => {
@@ -668,10 +723,25 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
       feedback.push(item);
     };
 
-    for (const rec of singles.slice(0, 10)) await send(rec, [1], 'adopt');
-    for (const rec of multi.slice(0, 6)) await send(rec, [1, 2], 'adopt');
+    // 反馈按"这条事实是否回答了问题"判：问题里的主体词（包名/仓库路径/端口/工具名）
+    // 出现在事实正文里才算采纳，其余算否决。这样同一题内同时有正负样本，
+    // rank 头才有 pairwise 信号；导出时带上 query_vector，模型才学得到"与问题相关"。
+    for (const rec of usable) {
+      const token = rec.query.trim().split(/\s+/)[0] ?? '';
+      const adoptIds: number[] = [];
+      const rejectIds: number[] = [];
+      rec.m_ids.forEach((mid, idx) => {
+        const text = rec.m_texts[idx] ?? '';
+        (token !== '' && text.includes(token) ? adoptIds : rejectIds).push(mid);
+      });
+      if (adoptIds.length === 0) {
+        adoptIds.push(rec.m_ids[0]!);
+        rejectIds.shift();
+      }
+      if (adoptIds.length > 0) await send(rec, adoptIds, 'adopt');
+      if (rejectIds.length > 0) await send(rec, rejectIds, 'reject');
+    }
     for (const rec of temporals.slice(0, 6)) await send(rec, [1], 'correct');
-    for (const rec of singles.slice(10, 18)) await send(rec, [2], 'reject');
     log(`[seed:devdb] 查询 ${queries.length} 次、反馈 ${feedback.length} 次`);
 
     // 5) golden：从库里**真实存在的事实**出题，四类各 8 题
@@ -841,7 +911,14 @@ if (isCliEntry()) {
   const argv = process.argv.slice(2);
   // P3-A8：只认 `--config <path>` / `--config=<path>`（`--home` 已移除：库与会话根都由配置决定）
   let configFile: string | undefined;
+  let sessions: number | undefined;
   let configError = false;
+  const parseSessions = (v: string): boolean => {
+    const n = Number(v);
+    if (!Number.isInteger(n) || n <= 0) return false;
+    sessions = n;
+    return true;
+  };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--config') {
@@ -859,6 +936,18 @@ if (isCliEntry()) {
         break;
       }
       configFile = v;
+    } else if (a === '--sessions') {
+      const v = argv[i + 1];
+      if (v === undefined || v.startsWith('--') || !parseSessions(v)) {
+        configError = true;
+        break;
+      }
+      i += 1;
+    } else if (a?.startsWith('--sessions=') === true) {
+      if (!parseSessions(a.slice('--sessions='.length))) {
+        configError = true;
+        break;
+      }
     } else if (a === '--home' || a?.startsWith('--home=') === true) {
       process.stderr.write('--home 已移除：请用 --config 指定配置（库与会话根都跟着配置走）\n');
       process.exitCode = 2;
@@ -868,11 +957,11 @@ if (isCliEntry()) {
   }
   if (configError) {
     process.stderr.write(
-      '用法：pnpm seed:devdb -- --config <path> [--dry-run]\n',
+      '用法：pnpm seed:devdb -- --config <path> [--sessions <N>] [--dry-run]\n',
     );
   } else {
     const dryRun = argv.includes('--dry-run');
-    seedDevDb({ ...(configFile === undefined ? {} : { configFile }), dryRun })
+    seedDevDb({ ...(configFile === undefined ? {} : { configFile }), ...(sessions === undefined ? {} : { sessions }), dryRun })
       .then((res) => {
         const out = path.join(TEMP_DIR, 'p3a4-seed-result.json');
         writeFileSync(

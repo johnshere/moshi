@@ -20,11 +20,15 @@ import { parseClaudeLine } from '../../src/core/adapters/claude-code.js';
 import {
   ForeignDataError,
   assertOwnedDb,
+  DAYS,
+  END_MS,
   generateSessions,
   parseImportSummary,
   seedDevDb,
   PROJECT_DIR_NAME,
   SEED,
+  SESSIONS_PER_DAY,
+  startMsFor,
 } from '../../tools/seed-devdb.js';
 
 const opened: Db[] = [];
@@ -90,6 +94,26 @@ describe('generateSessions：同种子同输出', () => {
     const spanDays = (Math.max(...ts) - Math.min(...ts)) / 86_400_000;
     expect(spanDays).toBeGreaterThanOrEqual(14);
     expect(pairs).toBeGreaterThan(0);
+  });
+});
+
+describe('--sessions 放大（P3-12 数据面）', () => {
+  it('默认会话数起点仍是 START_MS；放大时末端固定、起点等比前移', () => {
+    expect(startMsFor(DAYS * SESSIONS_PER_DAY)).toBe(Date.parse('2026-10-20T01:00:00.000Z'));
+    expect(startMsFor(24 * SESSIONS_PER_DAY)).toBe(END_MS - 24 * 86_400_000);
+  });
+
+  it('按传入数量生成会话，且同种子仍逐字节一致', () => {
+    const a = generateSessions(SEED, 10);
+    expect(a.length).toBe(10);
+    expect(JSON.stringify(a)).toBe(JSON.stringify(generateSessions(SEED, 10)));
+  });
+
+  it('放大后时间戳全部早于默认窗口末端（不会把 valid_at 推到未来）', () => {
+    for (const s of generateSessions(SEED, 120)) {
+      const first = JSON.parse(s.lines[0]!) as { timestamp: string };
+      expect(Date.parse(first.timestamp)).toBeLessThan(END_MS);
+    }
   });
 });
 
