@@ -39,7 +39,8 @@ import { fuseRank, fusedScores, type FusedItem, type RecallChannel } from './fus
 import { buildSubgraph } from './subgraph.js';
 import { buildPayloadFromSubgraph } from './subgraph-payload.js';
 import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
-import { adjudicate, type AdjudicatedFact } from './adjudicate.js';
+import { adjudicate, type AdjudicateResult, type AdjudicatedFact } from './adjudicate.js';
+import { applyNeuralDeltas } from './gate-delta.js';
 import { packFacts, type PackItem } from './pack.js';
 import { assembleEvidence, type ConflictEntry, type EvidencePackage, type TopicHint } from './evidence.js';
 import { mapDegradation, type InternalSignal } from './errors.js';
@@ -128,6 +129,8 @@ export interface SearchRuntime {
    * 用结构化类型而不是 import 具体客户端：core 不依赖 infra 实现。
    */
   score?: ModelScoreFn;
+  /** δ 门控上限（`model.delta_cap`，默认 0.15）；只在 `gat_mode='on'` 生效 */
+  deltaCap?: number;
   /**
    * 证据链采集注入点（P2-24，详设 §4.7）。**不传 = 完全不采集**，行为与 P2-24 之前
    * 逐字节一致；daemon 注入 TraceStore 后每次查询留一条内存 trace（不落库）。
@@ -572,12 +575,33 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   // ── 8) 符号兜底五步（§6.7）──
   // 融合分以 base 身份进 finalScore（0.55 权重）。不传的话 base 恒 0，
   // 排序退化成 0.30×confidence + 0.15×strength，图邻居能压过融合分第一的直命中（B-3）。
-  const adj = adjudicate(db, nodeFacts, sub.edges, {
+  const adjOpts = {
     now,
     // include_history 是对第①步的显式豁免（§4.1.1）：调用方要看被取代的事实
     keepExpired: input.includeHistory === true,
     base: fusedScores(fused),
-  });
+  };
+  let adj: AdjudicateResult;
+  if ((rt.gatMode ?? 'off') === 'on' && modelScores.size > 0) {
+    // δ 门控 + 重跑裁决（§7.5 五步）：翻转就回退，落库走 setConfidence + audit。
+    // 门控本身出错（落库失败、重跑裁决异常）一律退回普通裁决：**模型的问题不能让查询失败**。
+    try {
+      const gated = applyNeuralDeltas(db, nodeFacts, sub.edges, {
+        ...adjOpts,
+        scores: modelScores,
+        ...(rt.deltaCap === undefined ? {} : { deltaCap: rt.deltaCap }),
+        modelVersion: resolvedVersion,
+      });
+      adj = gated.result;
+      stageMs['model_applied'] = gated.applied.length;
+      stageMs['model_rejected'] = gated.rejected.length;
+    } catch {
+      signals.push('gat_unavailable');
+      adj = adjudicate(db, nodeFacts, sub.edges, adjOpts);
+    }
+  } else {
+    adj = adjudicate(db, nodeFacts, sub.edges, adjOpts);
+  }
   mark('adjudicate');
 
   // ── 9) top_k 截断 + 装箱（§6.8）──

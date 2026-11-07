@@ -164,3 +164,48 @@ describe('searchWithPipeline · GAT shadow（P3-07）', () => {
     expect(out.stageMs['model_ms']).toBeUndefined();
   });
 });
+
+describe('searchWithPipeline · GAT on（P3-08 δ 门控）', () => {
+  it('on 模式 δ 生效：写入 model_applied，置信来源变 gat_delta', async () => {
+    const db = freshDb();
+    seed(db);
+    const out = await searchWithPipeline(
+      { db, gatMode: 'on', score: fakeScore, deltaCap: 0.15 },
+      { query: 'alpha', scope: 'global', topK: 10 },
+    );
+
+    expect(out.stageMs['model_applied']).toBeGreaterThan(0);
+    const rows = db.prepare("SELECT confidence_source FROM fact WHERE confidence_source = 'gat_delta'").all();
+    expect(rows.length).toBeGreaterThan(0);
+    // audit 有 model:<版本> 记录
+    const audit = db
+      .prepare("SELECT reason FROM audit WHERE source = 'gat_delta' LIMIT 1")
+      .get() as { reason: string } | undefined;
+    expect(audit?.reason).toBe('model:gat-v1@test');
+  });
+
+  it('on 模式 overturned 概率高时不上调/不下调：负 δ 被守卫丢弃', async () => {
+    const db = freshDb();
+    seed(db);
+    const out = await searchWithPipeline(
+      {
+        db,
+        gatMode: 'on',
+        deltaCap: 0.15,
+        score: async (payload) => ({
+          scores: payload.nodes.map((n) => ({ fact_id: n.fact_id, delta: -0.1, overturn_prob: 0.9 })),
+          modelVersion: 'gat-v1@test',
+          degraded: [],
+        }),
+      },
+      { query: 'alpha', scope: 'global', topK: 10 },
+    );
+
+    expect(out.stageMs['model_applied']).toBe(0);
+    expect(out.stageMs['model_rejected']).toBeGreaterThan(0);
+    const changed = db.prepare("SELECT COUNT(*) AS n FROM fact WHERE confidence_source = 'gat_delta'").get() as {
+      n: number;
+    };
+    expect(changed.n).toBe(0);
+  });
+});
