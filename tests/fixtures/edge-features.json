@@ -1,0 +1,27 @@
+{
+  "schema": "moshi-edge-features/1",
+  "dim": 16,
+  "max_edges": 192,
+  "edges": [
+    {
+      "input": {
+        "etype": "depends_on",
+        "weight": 1.0,
+        "confidence": 0.7,
+        "hop": 1,
+        "direction": 1
+      },
+      "expected": [1, 0, 0, 0, 0, 0, 1, 0.7, 0.5, 1, 0, 0, 0, 0, 0, 0]
+    },
+    {
+      "input": {
+        "etype": "co_occur",
+        "weight": 1.0,
+        "confidence": 0.9,
+        "hop": null,
+        "direction": 0
+      },
+      "expected": [0, 0, 0, 1, 0, 0, 1, 0.9, 0, 0, 0, 0, 0, 0, 0, 0]
+    }
+  ]
+}
