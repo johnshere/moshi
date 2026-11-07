@@ -82,18 +82,28 @@ export function spawnSidecar(opts: SpawnSidecarOptions): SpawnedSidecar {
   });
 
   const log = createWriteStream(opts.logFile, { flags: 'a' });
+  let logClosed = false;
+  const closeLog = (): void => {
+    if (logClosed) return;
+    logClosed = true;
+    log.end();
+  };
   let spawnError: Error | null = null;
   child.on('error', (err) => {
     // spawn 失败（ENOENT 等）不触发 exit：记下错误，让 waitReady 立即失败而非空等超时
     spawnError = err;
     log.write(`[spawn-error] ${err.message}\n`);
-    log.end();
+    closeLog();
   });
-  child.stdout?.on('data', (d) => log.write(`[out] ${d}`));
-  child.stderr?.on('data', (d) => log.write(`[err] ${d}`));
+  child.stdout?.on('data', (d) => {
+    if (!logClosed) log.write(`[out] ${d}`);
+  });
+  child.stderr?.on('data', (d) => {
+    if (!logClosed) log.write(`[err] ${d}`);
+  });
   child.on('exit', (code, signal) => {
-    log.write(`[exit] code=${code ?? 'null'} signal=${signal ?? 'null'}\n`);
-    log.end();
+    if (!logClosed) log.write(`[exit] code=${code ?? 'null'} signal=${signal ?? 'null'}\n`);
+    closeLog();
   });
   child.unref();
 
@@ -118,6 +128,10 @@ export function spawnSidecar(opts: SpawnSidecarOptions): SpawnedSidecar {
       }
     },
     kill() {
+      // 先释放 stdout/stderr 与日志流：子进程即便没退出，事件循环也能排空。
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      closeLog();
       if (process.platform === 'win32') {
         // Windows 无 SIGTERM 投递；TaskKill 树（子进程可能还有线程）
         spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).unref();

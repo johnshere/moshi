@@ -43,6 +43,7 @@ class FakeTransport implements SidecarTransport {
 
 interface FakeSpawnRec {
   spawns: number;
+  kills: number;
   failReady: boolean;
   waitReady(): Promise<{ pid: number; socket: string; embedModel: string; modelVersion: string; startedAt: string }>;
 }
@@ -52,6 +53,7 @@ function makeDeps(home: string, transport: FakeTransport): { deps: SidecarClient
   const clock = { t: 1_000_000 };
   const spawnRec: FakeSpawnRec = {
     spawns: 0,
+    kills: 0,
     failReady: false,
     waitReady() {
       return Promise.resolve({ pid: 777, socket: 'pipe', embedModel: 'bge', modelVersion: 'v1', startedAt: 'x' });
@@ -66,7 +68,9 @@ function makeDeps(home: string, transport: FakeTransport): { deps: SidecarClient
       return {
         pid: 777,
         waitReady: spawnRec.failReady ? () => Promise.reject(new Error('就绪超时')) : spawnRec.waitReady,
-        kill: () => {},
+        kill: () => {
+          spawnRec.kills += 1;
+        },
       };
     },
     now: () => clock.t,
@@ -91,6 +95,9 @@ describe('SidecarClient（P1-01）', () => {
     const vecs = await c.encode(['x']);
     expect(vecs).toEqual([[0.1, 0.2]]);
     await c.shutdown();
+    // ready 状态下也必须杀进程树：旧 /shutdown 只 unload 不退出（P1-01 遗留）
+    expect(c.status().state).toBe('stopped');
+    expect(spawnRec.kills).toBe(1);
   });
 
   it('启动中不重复 spawn', async () => {

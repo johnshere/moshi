@@ -1,6 +1,6 @@
 # P3-A3 m2 进度（实施子代理维护）
 
-- 状态：**FAILED（第二次独立验收，仅 AC-2；按批次规则终止，等用户裁决）**；数值面达标，生命周期缺陷归预存 B-8/P3-A9
+- 状态：**DONE.m2（修复 P1-01 关停缺陷后复核；M1 待 `fact_vec` 重编码）**
 - 机器：M2 本机（Windows，pwsh 7；证据不引用 M1 读数）
 - 设计：`docs/progress/m2-batch-20261107/p3-a3-design.md`
 - 验收：`docs/progress/m2-batch-20261107/p3-a3-acceptance.md`
@@ -114,3 +114,10 @@ EXIT=0
 - AC-1/3/4 复跑仍 PASS：`setup-env --check` exit 0；`sidecar.test.ts` 2/2 自然退出；真实库 SHA256/size/mtime/`query_log=174` 前后不变。
 - 只 kill 自己启动的进程树，强制终止后 EXIT=1、无残留；未改文件、未 commit、未 push。
 - 按批次规则：二次 FAIL → 终止批次；P3-A4 不启动；待裁决 B-8/P3-A9 与 P3-A3 m2 口径。
+
+## 8. B-8 修复后复核（2026-11-07 11:05）
+
+- 用户裁决：不新增 P3-A9；B-8 是 P1-01（sidecar 骨架）遗留，直接修 P1-01 并备注。
+- 补丁：`server.py` 的 `/shutdown` 置 `stopping`，响应后 `serve_pipe/serve_unix` 退出；`client.shutdown`/`checkIdle` 杀进程树；`spawn.kill` 释放 stdout/stderr/日志流；单测补 `shutdown` 调 kill 断言。
+- 复核：`eval --vector` 3 次自然退出（23.8s / 9.3s / 9.2s，exit 0），`Get-CimInstance python.exe` 残留 0；`pnpm verify` 116 files/1403 passed，`pnpm build` 0；真实库 SHA256/mtime/query_log 174 不变。
+- 结论：AC-2 通过；P3-A3 m2 按 `DONE.m2` 收口，M1 的 `fact_vec=0` 仍待 M1 侧重编码。

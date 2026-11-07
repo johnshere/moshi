@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | P3-A8 | `docs/progress/m2-batch-20261107/p3-a8-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 67687a7 |
 | 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | d3ced7b |
-| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | FAILED | 1 | 2（均 FAIL：AC-2） | - |
+| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | DONE（P1-01 修复后复核；批次原已终止） | 1 | 2（FAIL）+ 修复后复核 | 待提交 |
 | 4 | P3-A4 m2 | `.../p3-a4-design.md` / `...-acceptance.md` | PENDING（批次终止，未启动） | 0 | 0 | - |
 
 图例：`PENDING` 未开始；`IMPLEMENTING` 实施中；`VERIFYING` 待/在验收；`PASS` 验收通过待 commit；`DONE` 已 commit；`FAILED` 二次验收不通过，批次终止。
@@ -39,3 +39,4 @@
 - 2026-11-07：批次创建，P3-A8 实施子代理已派发。
 - 2026-11-07 02:26：P3-A3 m2 返工报告 BLOCKED（确认无代码改动下没有自然退出路径；预存缺陷需新任务 P3-A9）。按规则进行第二次独立验收。
 - 2026-11-07 02:30：P3-A3 m2 第二次独立验收 **FAIL（仅 AC-2）**：结果 11.5s 打印完，181.8s 进程树仍活；HEAD 仍 `d3ced7b`、src/sidecar/tests 零改动；AC-1/3/4 复跑 PASS。按批次规则**终止本批次**，P3-A4 未启动；等用户裁决 B-8（P3-A9 或 P3-A3 口径）。
+- 2026-11-07 11:05：用户裁决不新增节点，B-8 归 P1-01 遗留并直接修复。补丁后 `eval --vector` 3 次自然退出（23.8/9.3/9.2s，exit 0）、无 python 残留；verify 1403 passed/build 0；P3-A3 m2 复核 PASS（`DONE.m2`）。批次仍保持终止状态，P3-A4 未启动，等用户决定是否续跑。

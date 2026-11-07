@@ -195,7 +195,7 @@ export class SidecarClient {
     }
   }
 
-  /** 关停（daemon 退出时兜底）：尽力发 /shutdown，不再重启 */
+  /** 关停（daemon 退出/CLI 单次运行兜底）：发 /shutdown，再杀进程树，不再重启 */
   async shutdown(): Promise<void> {
     clearInterval(this.idleTimer);
     if (this.state === 'ready' && this.transport !== null) {
@@ -205,14 +205,12 @@ export class SidecarClient {
         /* 尽力而为 */
       }
     }
-    // 还在启动中（waitReady 未返回）时没有可用传输：直接杀进程树，
-    // 否则 shutdown 会留一个孤儿 sidecar + 挂着日志流（目录被删后 ENOENT）
-    if (this.spawned !== null && this.ready === null) {
-      try {
-        this.spawned.kill();
-      } catch {
-        /* 尽力而为 */
-      }
+    // /shutdown 在旧版 sidecar 只 unload 不退出（P1-01 遗留）；无论服务端是否
+    // 自己退出，这里都杀进程树并释放日志流，保证 CLI 的事件循环能排空。
+    try {
+      this.spawned?.kill();
+    } catch {
+      /* 尽力而为 */
     }
     this.transport?.close();
     this.transport = null;
@@ -319,6 +317,12 @@ export class SidecarClient {
         } catch {
           /* 尽力 */
         }
+      }
+      // 旧版 /shutdown 不退出进程；空闲退出同样要杀进程树释放管道。
+      try {
+        this.spawned?.kill();
+      } catch {
+        /* 尽力 */
       }
       this.cleanupTransport();
       this.state = 'stopped';

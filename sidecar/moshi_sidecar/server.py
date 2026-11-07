@@ -59,6 +59,7 @@ class State:
         self.started_at = now_iso()
         self.encoder = Encoder(embed_model, embed_dim)
         self.unloaded = False
+        self.stopping = False
         self.model_error: str | None = None
         self.lock = threading.Lock()
 
@@ -118,6 +119,9 @@ def dispatch(state: State, path: str, body: dict) -> dict:
         return {"ok": True}
     if path == "/shutdown":
         state.unload()
+        # 只置退出标志；由 serve_pipe/serve_unix 写完响应后退出进程。
+        # 旧实现只 unload，docstring 说的“随后进程退出”并未发生（P1-01 遗留）。
+        state.stopping = True
         return {"ok": True}
     raise ValueError(f"未知端点: {path}")
 
@@ -169,6 +173,8 @@ def serve_pipe(state: State, pipe_name: str) -> None:
                 win32file.CloseHandle(pipe)
             except Exception:
                 pass
+        if state.stopping:
+            return
 
 
 def _read_line(pipe) -> bytes | None:
@@ -212,6 +218,8 @@ def _handle_connection(state: State, pipe) -> None:
             win32file.WriteFile(pipe, (json.dumps(resp) + "\n").encode("utf-8"))
         except pywintypes.error:
             return
+        if state.stopping:
+            return
 
 
 def _error_code(e: Exception) -> str:
@@ -254,6 +262,8 @@ def serve_unix(state: State, socket_path: str) -> None:
                     except Exception as e:  # noqa: BLE001
                         resp = {"error": {"code": _error_code(e), "message": str(e)}}
                     conn.sendall((json.dumps(resp) + "\n").encode("utf-8"))
+                    if state.stopping:
+                        return
 
 
 def main() -> int:
