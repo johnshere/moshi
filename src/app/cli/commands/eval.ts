@@ -38,9 +38,14 @@ import { safeRemoveDir } from '../../../infra/fs/safeWrite.js';
 import { SidecarClient } from '../../../infra/sidecar/client.js';
 import { setVectorDisabled, syncFactVectors } from '../../../infra/vec/index.js';
 import { checkGatGate, evaluateGatGate, GATE_QUERY_WINDOW } from '../../../core/ops/gate.js';
+import {
+  formatPackDiff,
+  packDiffRows,
+  summarizePackDiff,
+} from '../../../core/ops/pack-diff.js';
 import { dataPaths } from '../../config.js';
 import { runMemoryQuery } from '../../mcp/query.js';
-import { encodeViaSidecar, type EncodeFn, type McpDeps } from '../../mcp/deps.js';
+import { encodeViaSidecar, scoreViaSidecar, type EncodeFn, type McpDeps } from '../../mcp/deps.js';
 import { ensureDataDirs } from '../../lifecycle.js';
 import type { Command, CommandContext } from '../types.js';
 
@@ -94,6 +99,32 @@ function runGate(ctx: CommandContext): number {
   return result.ok ? 0 : 1;
 }
 
+export type GatMode = 'off' | 'shadow' | 'on';
+
+/**
+ * 解析 `--flags gat=on,gat=off`（P3-11）：必须恰好两个不同档位、其中一个是 `off`。
+ * 返回顺序即用户书写顺序；不合法返回 null（由调用方给用法并退出 2）。
+ */
+export function parseGatFlags(value: string): readonly GatMode[] | null {
+  const modes: GatMode[] = [];
+  for (const part of value.split(',')) {
+    const m = /^gat=(off|shadow|on)$/.exec(part.trim());
+    if (m === null) return null;
+    const mode = m[1] as GatMode;
+    if (!modes.includes(mode)) modes.push(mode);
+  }
+  if (modes.length !== 2 || !modes.includes('off')) return null;
+  return modes;
+}
+
+/**
+ * 两组执行顺序：off 固定在前。
+ * on 档会按 δ 写回置信（P3-08），先跑 on 会把它的改动算进 off 的基线。
+ */
+export function orderedGatModes(modes: readonly GatMode[]): readonly GatMode[] {
+  return ['off', ...modes.filter((m) => m !== 'off')];
+}
+
 export const evalCommand: Command = {
   name: 'eval',
   summary: '运行 golden set 评估（moshi eval run）或 GAT 双门槛（moshi eval gate）',
@@ -102,7 +133,7 @@ export const evalCommand: Command = {
     if (args[0] === 'gate') return runGate(ctx);
     if (args[0] !== 'run') {
       ctx.stderr(
-        '用法：moshi eval gate\n        moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial]\n',
+        '用法：moshi eval gate\n        moshi eval run [--golden <v1|路径>] [--vector] [--in-place] [--allow-partial] [--flags gat=on,gat=off]\n',
       );
       return 2;
     }
@@ -116,6 +147,22 @@ export const evalCommand: Command = {
     const inPlace = args.includes('--in-place');
     // 仅测试/局部 golden 用：跳过四类完整性校验，门禁（temporal/refusal）照旧。
     const allowPartial = args.includes('--allow-partial');
+    // P3-11：on/off 两组跑同一批题并算入包差异率
+    const flagsIdx = args.indexOf('--flags');
+    const flagsArg = flagsIdx === -1 ? undefined : args[flagsIdx + 1];
+    const gatModes =
+      flagsIdx !== -1 && flagsArg !== undefined ? parseGatFlags(flagsArg) : null;
+    if (flagsIdx !== -1 && gatModes === null) {
+      ctx.stderr(
+        '--flags 需要成对的 gat=<off|shadow|on>，且必须含一个 off（如 gat=on,gat=off）\n',
+      );
+      return 2;
+    }
+    if (gatModes !== null && inPlace) {
+      // on 档会按 δ 写回置信（P3-08），跑在用户库上就是污染
+      ctx.stderr('--flags 不能与 --in-place 同用（on 档会写回置信）\n');
+      return 2;
+    }
 
     // 完整性校验必须在开库/查询之前：题集不完整时不能留下 query_log。
     const { items, skipped } = loadGolden(goldenFile);
@@ -159,19 +206,87 @@ export const evalCommand: Command = {
       migrate(db, { backupsDir: paths.backups });
 
       // 默认不接模型：测的是"没有模型时这套记忆还能不能查对"（概设 §1.5），
-      // 也让 CI 不依赖 sidecar 二进制。`--vector` 才补向量、走三路召回。
+      // 也让 CI 不依赖 sidecar 二进制。`--vector` 才补向量、走三路召回；
+      // `--flags`（P3-11）需要 on 档真实打分，也要拉起 sidecar 并注入 score。
+      const needModel = gatModes !== null && gatModes.some((m) => m !== 'off');
       let encode: EncodeFn | undefined;
-      if (useVector) {
+      let score: McpDeps['score'];
+      if (useVector || needModel) {
         const silent = { info: () => {}, warn: () => {}, error: () => {} };
         sidecar = new SidecarClient({ cfg: ctx.cfg, logger: silent });
         await sidecar.ensureStarted();
-        setVectorDisabled(db, false);
         encode = encodeViaSidecar(sidecar);
-        const synced = await syncFactVectors(db, { encode, batchSize: 200, concurrency: 4 });
-        ctx.stdout(`向量索引（仅副本）：编码 ${synced.synced} 条，缺 ${synced.missing}，失败 ${synced.failed}\n`);
+        if (needModel) score = scoreViaSidecar(sidecar);
+        if (useVector) {
+          setVectorDisabled(db, false);
+          const synced = await syncFactVectors(db, { encode, batchSize: 200, concurrency: 4 });
+          ctx.stdout(`向量索引（仅副本）：编码 ${synced.synced} 条，缺 ${synced.missing}，失败 ${synced.failed}\n`);
+        }
       }
 
-      const deps: McpDeps = { db, cfg: ctx.cfg, encode };
+      const plane = inPlace ? '用户库（--in-place）' : '临时副本';
+
+      const deps: McpDeps = {
+        db,
+        cfg: ctx.cfg,
+        ...(encode === undefined ? {} : { encode }),
+      };
+
+      if (gatModes !== null) {
+        // ── P3-11：同一批题跑两组（off + on/shadow），逐题对齐算入包差异率 ──
+        const runMode = async (mode: GatMode) => {
+          const packs: string[][] = [];
+          const modeDeps: McpDeps = {
+            db,
+            cfg: { ...ctx.cfg, model: { ...ctx.cfg.model, gat_mode: mode } },
+            ...(encode === undefined ? {} : { encode }),
+            ...(score === undefined ? {} : { score }),
+          };
+          const query: EvalQueryFn = async (q, topK) => {
+            const pack = await runMemoryQuery(modeDeps, {
+              query: q,
+              top_k: topK,
+              scope: 'global',
+              include_history: false,
+              format: 'json',
+            });
+            packs.push(pack.evidence.map((e) => e.fact_id));
+            return pack;
+          };
+          return { result: await runGoldenSet(items, query, skipped), packs };
+        };
+
+        let gateFailed = false;
+        const runs = new Map<GatMode, Awaited<ReturnType<typeof runMode>>>();
+        // off 必须先跑：on 档会按 δ 写回置信（P3-08），先跑 on 会把差异算进 off 的基线
+        for (const mode of orderedGatModes(gatModes)) {
+          const run = await runMode(mode);
+          runs.set(mode, run);
+          ctx.stdout(
+            `golden 评估（${goldenFile}；数据面 ${plane}；gat=${mode}）：${run.result.passed}/${run.result.total} 通过（跳过 ${run.result.skipped} 行非法）\n`,
+          );
+          ctx.stdout(formatByType(run.result.outcomes) + '\n');
+          for (const o of run.result.outcomes) {
+            if (!o.pass) ctx.stdout(`  FAIL ${o.id} [${o.type}] ${o.detail}\n`);
+          }
+          if (run.result.gate_failed) gateFailed = true;
+        }
+
+        const offRun = runs.get('off')!;
+        const onMode = gatModes.find((m) => m !== 'off')!;
+        const onRun = runs.get(onMode)!;
+        const rows = packDiffRows(
+          items.map((i) => i.id),
+          onRun.packs,
+          offRun.packs,
+        );
+        const summary = summarizePackDiff(rows);
+        ctx.stdout(`${formatPackDiff(rows, summary)}\n`);
+        // 差异率也是门禁：台账 §2 的 `moshi eval gate && moshi eval run --flags ...`
+        // 靠退出码判「> 5%」，只打印不失败这条链就判不出来
+        return gateFailed || !summary.pass ? 1 : 0;
+      }
+
       const query: EvalQueryFn = (q, topK) =>
         runMemoryQuery(deps, {
           query: q,
@@ -182,7 +297,6 @@ export const evalCommand: Command = {
         });
       const result = await runGoldenSet(items, query, skipped);
 
-      const plane = inPlace ? '用户库（--in-place）' : '临时副本';
       ctx.stdout(
         `golden 评估（${goldenFile}；数据面 ${plane}；向量路 ${useVector ? '开' : '关'}）：${result.passed}/${result.total} 通过（跳过 ${result.skipped} 行非法）\n`,
       );
