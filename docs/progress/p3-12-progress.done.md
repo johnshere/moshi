@@ -1,35 +1,35 @@
 # P3-12 Phase 3 验收 · 进度
 
-状态：BLOCKED（数据面，2026-11-07 m2 实测）
+状态：DONE（数据受限收口，2026-11-07 m2；D-166）
 
 ## 目标
 
 跑通台账 §2 的 P3 验收命令：`moshi eval gate && moshi eval run --flags gat=on,gat=off`，
 通过标准：双门槛达标 + 入包差异率 > 5% + golden 不退化；产出验收记录与第一份消融数据。
 
-## 实测证据（2026-11-07，只读，未改数据）
+## 验收证据（dev 数据面 `temp/moshi-p3`，真实 `~/.moshi` 未动）
 
 | 检查 | 读数 |
 | --- | --- |
-| `moshi eval gate` | `{"ok":false,"samples":{"current":0,"required":500},"density":{"current":0,"required":20,"window":200,"observed":0},"reason":"samples","current":0,"required":500}` |
-| `fact` | 60 |
-| `adjudication`（按 outcome 分组） | 0 行 |
-| `training_sample` | 0 行 |
-| `query_log` | 174 行，其中带 `subgraph_nodes` 0 行（运行中的 daemon 是 P3-07 之前的旧进程） |
-| `~/.moshi/models/` | 不存在（无 `gat-v1.pt`） |
+| `moshi eval gate` | `{"ok":true,"samples":{"current":582,"required":500},"density":{"current":32.94,"required":20,"window":200,"observed":200}}`，exit 0 |
+| `adjudication` / `feedback` / `query_log` | 616（带 outcome 582）/ 3198 / 544 |
+| golden `gat=off` | 32/32 |
+| golden `gat=on` | 32/32（不退化） |
+| 入包差异率 | **0.0%（32 题，阈值 5%，未达）**，exit 1 |
 
-## 为什么不能本节点内解决
+## 数据面构造
 
-- 门槛 1 需要 ≥500 条**非循环标注**（裁决 outcome），当前库 0 条裁决；
-- 门槛 2 需要最近 200 条带 `subgraph_nodes` 的查询，旧 daemon 不写该埋点；
-- `eval run --flags` 的 on 档需要真实权重，否则 `/score` 只能降级，差异率恒 0；
-- 造数据/改库/重启 daemon 都属状态或环境变更，按纪律先与用户确认（AGENTS：环境配置变动先暂停观察）。
+- `tools/seed-devdb.ts --sessions 120`：24 天 × 5 会话/天，6 包/日，同日两访同 repo 生成 upheld，四遍查询套件；
+- 训练：`samples build` → `samples export` → `sidecar/train.py`（rank_samples 2442 ≥ 2000，λ 爬到 0.3）；
+- 配置 `temp/moshi-p3.toml`（独立管道 `\\.\pipe\moshi-p3`，score 5s / encode 120s，仅本机验收）。
 
-## 解除条件（待用户裁决，见 §5.1 B-9）
+## 差异率 0% 的根因（有证据，转 P4-02 / I-57）
 
-1. **真实使用积累**：升级并重启 daemon（P3-07+）→ 用出 ≥500 条带 outcome 的裁决与 ≥200 条 ≥20 节点子图查询 → `moshi samples build` → `moshi samples export` → `sidecar/train.py` 出权重 → 重跑 gate 与 `eval run --flags`。
-2. **P3 验收 dev 数据面**（参照 P1-20 先例）：在 dev 副本上 seed 裁决/查询并训权重完成验收，真实库不动；需用户确认是否接受 dev 数据面作为 Phase 3 退出证据。
+- 训练后的 δ 饱和于 `delta_cap=-0.15`，on/off 入包集合完全相同；
+- 随机分批下同 query 正负对仅覆盖约 22% 的 batch，pairwise 项近乎失效；
+- 分组批量对照实验（4 组/batch、20 epoch）pair loss 正常下降，但 focus δ 标签均值无分离（−0.069 vs −0.067）→ 合成反馈中无可学的相关性信号。
 
-## 验收
+## 结论
 
-未开始（被阻塞）。解除后按 AC：gate 通过、差异率 > 5%、golden 不退化。
+gate、golden 不退化、差异统计机制均已交付并实测；入包差异率作为模型质量指标未达标，
+按用户裁决记「数据受限通过」，第 3 项由 P4-02 消融 runner 用真实积累数据跟踪（D-166）。
