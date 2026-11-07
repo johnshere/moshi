@@ -11,6 +11,7 @@ import { revokeCommand } from './commands/revoke.js';
 import { layoutCommand } from './commands/layout.js';
 import { dbCommand } from './commands/db.js';
 import { schemaCommand } from './commands/schema.js';
+import { samplesCommand } from './commands/samples.js';
 import { doctorCommand } from './commands/doctor.js';
 import type { Command, CommandContext } from './types.js';
 
@@ -26,6 +27,7 @@ export const COMMANDS: readonly Command[] = [
   layoutCommand,
   dbCommand,
   schemaCommand,
+  samplesCommand,
   doctorCommand,
 ];
 

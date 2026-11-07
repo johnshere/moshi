@@ -78,6 +78,13 @@ export type AdjOutcome = (typeof ADJ_OUTCOME)[number];
 export const CARDINALITY = ['single-valued', 'series', 'set'] as const;
 export type Cardinality = (typeof CARDINALITY)[number];
 
+/** 训练样本标签种类（详设 §7.4；DDL 同名 CHECK 约束） */
+export const LABEL_KIND = ['overturn', 'rank'] as const;
+export type LabelKind = (typeof LABEL_KIND)[number];
+
+export const SAMPLE_SOURCE = ['adjudication', 'feedback', 'execution'] as const;
+export type SampleSource = (typeof SAMPLE_SOURCE)[number];
+
 export const STATUS = ['ok', 'degraded'] as const;
 export type Status = (typeof STATUS)[number];
 
