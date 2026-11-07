@@ -106,6 +106,8 @@ export function buildDevToml(paths: DevPaths): string {
     '# 固定落点 temp/moshi-dev；一次性、可重建、不备份。',
     '[storage]',
     `data_dir = "${tomlPath(paths.dataDir)}"`,
+    // P1-19：导出主题文档也留在 dev 面（否则默认 archive_dir 会指到真实用户目录）
+    `archive_dir = "${tomlPath(path.join(paths.root, 'archive'))}"`,
     '',
     '[eval]',
     `golden_set = "${tomlPath(paths.goldenSet)}"`,
