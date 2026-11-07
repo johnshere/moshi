@@ -123,3 +123,53 @@ export function applyConflictPolicy(
 export function applyConflictPolicyTx(db: Db, target: Fact, cardinality: Cardinality): ConflictResult {
   return withTransaction(db, () => applyConflictPolicy(db, target, cardinality));
 }
+
+// ---------------------------------------------------------------- I-49：outcome 回填
+//
+// `outcome` 的语义是"规则在 t 时刻的裁决，在 t' 时刻是否被新观测推翻"。
+// 只有**写入侧的新观测**能回答这个问题，读取侧仍然只开裁决、不写 outcome：
+//   - favored fact 被再次观测（case B refresh）      → upheld
+//   - favored fact 被后续新值失效（case D invalidation）→ overturned
+// 非 favored 的刷新/失效证据不足，保持 open；已 resolved 的裁决不覆盖（`outcome IS NULL`）。
+
+/**
+ * case B（完全重复 refresh）：若被再次观测的 fact 是某条 open 裁决的 favored，
+ * 说明"留住它"的裁决被新观测证实 → `upheld`，`outcome_at` 用本次观测时刻。
+ * 返回本次真实写入的条数（幂等重跑为 0）。
+ */
+export function resolveOutcomesForRefresh(db: Db, fact: Fact, ts: string): number {
+  let written = 0;
+  for (const row of adjudicationRepo.listOpenAdjudicationsForFact(db, fact.id)) {
+    if (adjudicationRepo.favoredFactId(row) !== fact.id) continue;
+    adjudicationRepo.resolveAdjudication(db, row.id, 'upheld', fact.id, ts);
+    written += 1;
+  }
+  return written;
+}
+
+/**
+ * case D（single-valued 新值失效旧值）：若被失效的 fact 是某条 open 裁决的 favored，
+ * 说明规则押注的那条事实被后续新观测推翻 → `overturned`。
+ *
+ * evidence 用**新观测** `target.id`（推翻它的是这条新事实），`outcome_at` 用新观测的
+ * `validAt` 而不是执行时刻——回填的历史时间线必须跟事实本身对齐。`ts` 只在 validAt
+ * 缺省（空串）时兜底。
+ * 返回本次真实写入的条数（幂等重跑为 0）。
+ */
+export function resolveOutcomesForInvalidation(
+  db: Db,
+  target: Fact,
+  invalidatedIds: readonly string[],
+  ts: string,
+): number {
+  const at = target.validAt === '' ? ts : target.validAt;
+  let written = 0;
+  for (const id of invalidatedIds) {
+    for (const row of adjudicationRepo.listOpenAdjudicationsForFact(db, id)) {
+      if (adjudicationRepo.favoredFactId(row) !== id) continue;
+      adjudicationRepo.resolveAdjudication(db, row.id, 'overturned', target.id, at);
+      written += 1;
+    }
+  }
+  return written;
+}

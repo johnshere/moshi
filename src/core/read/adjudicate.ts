@@ -19,7 +19,7 @@
  */
 import type { Db } from '../../infra/sqlite/db.js';
 import { getEntity } from '../../infra/sqlite/entityRepo.js';
-import { openAdjudicationOnce } from '../../infra/sqlite/adjudicationRepo.js';
+import { MUTEX_FAVORED_DECIDED_BY, openAdjudicationOnce } from '../../infra/sqlite/adjudicationRepo.js';
 import { getPredicateCardinality } from '../../infra/sqlite/ontologyRepo.js';
 import type { Fact } from '../../domain/types.js';
 import type { SubgraphEdge } from './subgraph.js';
@@ -108,7 +108,15 @@ export function adjudicate(db: Db, facts: readonly Fact[], edges: readonly Subgr
         pushFlag(flags, loser.id, 'disputed');
         disputedBy.set(loser.id, winner.id);
         stats.disputed += 1;
-        if (openAdjudicationOnce(db, { kind: 'mutex_win', factIds: [winner.id, loser.id], decidedBy: 'mutex_by_confidence@1' })) {
+        // decidedBy 带版本：@2 = 落库保留 winner/loser 原序，写入侧可据此回填 outcome；
+        // @1（legacy）是排序 JSON，顺序已丢，写入侧不敢猜 favored。
+        if (
+          openAdjudicationOnce(db, {
+            kind: 'mutex_win',
+            factIds: [winner.id, loser.id],
+            decidedBy: MUTEX_FAVORED_DECIDED_BY,
+          })
+        ) {
           adjudicationWrites += 1;
         }
       }

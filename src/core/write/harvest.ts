@@ -26,7 +26,14 @@ import * as factRepo from '../../infra/sqlite/factRepo.js';
 import { loadRegisteredKeys, recordPendingKeys } from '../../infra/sqlite/ontologyRepo.js';
 import { withTransaction } from '../../infra/sqlite/tx.js';
 import { parseTurn } from '../parse/registry.js';
-import { applyConflictPolicy, cardinalityOf, type ConflictResult, type OntologyHint } from './conflict.js';
+import {
+  applyConflictPolicy,
+  cardinalityOf,
+  resolveOutcomesForInvalidation,
+  resolveOutcomesForRefresh,
+  type ConflictResult,
+  type OntologyHint,
+} from './conflict.js';
 import { extractEdges, totalCreated } from './edges.js';
 import { mergeOnReobserve, type Priors, DEFAULT_PRIORS } from './confidence.js';
 import { buildIdentity } from './identity.js';
@@ -216,6 +223,9 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
           ts,
         });
       }
+      // I-49：重复观测是真实的新证据。这条 fact 若是某条 open 裁决的 favored，
+      // 裁决被证实 → upheld（非 favored 的刷新不写，保持 open）。
+      resolveOutcomesForRefresh(db, existing, ts);
       return {
         outcome: 'refreshed',
         factId: existing.id,
@@ -292,6 +302,11 @@ export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): Ups
     }
 
     const conflict = applyConflictPolicy(db, fact, card);
+    // I-49：single-valued 新值使旧值失效时，若被失效的是某条 open 裁决的 favored，
+    // 该裁决被推翻 → overturned（evidence=这条新事实，outcome_at=新事实 validAt）。
+    if (conflict.invalidated.length > 0) {
+      resolveOutcomesForInvalidation(db, fact, conflict.invalidated, ts);
+    }
     return {
       outcome: card === 'single-valued' ? 'superseded' : 'coexist',
       factId: fact.id,
