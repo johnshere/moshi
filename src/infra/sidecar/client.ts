@@ -195,7 +195,7 @@ export class SidecarClient {
     }
   }
 
-  /** 关停（daemon 退出/CLI 单次运行兜底）：发 /shutdown，再杀进程树，不再重启 */
+  /** 兼容旧语义：发 /shutdown（仅卸载权重，进程保留），客户端状态置 stopped */
   async shutdown(): Promise<void> {
     clearInterval(this.idleTimer);
     if (this.state === 'ready' && this.transport !== null) {
@@ -205,8 +205,32 @@ export class SidecarClient {
         /* 尽力而为 */
       }
     }
-    // /shutdown 在旧版 sidecar 只 unload 不退出（P1-01 遗留）；无论服务端是否
-    // 自己退出，这里都杀进程树并释放日志流，保证 CLI 的事件循环能排空。
+    // 还在启动中（waitReady 未返回）时没有可用传输：直接杀进程树，
+    // 否则 shutdown 会留一个孤儿 sidecar + 挂着日志流（目录被删后 ENOENT）
+    if (this.spawned !== null && this.ready === null) {
+      try {
+        this.spawned.kill();
+      } catch {
+        /* 尽力而为 */
+      }
+    }
+    this.transport?.close();
+    this.transport = null;
+    this.spawned = null;
+    this.ready = null;
+    this.state = 'stopped';
+  }
+
+  /** 内部关停：发 /terminate（卸载后退出），再兜底杀进程树、释放日志流 */
+  async terminate(): Promise<void> {
+    clearInterval(this.idleTimer);
+    if (this.transport !== null) {
+      try {
+        await this.transport.request('/terminate', {}, 1000);
+      } catch {
+        /* 尽力而为 */
+      }
+    }
     try {
       this.spawned?.kill();
     } catch {
@@ -311,21 +335,7 @@ export class SidecarClient {
     const idleMs = this.now() - this.lastActivityAt;
     const { idle_unload_min, idle_exit_min } = this.deps.cfg.sidecar;
     if (idleMs >= idle_exit_min * 60_000) {
-      if (this.transport !== null) {
-        try {
-          await this.transport.request('/shutdown', {}, 1000);
-        } catch {
-          /* 尽力 */
-        }
-      }
-      // 旧版 /shutdown 不退出进程；空闲退出同样要杀进程树释放管道。
-      try {
-        this.spawned?.kill();
-      } catch {
-        /* 尽力 */
-      }
-      this.cleanupTransport();
-      this.state = 'stopped';
+      await this.terminate();
       this.lastActivityAt = null;
       this.deps.logger.info({ event: 'sidecar.idle_exit' }, 'sidecar 空闲超时退出');
       return;

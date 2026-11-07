@@ -226,7 +226,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     communityRunner?.stop();
     collectRunner?.stop();
     layoutRunner?.stop();
-    await sidecar?.shutdown();
+    await sidecar?.terminate();
     await instance.close();
     await built.close();
     process.exit(0);

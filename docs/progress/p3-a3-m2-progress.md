@@ -115,9 +115,9 @@ EXIT=0
 - 只 kill 自己启动的进程树，强制终止后 EXIT=1、无残留；未改文件、未 commit、未 push。
 - 按批次规则：二次 FAIL → 终止批次；P3-A4 不启动；待裁决 B-8/P3-A9 与 P3-A3 m2 口径。
 
-## 8. B-8 修复后复核（2026-11-07 11:05）
+## 8. B-8 修复后复核（2026-11-07 11:15）
 
 - 用户裁决：不新增 P3-A9；B-8 是 P1-01（sidecar 骨架）遗留，直接修 P1-01 并备注。
-- 补丁：`server.py` 的 `/shutdown` 置 `stopping`，响应后 `serve_pipe/serve_unix` 退出；`client.shutdown`/`checkIdle` 杀进程树；`spawn.kill` 释放 stdout/stderr/日志流；单测补 `shutdown` 调 kill 断言。
-- 复核：`eval --vector` 3 次自然退出（23.8s / 9.3s / 9.2s，exit 0），`Get-CimInstance python.exe` 残留 0；`pnpm verify` 116 files/1403 passed，`pnpm build` 0；真实库 SHA256/mtime/query_log 174 不变。
+- 兼容性修正：用户指出 `/shutdown` 可能已被其他程序使用，不能直接改语义。最终方案：`/shutdown` 恢复“只卸载、进程保留”；新增 `/terminate`“卸载后退出”；`SidecarClient.shutdown()` 保持旧语义，新增 `terminate()`，eval/daemon/checkIdle 改用 terminate；`spawn.kill` 释放 stdout/stderr/日志流。
+- 复核：`eval --vector` 12.1s 自然退出、exit 0，`Get-CimInstance python.exe` 残留 0；`pnpm verify` 1403 passed/116 files，`pnpm build` 0；真实库 SHA256/mtime/query_log 174 不变。
 - 结论：AC-2 通过；P3-A3 m2 按 `DONE.m2` 收口，M1 的 `fact_vec=0` 仍待 M1 侧重编码。

@@ -94,10 +94,19 @@ describe('SidecarClient（P1-01）', () => {
     expect(c.status().state).toBe('ready');
     const vecs = await c.encode(['x']);
     expect(vecs).toEqual([[0.1, 0.2]]);
-    await c.shutdown();
-    // ready 状态下也必须杀进程树：旧 /shutdown 只 unload 不退出（P1-01 遗留）
+    await c.terminate();
     expect(c.status().state).toBe('stopped');
     expect(spawnRec.kills).toBe(1);
+  });
+
+  it('/shutdown 保持兼容：ready 只卸载，不杀进程树', async () => {
+    const home = tempHome();
+    const { deps, spawnRec } = makeDeps(home, new FakeTransport());
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+    await c.shutdown();
+    expect(c.status().state).toBe('stopped');
+    expect(spawnRec.kills).toBe(0);
   });
 
   it('启动中不重复 spawn', async () => {
@@ -108,7 +117,7 @@ describe('SidecarClient（P1-01）', () => {
     const p2 = c.ensureStarted();
     await Promise.all([p1, p2]);
     expect(spawnRec.spawns).toBe(1);
-    await c.shutdown();
+    await c.terminate();
   });
 
   it('encode 断开 → 重启计数 +1 并重新拉起', async () => {
@@ -122,7 +131,7 @@ describe('SidecarClient（P1-01）', () => {
     expect(vecs).toBeNull();
     expect(spawnRec.spawns).toBeGreaterThanOrEqual(2); // 断开后自动重启
     expect(c.status().restartsThisHour).toBe(1);
-    await c.shutdown();
+    await c.terminate();
   });
 
   it('1 小时内 ≥ max_restarts 次 → mode=off、state=failed，不再尝试', async () => {
@@ -142,7 +151,7 @@ describe('SidecarClient（P1-01）', () => {
     const before = spawnRec.spawns;
     await c.ensureStarted();
     expect(spawnRec.spawns).toBe(before); // off 后不再 spawn
-    await c.shutdown();
+    await c.terminate();
   });
 
   it('空闲卸载：超 idle_unload_min → unloaded；超 idle_exit_min → stopped', async () => {
@@ -160,8 +169,8 @@ describe('SidecarClient（P1-01）', () => {
     clock.t += 31 * 60_000; // 距上次活动 37 分钟 > idle_exit_min=30
     await c.checkIdle();
     expect(c.status().state).toBe('stopped');
-    expect(t.requests.map((r) => r.path)).toContain('/shutdown');
-    await c.shutdown();
+    expect(t.requests.map((r) => r.path)).toContain('/terminate');
+    await c.terminate();
   });
 
   it('启动失败（就绪超时）计入重启计数，连续失败后同样熔断为 off', async () => {
@@ -181,6 +190,6 @@ describe('SidecarClient（P1-01）', () => {
     }
     expect(c.status().mode).toBe('off');
     expect(c.status().restartsThisHour).toBeGreaterThanOrEqual(3);
-    await c.shutdown();
+    await c.terminate();
   });
 });

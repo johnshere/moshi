@@ -20,7 +20,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | P3-A8 | `docs/progress/m2-batch-20261107/p3-a8-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | 67687a7 |
 | 2 | P1-16 m2 | `.../p1-16-design.md` / `...-acceptance.md` | DONE | 1 | 1（PASS） | d3ced7b |
-| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | DONE（P1-01 修复后复核；批次原已终止） | 1 | 2（FAIL）+ 修复后复核 | 待提交 |
+| 3 | P3-A3 m2 | `.../p3-a3-design.md` / `...-acceptance.md` | DONE（P1-01 兼容修正后复核；批次原已终止） | 1 | 2（FAIL）+ 修复后复核 | 已提交（见 git log） |
 | 4 | P3-A4 m2 | `.../p3-a4-design.md` / `...-acceptance.md` | PENDING（批次终止，未启动） | 0 | 0 | - |
 
 图例：`PENDING` 未开始；`IMPLEMENTING` 实施中；`VERIFYING` 待/在验收；`PASS` 验收通过待 commit；`DONE` 已 commit；`FAILED` 二次验收不通过，批次终止。

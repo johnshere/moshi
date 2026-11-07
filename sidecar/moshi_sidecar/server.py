@@ -8,7 +8,8 @@
   /encode    → {vectors, dim}
   /reload    → {ok}
   /unload    → {ok}（权重置 None + gc.collect()，进程保留）
-  /shutdown  → {ok}（随后进程退出）
+  /shutdown  → {ok}（仅卸载权重，进程保留；兼容旧行为）
+  /terminate → {ok}（卸载权重后进程退出；内部关停用）
 
 错误响应：`{"error": {"code": "...", "message": "..."}}`，
 code ∈ {E_MODEL_NOT_LOADED, E_INPUT_SHAPE, E_OOM, E_INTERNAL}。
@@ -118,9 +119,12 @@ def dispatch(state: State, path: str, body: dict) -> dict:
         state.unload()
         return {"ok": True}
     if path == "/shutdown":
+        # 兼容旧行为：只卸载权重，不退出进程。历史调用方按此语义使用。
         state.unload()
-        # 只置退出标志；由 serve_pipe/serve_unix 写完响应后退出进程。
-        # 旧实现只 unload，docstring 说的“随后进程退出”并未发生（P1-01 遗留）。
+        return {"ok": True}
+    if path == "/terminate":
+        # 内部关停专用：卸载权重并退出；由 serve_pipe/serve_unix 写完响应后收尾。
+        state.unload()
         state.stopping = True
         return {"ok": True}
     raise ValueError(f"未知端点: {path}")

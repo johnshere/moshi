@@ -143,7 +143,7 @@ describe('向量索引集成（P1-02）', () => {
       // 近邻 similarity 显著高于远处
       expect(hits[0]!.similarity).toBeGreaterThan(hits[hits.length - 1]!.similarity);
     } finally {
-      await sidecar.shutdown();
+      await sidecar.terminate();
       closeDb(db);
     }
   });

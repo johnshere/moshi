@@ -159,7 +159,7 @@ export const evalCommand: Command = {
     } finally {
       closeDb(db);
       if (tmpDir !== undefined) safeRemoveDir(tmpDir, [os.tmpdir()]);
-      await sidecar?.shutdown();
+      await sidecar?.terminate();
     }
   },
 };

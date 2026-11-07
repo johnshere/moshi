@@ -70,7 +70,7 @@ describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管�
     }
   });
 
-  it('spawn → 就绪 → health → encode → unload → shutdown 全链路', async () => {
+  it('spawn → 就绪 → health → encode → unload → terminate 全链路', async () => {
     const home = tempHome();
     const c = makeClient(home);
     try {
@@ -94,7 +94,7 @@ describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管�
       await c.checkIdle(); // 未超时（lastActivity 刚更新），不应卸载
       expect(c.status().state).toBe('ready');
     } finally {
-      await c.shutdown();
+      await c.terminate();
       expect(c.status().state).toBe('stopped');
     }
   });
@@ -119,7 +119,7 @@ describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管�
       const newPid = c.status().pid;
       expect(newPid).not.toBe(pid);
     } finally {
-      await c.shutdown();
+      await c.terminate();
     }
   });
 });
