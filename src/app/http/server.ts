@@ -24,7 +24,7 @@ import { countFact, countVec, vectorDisabled, VEC_DIM } from '../../infra/vec/in
 import { countFts } from '../../infra/sqlite/ftsRepo.js';
 import type { Config } from '../config.js';
 import { createMcpHttpHandler } from '../mcp/server.js';
-import { buildEvidenceCache, encodeViaSidecar, type McpDeps } from '../mcp/deps.js';
+import { buildEvidenceCache, encodeViaSidecar, scoreViaSidecar, type McpDeps } from '../mcp/deps.js';
 import { factRoutes } from './routes/facts.js';
 import { graphRoutes } from './routes/graph.js';
 import { batchRoutes } from './routes/batch.js';
@@ -146,7 +146,9 @@ export async function buildHttpApp(deps: HttpDeps) {
   const mcpDeps: McpDeps = {
     db: deps.db,
     cfg: deps.cfg,
-    ...(deps.sidecar === undefined ? {} : { encode: encodeViaSidecar(deps.sidecar) }),
+    ...(deps.sidecar === undefined
+      ? {}
+      : { encode: encodeViaSidecar(deps.sidecar), score: scoreViaSidecar(deps.sidecar) }),
     ...(deps.onEnqueued === undefined ? {} : { onEnqueued: deps.onEnqueued }),
     // P2-24：MCP 查询把证据链写进同一份 ring buffer，HTTP 只读接口从它取
     traceStore,

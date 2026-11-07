@@ -37,6 +37,8 @@ import { recallBm25, tokenizeForFts } from './recall/bm25.js';
 import { recallPpr, type PprResult } from './recall/ppr.js';
 import { fuseRank, fusedScores, type FusedItem, type RecallChannel } from './fuse.js';
 import { buildSubgraph } from './subgraph.js';
+import { buildPayloadFromSubgraph } from './subgraph-payload.js';
+import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
 import { adjudicate, type AdjudicatedFact } from './adjudicate.js';
 import { packFacts, type PackItem } from './pack.js';
 import { assembleEvidence, type ConflictEntry, type EvidencePackage, type TopicHint } from './evidence.js';
@@ -94,6 +96,22 @@ export interface SearchInput {
   session?: string;
 }
 
+/** 单节点打分（与 `/score` 返回一致） */
+export interface ModelScore {
+  fact_id: string;
+  delta: number;
+  overturn_prob: number;
+}
+
+export interface ModelScoreOutcome {
+  scores: ModelScore[] | null;
+  modelVersion: string | null;
+  /** `no_sidecar / timeout / input_shape / model_not_loaded / error`（P3-04 口径） */
+  degraded: readonly string[];
+}
+
+export type ModelScoreFn = (payload: MoshiSubgraphPayload) => Promise<ModelScoreOutcome>;
+
 export interface SearchRuntime {
   db: Db;
   params?: Partial<SearchParams>;
@@ -104,6 +122,12 @@ export interface SearchRuntime {
   gatMode?: 'off' | 'shadow' | 'on';
   /** GAT 模型版本（P3）；缺省 null。P2 恒 null——模型未生效（§4.7） */
   modelVersion?: string | null;
+  /**
+   * GAT 打分注入点（P3-07）。`shadow`/`on` 时查询会组 payload 调它；
+   * 不注入 = 完全不打分（行为与 P3-07 之前一致）。
+   * 用结构化类型而不是 import 具体客户端：core 不依赖 infra 实现。
+   */
+  score?: ModelScoreFn;
   /**
    * 证据链采集注入点（P2-24，详设 §4.7）。**不传 = 完全不采集**，行为与 P2-24 之前
    * 逐字节一致；daemon 注入 TraceStore 后每次查询留一条内存 trace（不落库）。
@@ -120,6 +144,11 @@ export interface SearchOutcome {
   cached: boolean;
   /** 各阶段累计耗时（§6.1 的 stage_ms_json / §6.13 预算断言用） */
   stageMs: Record<string, number>;
+}
+
+/** 模型分入库前的定点（避免 17 位浮点把 query_log 撑大且无信息量） */
+function round4(v: number): number {
+  return Math.round(v * 1e4) / 1e4;
 }
 
 /** 开关快照（§6.12：没有它 A/B 数据无法归组） */
@@ -145,8 +174,11 @@ function emitTrace(rt: SearchRuntime, record: TraceRecord): void {
 }
 
 /** trace 的公共字段（三处出口共用，避免 model_mode/model_version 漂移） */
-function traceMeta(rt: SearchRuntime): { modelMode: 'off' | 'shadow' | 'on'; modelVersion: string | null } {
-  return { modelMode: rt.gatMode ?? 'off', modelVersion: rt.modelVersion ?? null };
+function traceMeta(
+  rt: SearchRuntime,
+  modelVersion?: string | null,
+): { modelMode: 'off' | 'shadow' | 'on'; modelVersion: string | null } {
+  return { modelMode: rt.gatMode ?? 'off', modelVersion: modelVersion ?? rt.modelVersion ?? null };
 }
 
 /** 候选过滤：scope / ftype / 生命周期 / 有效时间窗（§4.1.1 入参语义） */
@@ -254,6 +286,7 @@ type Stage =
   | 'load'
   | 'fuse'
   | 'subgraph'
+  | 'score'
   | 'adjudicate'
   | 'pack'
   | 'assemble';
@@ -497,12 +530,44 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     maxNodes: params.subgraphMaxNodes,
     maxEdges: params.subgraphMaxEdges,
   });
+  // 门槛 2 的密度口径（详设 §7.6）：复用 stage_ms_json，不改表结构
+  stageMs['subgraph_nodes'] = sub.nodes.length;
   const nodeIds = sub.nodes.map((n) => n.fact_id);
   // 邻居节点同样要过过滤器；顺序按子图全序（§6.6 的稳定性要求）
   const nodeFacts = listByIds(db, nodeIds)
     .filter((f) => passFilters(f, input, scope))
     .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id));
   mark('subgraph');
+
+  // ── 7.5) GAT 打分（P3-07）：shadow/on 都只**记录**，不改排序 ──
+  // δ 应用与门控在 P3-08；这里唯一的副作用是把分数记进 query_log 与 trace，
+  // 以及模型不可用时把降级码补进 degraded[]（失败绝不影响查询结果）。
+  const modelScores = new Map<string, { delta: number; overturnProb: number }>();
+  let resolvedVersion = rt.modelVersion ?? null;
+  if (rt.score !== undefined && (rt.gatMode ?? 'off') !== 'off') {
+    const scoreStarted = performance.now();
+    try {
+      const vec = await queryVector();
+      const bridged = buildPayloadFromSubgraph(db, sub, vec === null ? null : Array.from(vec));
+      if (bridged.missing.length > 0) {
+        signals.push('gat_unavailable');
+      } else {
+        const outcome = await rt.score(bridged.payload);
+        if (outcome.scores === null) {
+          signals.push(outcome.degraded.includes('no_sidecar') ? 'sidecar_unavailable' : 'gat_unavailable');
+        } else {
+          for (const s of outcome.scores) {
+            modelScores.set(s.fact_id, { delta: s.delta, overturnProb: s.overturn_prob });
+          }
+          resolvedVersion = outcome.modelVersion ?? resolvedVersion;
+        }
+      }
+    } catch {
+      signals.push('gat_unavailable');
+    }
+    stageMs['model_ms'] = Math.round((performance.now() - scoreStarted) * 100) / 100;
+    mark('score');
+  }
 
   // ── 8) 符号兜底五步（§6.7）──
   // 融合分以 base 身份进 finalScore（0.55 权重）。不传的话 base 恒 0，
@@ -556,7 +621,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
       queryId,
       ts: parseTs(now),
       route: 'local',
-      ...traceMeta(rt),
+      ...traceMeta(rt, resolvedVersion),
       directIds: [...new Set([...vectorIds, ...bm25Ids])],
       pprSeeds: seeds,
       ppr: pprResult,
@@ -584,12 +649,19 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
         bm25: channels.bm25?.ids ?? [],
         ppr: channels.ppr?.ids ?? [],
       },
-      fused: fused.map((f) => ({
-        fact_id: f.fact_id,
-        rrf: f.rrf,
-        entity_bonus: f.entity_bonus,
-        temporal_bonus: f.temporal_bonus,
-      })),
+      fused: fused.map((f) => {
+        const m = modelScores.get(f.fact_id);
+        return {
+          fact_id: f.fact_id,
+          rrf: f.rrf,
+          entity_bonus: f.entity_bonus,
+          temporal_bonus: f.temporal_bonus,
+          // P3-07：模型分只入库不入排序；未打分时字段不出现（保持旧行形状）
+          ...(m === undefined
+            ? {}
+            : { model_delta: round4(m.delta), overturn_prob: round4(m.overturnProb) }),
+        };
+      }),
       packed: items.map((p) => p.fact.id),
       degraded,
       truncated: pack.truncated,

@@ -10,11 +10,11 @@
  * `/encode` 现场补（`queryVectors` 注入）。补不上的样本 `query_vector=null`，
  * 模型侧会跳过交叉注意力（`model.py` 支持 None），不会污染其它样本。
  */
-import { buildSubgraphPayload, type MoshiSubgraphPayload } from '../../domain/subgraph.js';
+import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
+import { buildPayloadFromSubgraph } from '../read/subgraph-payload.js';
 import type { LabelKind, SampleSource } from '../../domain/enums.js';
 import { getFact } from '../../infra/sqlite/factRepo.js';
 import { favoredFactId, getAdjudication } from '../../infra/sqlite/adjudicationRepo.js';
-import { getVec } from '../../infra/vec/index.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import {
   getQueryText,
@@ -71,27 +71,6 @@ export interface ExportOptions extends SampleFilter {
   queryVectors?: (texts: string[]) => Promise<number[][] | null>;
 }
 
-/** 子图节点 → payload 节点；缺 embedding 走 null（Python 侧零向量 + confidence 折半） */
-function nodeInputs(db: Db, subgraph: ReturnType<typeof buildSubgraph>) {
-  return subgraph.nodes.map((n) => {
-    const fact = getFact(db, n.fact_id);
-    if (fact === null) {
-      // buildSubgraph 刚查过 degree，正常不会走到这里；真走到说明并发删了事实
-      throw new Error(`子图节点 ${n.fact_id} 在 fact 表里查不到`);
-    }
-    const vec = getVec(db, n.fact_id);
-    return {
-      factId: n.fact_id,
-      embedding: vec === null ? null : Array.from(vec),
-      ftype: fact.ftype,
-      confidence: fact.confidence,
-      importance: fact.importance,
-      epistemicStatus: fact.epistemicStatus,
-      degree: fact.degree,
-    };
-  });
-}
-
 export async function exportTrainingPayloads(db: Db, opts: ExportOptions = {}): Promise<ExportResult> {
   const all = listSamples(db, opts);
   const rows = opts.limit === undefined ? all : all.slice(0, opts.limit);
@@ -131,18 +110,17 @@ export async function exportTrainingPayloads(db: Db, opts: ExportOptions = {}): 
     const subgraph = buildSubgraph(db, nodeIds);
     let payload: MoshiSubgraphPayload;
     try {
-      payload = buildSubgraphPayload({
-        queryVector: row.queryId === null ? null : (vectors.get(row.queryId) ?? null),
-        nodes: nodeInputs(db, subgraph),
-        edges: subgraph.edges.map((e) => ({
-          srcFactId: e.src,
-          dstFactId: e.dst,
-          etype: e.etype,
-          weight: e.weight,
-          confidence: e.confidence,
-          hop: e.hop,
-        })),
-      });
+      const bridged = buildPayloadFromSubgraph(
+        db,
+        subgraph,
+        row.queryId === null ? null : (vectors.get(row.queryId) ?? null),
+      );
+      if (bridged.missing.length > 0) {
+        // 子图刚查过 degree 却查不到 fact：并发删除，按非法样本跳过
+        stats.skipped.invalid += 1;
+        continue;
+      }
+      payload = bridged.payload;
     } catch {
       stats.skipped.invalid += 1;
       continue;

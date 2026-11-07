@@ -163,9 +163,15 @@ describe('searchWithPipeline · 局部路径', () => {
     for (const stage of ['route', 'recognize', 'recall_vector', 'recall_bm25', 'recall_ppr', 'load', 'fuse', 'subgraph', 'adjudicate', 'pack', 'assemble']) {
       expect(out.stageMs[stage], `缺阶段 ${stage}`).toBeTypeOf('number');
     }
-    const values = Object.values(out.stageMs);
+    // P3-07 起 stage_ms_json 还复用为观测字段（subgraph_nodes 等），它们不是累计耗时
+    const NON_STAGE = new Set(['subgraph_nodes', 'model_ms']);
+    const values = Object.entries(out.stageMs)
+      .filter(([k]) => !NON_STAGE.has(k))
+      .map(([, v]) => v);
     const sorted = [...values].sort((x, y) => x - y);
     expect(values).toEqual(sorted);
+    // 门槛 2 的密度口径（详设 §7.6）
+    expect(out.stageMs['subgraph_nodes']).toBeTypeOf('number');
   });
 });
 

@@ -8,6 +8,7 @@
  * - `cache`：会话内证据缓存（详设 §6.11）。**每个进程一份**，`schema_rev` 变化即全清。
  */
 import { EvidenceCache } from '../../core/read/cache.js';
+import type { ModelScoreFn } from '../../core/read/search.js';
 import type { TraceStore } from '../../core/read/trace.js';
 import { schemaRev } from '../../infra/sqlite/metaRepo.js';
 import type { SidecarClient } from '../../infra/sidecar/client.js';
@@ -21,6 +22,11 @@ export interface McpDeps {
   db: Db;
   cfg: Config;
   encode?: EncodeFn;
+  /**
+   * GAT 打分（P3-07）。daemon 注入 `SidecarClient.score` 的收窄形态；
+   * CLI / 测试不注入时 `gat_mode` 即使非 off 也不打分（只记 flags）。
+   */
+  score?: ModelScoreFn;
   cache?: EvidenceCache;
   /**
    * `memory_annotate` 入队成功后的通知点（P1-22）。由 daemon 注入 harvest runner 的
@@ -41,6 +47,14 @@ export function buildEvidenceCache(db: Db, cfg: Config): EvidenceCache {
     simThreshold: cfg.read.cache_similarity,
     schemaRev: () => schemaRev(db),
   });
+}
+
+/** 把 sidecar 的 `/score` 收窄成编排层要的形态（只是透传，不做形状转换） */
+export function scoreViaSidecar(sidecar: SidecarClient): ModelScoreFn {
+  return async (payload) => {
+    const outcome = await sidecar.score(payload);
+    return { scores: outcome.scores, modelVersion: outcome.modelVersion, degraded: outcome.degraded };
+  };
 }
 
 /** 把 sidecar 的批量 encode 收窄成编排层要的单条形态 */

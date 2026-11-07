@@ -9,7 +9,16 @@
  * - **没有写入方的字段一律 null**，不拿进程启动时间或文件 mtime 冒充（前端据此显式降级）；
  * - 不依赖 Fastify / Config，方便单测直接钉 JSON 形状。
  */
-import type { SidecarStatus } from '../../infra/sidecar/client.js';
+/**
+ * sidecar 状态快照的结构类型（只取这里用到的字段）。
+ * 不 import 具体客户端模块：core 不依赖 infra 实现，
+ * `SidecarClient.status()` 的返回值按结构直接兼容。
+ */
+export interface SidecarStatusView {
+  state: 'stopped' | 'starting' | 'ready' | 'unloaded' | 'failed';
+  mode: 'on' | 'off';
+  embedModel: string;
+}
 import type { Db } from '../../infra/sqlite/db.js';
 import { getMeta } from '../../infra/sqlite/metaRepo.js';
 
@@ -48,7 +57,7 @@ export interface StatusExtras {
 
 /** 只依赖 `status()`，测试可传一个假对象；daemon 直接传 `HttpDeps`（含 sidecar 时结构兼容） */
 export interface StatusExtrasDeps {
-  sidecar?: { status(): SidecarStatus };
+  sidecar?: { status(): SidecarStatusView };
 }
 
 /** meta 值为空串时按 null 处理：历史脏值不该污染 JSON 契约 */
@@ -64,7 +73,7 @@ function metaOrNull(db: Db, key: string): string | null {
  * 而不是把 undefined 漏进 JSON（前端三灯与首开五态都靠这个区分「没配」与「未知」）。
  */
 export function buildStatusExtras(db: Db, deps: StatusExtrasDeps = {}): StatusExtras {
-  const sidecar: SidecarStatus | undefined = deps.sidecar?.status();
+  const sidecar: SidecarStatusView | undefined = deps.sidecar?.status();
   return {
     model:
       sidecar === undefined
