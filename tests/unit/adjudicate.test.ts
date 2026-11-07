@@ -120,7 +120,7 @@ describe('符号兜底五步（P1-08）', () => {
     const db = freshDb();
     const dep = fact('f_dep', { status: 'invalidated' });
     const consumer = fact('f_consumer');
-    const edges = [{ src: 'f_dep', dst: 'f_consumer', etype: 'depends_on' as const, weight: 1, confidence: 0.9 }];
+    const edges = [{ src: 'f_dep', dst: 'f_consumer', etype: 'depends_on' as const, weight: 1, confidence: 0.9, hop: 1 as const }];
     const res = adjudicate(db, [dep, consumer], edges, { now: '2026-11-01T00:00:00.000Z' });
     const c = res.kept.find((k) => k.fact.id === 'f_consumer')!;
     expect(c.flags).toContain('stale_dependency');

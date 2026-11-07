@@ -1,13 +1,16 @@
 /**
- * P3-01 子图契约（`moshi-subgraph/1`）单测（详设 §4.5 / §7.2）。
+ * P3-01 / P3-02 子图契约（`moshi-subgraph/2`）单测（详设 §4.5 / §7.2）。
  *
  * 覆盖：常量、字段与边下标映射、options 默认/覆盖、确定性/无副作用、
  * 与 fixture `tests/fixtures/subgraph-contract.json` 深相等、非法输入统一
- * 抛 `MoshiError('E_INPUT')`、数值 clamp、节点/边上限边界。
+ * 抛 `MoshiError('E_INPUT')`、数值 clamp、节点/边上限边界；
+ * P3-02 追加：`edge_attr` 16 维与 `edgeFeatures()` 一致、`hop` 校验、
+ * `direction` 规则（有向 ±1 / 无向 0）。
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { EMBED_DIM } from '../../src/domain/embedding.js';
+import { edgeFeatures } from '../../src/domain/edgeFeatures.js';
 import { MoshiError } from '../../src/domain/errors.js';
 import {
   MAX_EDGES,
@@ -76,6 +79,7 @@ function baseEdges(): SubgraphEdgeInput[] {
       etype: 'depends_on',
       weight: 1.0,
       confidence: 0.7,
+      hop: 1,
     },
     {
       srcFactId: 'fact_episodic',
@@ -83,6 +87,7 @@ function baseEdges(): SubgraphEdgeInput[] {
       etype: 'co_occur',
       weight: 1.0,
       confidence: 0.9,
+      hop: 2,
     },
   ];
 }
@@ -122,7 +127,7 @@ function build(overrides: Partial<Parameters<typeof buildSubgraphPayload>[0]> = 
 
 describe('契约常量', () => {
   it('SUBGRAPH_SCHEMA / NODE_FEAT_DIM / MAX_NODES / MAX_EDGES', () => {
-    expect(SUBGRAPH_SCHEMA).toBe('moshi-subgraph/1');
+    expect(SUBGRAPH_SCHEMA).toBe('moshi-subgraph/2');
     expect(EMBED_DIM).toBe(512);
     expect(NODE_FEAT_DIM).toBe(EMBED_DIM + 10);
     expect(NODE_FEAT_DIM).toBe(522);
@@ -174,8 +179,30 @@ describe('payload 组装', () => {
     ]);
 
     expect(payload.edges).toEqual([
-      { src: 0, dst: 1, etype: 'depends_on', weight: 1, confidence: 0.7 },
-      { src: 1, dst: 2, etype: 'co_occur', weight: 1, confidence: 0.9 },
+      {
+        src: 0,
+        dst: 1,
+        etype: 'depends_on',
+        weight: 1,
+        confidence: 0.7,
+        edge_attr: [1, 0, 0, 0, 0, 0, 1, 0.7, 0.5, 1, 0, 0, 0, 0, 0, 0],
+      },
+      {
+        src: 1,
+        dst: 2,
+        etype: 'co_occur',
+        weight: 1,
+        confidence: 0.9,
+        edge_attr: [0, 0, 0, 1, 0, 0, 1, 0.9, 1, 0, 0, 0, 0, 0, 0, 0],
+      },
+    ]);
+    expect(Object.keys(payload.edges[0]!).sort()).toEqual([
+      'confidence',
+      'dst',
+      'edge_attr',
+      'etype',
+      'src',
+      'weight',
     ]);
   });
 
@@ -218,6 +245,41 @@ describe('payload 组装', () => {
     expect(payload.query_vector).not.toBe(query);
   });
 
+  it('每条边的 edge_attr 与 edgeFeatures() 逐条一致（16 维唯一权威）', () => {
+    const payload = build();
+    expect(payload.edges.map((e) => e.edge_attr)).toEqual([
+      edgeFeatures({ etype: 'depends_on', weight: 1, confidence: 0.7, hop: 1, direction: 1 }),
+      edgeFeatures({ etype: 'co_occur', weight: 1, confidence: 0.9, hop: 2, direction: 0 }),
+    ]);
+  });
+
+  it('direction：有向边按下标前进/逆序取 ±1，无向边取 0', () => {
+    const nodes = baseNodes();
+    const edges: SubgraphEdgeInput[] = [
+      {
+        srcFactId: 'fact_episodic',
+        dstFactId: 'fact_semantic',
+        etype: 'supersedes',
+        weight: 1,
+        confidence: 1,
+        hop: 1,
+      },
+      {
+        srcFactId: 'fact_semantic',
+        dstFactId: 'fact_conditional',
+        etype: 'mutually_exclusive',
+        weight: 1,
+        confidence: 1,
+        hop: 1,
+      },
+    ];
+    const payload = build({ nodes, edges });
+    // 有向逆序：fact_episodic(下标 1) → fact_semantic(下标 0) = -1
+    expect(payload.edges[0]!.edge_attr[9]).toBe(-1);
+    // 无向：下标 0 → 2 仍取 0
+    expect(payload.edges[1]!.edge_attr[9]).toBe(0);
+  });
+
   it('同一输入两次构造深相等（确定性）', () => {
     expect(build()).toEqual(build());
   });
@@ -231,6 +293,7 @@ describe('payload 组装', () => {
       etype: 'logic' as const,
       weight: 0.5,
       confidence: 0.5,
+      hop: 1 as const,
     }));
     const payload = build({ nodes, edges });
     expect(payload.nodes).toHaveLength(MAX_NODES);
@@ -241,6 +304,7 @@ describe('payload 组装', () => {
       etype: 'logic',
       weight: 0.5,
       confidence: 0.5,
+      edge_attr: [0, 1, 0, 0, 0, 0, 0.5, 0.5, 0.5, 0, 0, 0, 0, 0, 0, 0],
     });
   });
 });
@@ -373,6 +437,25 @@ describe('非法输入统一抛 E_INPUT', () => {
           edges: [{ ...edges[0]!, etype: 'unknown' as SubgraphEdgeInput['etype'] }, edges[1]!],
         }),
       /etype/,
+    );
+  });
+
+  it('hop 必须是 1 或 2', () => {
+    const edges = baseEdges();
+    expectEInput(
+      () => build({ edges: [{ ...edges[0]!, hop: 0 as unknown as 1 }, edges[1]!] }),
+      /hop/,
+    );
+    expectEInput(
+      () => build({ edges: [{ ...edges[0]!, hop: 3 as unknown as 1 }, edges[1]!] }),
+      /hop/,
+    );
+    expectEInput(
+      () =>
+        build({
+          edges: [{ ...edges[0]!, hop: '1' as unknown as 1 }, edges[1]!],
+        }),
+      /hop/,
     );
   });
 

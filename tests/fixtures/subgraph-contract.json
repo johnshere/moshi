@@ -1,8 +1,8 @@
 {
-  "schema": "moshi-subgraph/1",
+  "schema": "moshi-subgraph/2",
   "node_feat_dim": 522,
   "payload": {
-    "schema": "moshi-subgraph/1",
+    "schema": "moshi-subgraph/2",
     "query_vector": null,
     "nodes": [
       {
@@ -39,14 +39,16 @@
         "dst": 1,
         "etype": "depends_on",
         "weight": 1,
-        "confidence": 0.7
+        "confidence": 0.7,
+        "edge_attr": [1, 0, 0, 0, 0, 0, 1, 0.7, 0.5, 1, 0, 0, 0, 0, 0, 0]
       },
       {
         "src": 1,
         "dst": 2,
         "etype": "co_occur",
         "weight": 1,
-        "confidence": 0.9
+        "confidence": 0.9,
+        "edge_attr": [0, 0, 0, 1, 0, 0, 1, 0.9, 1, 0, 0, 0, 0, 0, 0, 0]
       }
     ],
     "options": {

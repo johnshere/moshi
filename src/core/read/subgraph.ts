@@ -30,6 +30,8 @@ export interface SubgraphEdge {
   etype: Etype;
   weight: number;
   confidence: number;
+  /** BFS 层数：第一层扩展 = 1 跳，第二层 = 2 跳（详设 §4.5 边特征第 8 维，P3-02）。 */
+  hop: 1 | 2;
 }
 
 export interface Subgraph {
@@ -72,7 +74,14 @@ export function buildSubgraph(db: Db, fusedIds: readonly string[], opts: { maxNo
         const key = [e.src, e.dst].sort().join('|') + `|${e.etype}`;
         if (!seenEdge.has(key)) {
           seenEdge.add(key);
-          edges.push({ src: e.src, dst: e.dst, etype: e.etype, weight: e.weight, confidence: e.confidence ?? 0.9 });
+          edges.push({
+            src: e.src,
+            dst: e.dst,
+            etype: e.etype,
+            weight: e.weight,
+            confidence: e.confidence ?? 0.9,
+            hop: (hop + 1) as 1 | 2,
+          });
         }
         if (inSet.has(other)) continue;
         if (order.length >= maxNodes) break;

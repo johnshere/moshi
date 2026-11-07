@@ -81,7 +81,7 @@ describe('证据包组装（P1-10）', () => {
         { a: 'f_a', b: 'f_out', type: 'mutex', resolved: null, rule: 'r1' }, // 端不在 evidence
       ],
       edges: Array.from({ length: 12 }, () => ({
-        src: `f_a`, dst: `f_b`, etype: 'depends_on' as const, weight: 1, confidence: 0.9,
+        src: `f_a`, dst: `f_b`, etype: 'depends_on' as const, weight: 1, confidence: 0.9, hop: 1 as const,
       })),
     });
     expect(ev.conflicts.length).toBe(1);

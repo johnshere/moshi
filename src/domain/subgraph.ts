@@ -1,11 +1,16 @@
 /**
- * 子图 JSON 契约（`moshi-subgraph/1`，详设 §4.5 / §7.2，P3-01）。
+ * 子图 JSON 契约（`moshi-subgraph/2`，详设 §4.5 / §7.2，P3-01 / P3-02）。
  *
  * 本模块把「节点 / 边 / 查询向量」组装成发给 Python sidecar 的正式 payload：
  * - 边端点 `src`/`dst` 转成 `nodes` 数组下标（不是 fact_id）；
+ * - 边特征 `edge_attr`（16 维）由本模块调 `domain/edgeFeatures.ts` 算好写在
+ *   每条边上——16 维规则只有 TS 一份权威，Python 侧只校验与 padding（P3-02，
+ *   D-153）；
  * - `confidence` / `importance` / `weight` 统一 clamp 到 `[0,1]`；
  * - 纯函数、不读 DB、不读 `fact_vec`、不做 L2 归一化（Node 侧只透传，
- *   Python 侧 P3-02 归一化）。
+ *   Python 侧归一化）。
+ *
+ * `/2` 相对 `/1` 的唯一改动：`edges[]` 增加 `edge_attr`。节点 522 维规则不变。
  *
  * 正式 payload **不包含** `node_feat_dim`：522 维由两侧 `EMBED_DIM + 10` 派生；
  * 契约 fixture 顶层的 `node_feat_dim` 只是测试元数据。
@@ -13,13 +18,13 @@
  * 形状契约：节点 padding 到 64、边 padding 到 192 是 Python 侧（`(1,64,522)` /
  * `(2,192)`）的事；本模块只校验并组装真实节点/边，不补 padding 行。
  */
-import { EDGE_PAD_MAX } from './edgeFeatures.js';
+import { EDGE_PAD_MAX, edgeFeatures } from './edgeFeatures.js';
 import { EMBED_DIM } from './embedding.js';
 import { EPISTEMIC, ETYPE, FTYPE, isOneOf, type Epistemic, type Etype, type Ftype } from './enums.js';
 import { MoshiError } from './errors.js';
 
 /** payload 版本；拼接顺序或字段语义改动即升版本。 */
-export const SUBGRAPH_SCHEMA = 'moshi-subgraph/1';
+export const SUBGRAPH_SCHEMA = 'moshi-subgraph/2';
 
 /** 节点特征总维度（详设 §4.5）：512 维 embedding + 10 维标量/one-hot。 */
 export const NODE_FEAT_DIM = EMBED_DIM + 10;
@@ -47,6 +52,8 @@ export interface SubgraphEdgeInput {
   readonly etype: Etype;
   readonly weight: number;
   readonly confidence: number;
+  /** BFS 层数（1 跳 / 2 跳）；由 `core/read/subgraph.ts` 提供（D-155）。 */
+  readonly hop: 1 | 2;
 }
 
 export interface SubgraphPayloadNode {
@@ -67,6 +74,8 @@ export interface SubgraphPayloadEdge {
   readonly etype: Etype;
   readonly weight: number;
   readonly confidence: number;
+  /** 16 维边特征（`domain/edgeFeatures.ts` 唯一权威，D-153）。 */
+  readonly edge_attr: number[];
 }
 
 export interface SubgraphPayloadOptions {
@@ -146,12 +155,30 @@ function readBoolOption(value: unknown, field: string, fallback: boolean): boole
   return value;
 }
 
+/** 无向边类型：`direction` 恒为 0（D-154）。其余 etype 视为有向。 */
+const UNDIRECTED_ETYPE: ReadonlySet<Etype> = new Set<Etype>(['logic', 'mutually_exclusive', 'co_occur']);
+
+function validateHop(value: unknown, field: string): 1 | 2 {
+  if (value !== 1 && value !== 2) {
+    throw inputError(field, `${field} 只能是 1 或 2`, { value: String(value) });
+  }
+  return value;
+}
+
+/** 详设 §4.5 第 9 维：`dst` 下标前进 +1、逆序 −1、无向 0（D-154）。 */
+function directionOf(etype: Etype, src: number, dst: number): 1 | -1 | 0 {
+  if (UNDIRECTED_ETYPE.has(etype)) return 0;
+  if (dst > src) return 1;
+  if (dst < src) return -1;
+  return 0;
+}
+
 /**
- * 组装 `moshi-subgraph/1` payload。
+ * 组装 `moshi-subgraph/2` payload。
  *
  * @throws MoshiError `E_INPUT`——节点/边数量越界、factId 空或重复、embedding /
  *         queryVector 非法、confidence/importance/weight 非有限数、degree 非法、
- *         ftype/epistemicStatus/etype 未知、边引用不存在的 factId。
+ *         hop 非 1/2、ftype/epistemicStatus/etype 未知、边引用不存在的 factId。
  */
 export function buildSubgraphPayload(input: BuildSubgraphPayloadInput): MoshiSubgraphPayload {
   const { nodes, edges } = input;
@@ -241,12 +268,22 @@ export function buildSubgraphPayload(input: BuildSubgraphPayloadInput): MoshiSub
         etype: String(edge.etype),
       });
     }
+    const weight = validateClamped01(edge.weight, `${field}.weight`);
+    const confidence = validateClamped01(edge.confidence, `${field}.confidence`);
+    const hop = validateHop(edge.hop, `${field}.hop`);
     return {
       src,
       dst,
       etype: edge.etype,
-      weight: validateClamped01(edge.weight, `${field}.weight`),
-      confidence: validateClamped01(edge.confidence, `${field}.confidence`),
+      weight,
+      confidence,
+      edge_attr: edgeFeatures({
+        etype: edge.etype,
+        weight,
+        confidence,
+        hop,
+        direction: directionOf(edge.etype, src, dst),
+      }),
     };
   });
 

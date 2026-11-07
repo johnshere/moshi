@@ -1,19 +1,23 @@
-"""P3-00 / P3-01 契约测试（详设 §4.5、§7.2）。
+"""P3-00 / P3-01 / P3-02 契约测试（详设 §4.5、§7.2）。
 
 P3-00（边特征）：`edge_attr` 形状 `(1, 192, 16)`、padding 行全 0、16 维逐维布局；
 fixture `tests/fixtures/edge-features.json` 同时被 TS 单测
 `tests/unit/edgeFeatures.test.ts` 校验。
 
 P3-01（子图节点契约）：读取 `tests/fixtures/subgraph-contract.json` 的正式
-`moshi-subgraph/1` payload，用**测试内参考实现**拼出 522 维：
+`moshi-subgraph/2` payload，用**测试内参考实现**拼出 522 维：
 `[0,512)` embedding（缺失 → 零向量 + confidence 折半）、`[512,515)` ftype one-hot、
 `[515]` confidence、`[516]` importance、`[517,521)` epistemic one-hot
 （`disputed` 归入 `active`）、`[521]` `log1p(degree)/log1p(64)` clamp 到 1。
 再 padding/掩码成 `x (1,64,522)`、`mask (1,64)`、`edge_index (2,192)`、
 `edge_mask (1,192)`。
 
-本文件**不依赖** `sidecar/moshi_sidecar/features.py` / `model.py`（P3-02/P3-03 才落地），
-也不 skip、不空断言；522 维参考实现只放在本测试文件内，不创建正式 `features.py`。
+P3-02 追加：payload 每条边携带 Node 算好的 `edge_attr`（16 维，D-153）；
+本文件只校验其形状与 padding，不重写 16 维规则（正式实现见
+`moshi_sidecar/features.py` 与 `test_features.py`）。
+
+本文件**不依赖** `sidecar/moshi_sidecar/features.py` / `model.py`，
+也不 skip、不空断言；522 维参考实现只放在本测试文件内。
 """
 
 import copy
@@ -203,8 +207,8 @@ def build_node_batch(payload: dict) -> dict:
 def test_subgraph_fixture_declares_node_contract():
     doc = load_subgraph_fixture()
     payload = doc["payload"]
-    assert doc["schema"] == "moshi-subgraph/1"
-    assert payload["schema"] == "moshi-subgraph/1"
+    assert doc["schema"] == "moshi-subgraph/2"
+    assert payload["schema"] == "moshi-subgraph/2"
     assert doc["node_feat_dim"] == NODE_FEAT_DIM == 522
     # 测试元数据不能污染正式 payload
     assert "node_feat_dim" not in payload
@@ -233,11 +237,13 @@ def test_subgraph_fixture_declares_node_contract():
         assert isinstance(node["degree"], int) and node["degree"] >= 0
 
     for edge in payload["edges"]:
-        assert set(edge.keys()) == {"src", "dst", "etype", "weight", "confidence"}
+        assert set(edge.keys()) == {"src", "dst", "etype", "weight", "confidence", "edge_attr"}
         assert 0 <= edge["src"] < SUBGRAPH_NODE_COUNT
         assert 0 <= edge["dst"] < SUBGRAPH_NODE_COUNT
         assert 0.0 <= edge["weight"] <= 1.0
         assert 0.0 <= edge["confidence"] <= 1.0
+        assert len(edge["edge_attr"]) == EDGE_DIM == 16
+        assert all(isinstance(v, (int, float)) for v in edge["edge_attr"])
 
 
 def test_node_feature_layout():
@@ -362,3 +368,19 @@ def test_fixture_embeddings_are_l2_normalized():
     for node in payload["nodes"]:
         norm = np.linalg.norm(np.asarray(node["embedding"], dtype=np.float64))
         assert np.isclose(norm, 1.0, atol=1e-6), f"{node['fact_id']} embedding 不是单位向量"
+
+
+def test_payload_edge_attr_pads_to_1x192x16():
+    payload = load_subgraph_fixture()["payload"]
+    rows = np.asarray([edge["edge_attr"] for edge in payload["edges"]], dtype=np.float32)
+
+    edge_attr = np.zeros((1, MAX_EDGES, EDGE_DIM), dtype=np.float32)
+    edge_attr[0, : rows.shape[0], :] = rows
+
+    assert edge_attr.shape == (1, 192, 16)
+    assert np.array_equal(edge_attr[0, :SUBGRAPH_EDGE_COUNT, :], rows)
+    assert np.count_nonzero(edge_attr[0, SUBGRAPH_EDGE_COUNT:, :]) == 0
+    # 与 P3-00 的 16 维布局一致：第 8 维 hop、第 9 维 direction 在合法域
+    for row in rows:
+        assert row[8] in (0.0, 0.5, 1.0)
+        assert row[9] in (-1.0, 0.0, 1.0)
