@@ -55,8 +55,10 @@ Var DownloadNode
 Var AutoStart
 Var NodeStatus
 Var NodeNeeded
+Var InstallPython
 Var hNodeCheck
 Var hAutoStart
+Var hPython
 
 !define MUI_ABORTWARNING
 !define MUI_WELCOMEPAGE_TITLE "安装默识（moshi）"
@@ -81,6 +83,12 @@ Function .onInit
   StrCpy $DownloadNode "auto"
   StrCpy $AutoStart "1"
   StrCpy $NodeNeeded "0"
+  StrCpy $InstallPython "0"
+  ; 静默安装可用 /PYTHON=1 指定安装 Python 组件（约 500MB，默认不装）
+  ${GetOptions} $CMDLINE "/PYTHON=" $0
+  ${If} $0 == "1"
+    StrCpy $InstallPython "1"
+  ${EndIf}
   InitPluginsDir
   File /oname=$PLUGINSDIR\check-node.ps1 "${PACKAGING_DIR}\check-node.ps1"
 FunctionEnd
@@ -130,10 +138,15 @@ Function DependenciesPageShow
     ${NSD_Check} $hNodeCheck
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 78u 100% 20u "Python 组件（向量召回与图神经网络，可选）：安装完成后可在「设置与诊断」中按需安装。"
+  ${NSD_CreateLabel} 0 78u 100% 16u "Python 组件（向量召回与图神经网络，可选）：不勾选时默识仍可完整使用（纯符号模式）。"
   Pop $0
+  ${NSD_CreateCheckBox} 0 94u 100% 18u "安装 Python 组件（下载 Python/依赖/模型，约 500MB，需联网；耗时数分钟）"
+  Pop $hPython
+  ${If} $InstallPython == "1"
+    ${NSD_Check} $hPython
+  ${EndIf}
 
-  ${NSD_CreateCheckBox} 0 104u 100% 12u "开机自动启动默识（推荐）"
+  ${NSD_CreateCheckBox} 0 118u 100% 12u "开机自动启动默识（推荐）"
   Pop $hAutoStart
   ${If} $AutoStart == "1"
     ${NSD_Check} $hAutoStart
@@ -151,10 +164,18 @@ Function DependenciesPageLeave
   ${EndIf}
   ${NSD_GetState} $hAutoStart $0
   StrCpy $AutoStart "$0"
+  ${NSD_GetState} $hPython $0
+  StrCpy $InstallPython "$0"
 FunctionEnd
 
 Section "默识主程序" SEC_APP
   SectionIn RO
+  ; 覆盖安装/升级前先停掉正在运行的 daemon，否则 .node 与数据库文件被锁
+  IfFileExists "$INSTDIR\tools\stop-moshi.ps1" 0 no_previous_install
+  nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\tools\stop-moshi.ps1"'
+  Pop $0
+  no_previous_install:
+
   SetOutPath "$INSTDIR"
   File /r "${STAGE_DIR}\*.*"
 
@@ -192,6 +213,21 @@ Section "运行环境（Node.js）" SEC_DEPS
     ${EndIf}
   ${Else}
     DetailPrint "按用户选择跳过 Node.js 下载"
+  ${EndIf}
+SectionEnd
+
+Section "Python 组件（可选）" SEC_PYTHON
+  ${If} $InstallPython == "1"
+    DetailPrint "正在安装 Python 组件（下载解释器/依赖/模型，约 500MB，可能需要数分钟）…"
+    nsExec::ExecToLog '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\tools\install-python.ps1" -VenvDir "$INSTDIR\sidecar\.venv" -SidecarDir "$INSTDIR\sidecar"'
+    Pop $0
+    ${If} $0 != "0"
+      MessageBox MB_ICONEXCLAMATION "Python 组件安装未完成（退出码 $0）。默识主程序已安装，仍可纯符号使用；可重新运行安装包勾选 Python 组件重试。"
+    ${Else}
+      DetailPrint "Python 组件已安装（venv: $INSTDIR\sidecar\.venv）"
+    ${EndIf}
+  ${Else}
+    DetailPrint "按用户选择跳过 Python 组件（之后可重新运行安装包安装）"
   ${EndIf}
 SectionEnd
 

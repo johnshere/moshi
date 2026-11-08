@@ -129,7 +129,7 @@ function copyLaunchers() {
   }
   const tools = path.join(STAGE, 'tools');
   mkdirSync(tools, { recursive: true });
-  for (const f of ['check-node.ps1', 'install-node.ps1', 'stop-moshi.ps1']) {
+  for (const f of ['check-node.ps1', 'install-node.ps1', 'install-python.ps1', 'stop-moshi.ps1']) {
     cpSync(path.join(PACKAGING, f), path.join(tools, f));
   }
 }

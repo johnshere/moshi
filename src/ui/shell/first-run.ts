@@ -100,7 +100,7 @@ export const BANNERS: Record<Exclude<FirstRunState, 'ready'>, BannerSpec> = {
   },
   sidecar_off: {
     text: '语义检索未启用（可选）',
-    hint: '不影响使用；需要向量召回时再安装 Python 组件',
+    hint: '不影响使用；需要向量召回时重新运行默识安装包，勾选「Python 组件」',
     tone: 'muted',
   },
   collect_off: {
