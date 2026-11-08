@@ -12,7 +12,7 @@ import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { loadConfig } from '../../src/app/config.js';
 import { callTool, findTool, TOOL_SPECS } from '../../src/app/mcp/tools.js';
-import { runMemoryQuery, PROTOCOL_HINT } from '../../src/app/mcp/query.js';
+import { runMemoryQuery, FEEDBACK_HINT, PROTOCOL_HINT } from '../../src/app/mcp/query.js';
 import { runMemoryAnnotate } from '../../src/app/mcp/annotate.js';
 import { runMemoryFeedback } from '../../src/app/mcp/feedback.js';
 import { runMemoryCorrect } from '../../src/app/mcp/correct.js';
@@ -172,6 +172,53 @@ describe('memory_query', () => {
     const r = await runMemoryQuery(deps, { ...baseQuery, format: 'json' });
     expect(r.protocol_hint).toContain('```moshi');
     expect(r.protocol_hint).toContain('moshi://protocol/ann-v1');
+  });
+
+  it('有证据才返回人类可读反馈提醒，且不是 JSON', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'node version = 22' });
+    syncFts(db);
+    const deps = makeDeps(db);
+    const hit = await runMemoryQuery(deps, { ...baseQuery, query: 'node' });
+    expect(hit.evidence).toHaveLength(1);
+    expect(hit.feedback_hint).toBe(FEEDBACK_HINT);
+    expect(hit.feedback_hint).toContain('【记忆反馈】');
+    expect(hit.feedback_hint).toContain('[M1]');
+    expect(hit.feedback_hint).not.toContain('{"');
+
+    const miss = await runMemoryQuery(deps, { ...baseQuery, query: 'zzzz-no-such-fact' });
+    expect(miss.evidence).toHaveLength(0);
+    expect(miss.feedback_hint).toBeUndefined();
+  });
+
+  it('text 格式：有证据时带 query_id 与反馈提醒，无证据时不带', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'aaa' });
+    syncFts(db);
+    const deps = makeDeps(db);
+    const hit = await callTool(deps, 'memory_query', {
+      query: 'aaa',
+      top_k: 5,
+      scope: 'global',
+      include_history: false,
+      format: 'text',
+    });
+    const hitText = textOf(hit);
+    expect(hitText).toContain('query_id: q_');
+    expect(hitText).toContain('【记忆反馈】');
+    expect(hitText).toContain('[M1]');
+
+    const miss = await callTool(deps, 'memory_query', {
+      query: 'zzzz-no-such-fact',
+      top_k: 5,
+      scope: 'global',
+      include_history: false,
+      format: 'text',
+    });
+    const missText = textOf(miss);
+    expect(missText).not.toContain('query_id: q_');
+    expect(missText).not.toContain('【记忆反馈】');
+    expect(missText).toContain(PROTOCOL_HINT);
   });
 
   it('text 格式末尾带 protocol_hint（P2-20）', async () => {

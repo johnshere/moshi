@@ -66,11 +66,16 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
       const input = z.object(queryShape).parse(args);
       const pack = await runMemoryQuery(deps, input);
       if (input.format === 'text') {
-        // 给不支持结构化内容的宿主：只给编号列表，不带 fact_id（详设 §4.4 字段纪律）
+        // 给不支持结构化内容的宿主：编号列表 + query_id（反馈映射用）+ 有证据时的反馈提醒。
+        // 无证据时不带 query_id/feedback_hint：没有 [M#] 可引用，提醒只会占上下文。
+        const parts: string[] = [];
+        if (pack.evidence.length > 0) {
+          parts.push(`query_id: ${pack.query_id}`, pack.numbered_list);
+          if (pack.feedback_hint !== undefined) parts.push(pack.feedback_hint);
+        }
+        parts.push(pack.protocol_hint);
         return {
-          content: [
-            { type: 'text', text: `${pack.numbered_list}\n\n${pack.protocol_hint}` },
-          ],
+          content: [{ type: 'text', text: parts.join('\n\n') }],
         };
       }
       return jsonResult(pack);

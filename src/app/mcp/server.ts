@@ -54,6 +54,22 @@ Rules:
 - Only depends_on, co_occur, derived_from edges may be declared directly.
 - One block: up to 20 facts and 20 edges.`;
 
+/** 反馈协议 v1 的机读规范（`moshi://protocol/feedback-v1`） */
+const PROTOCOL_FEEDBACK_V1_TEXT = `moshi feedback protocol v1
+
+After a memory_query result that contains [M#] evidence, and only when the user explicitly confirms, rejects, or corrects one of those facts, append a short human-readable section to the reply:
+
+【记忆反馈】
+[M1] 采纳：user's own words
+[M2] 否定：the user's reason
+[M3] 修正：the corrected value
+
+Rules:
+- One [M#] per line; [M#] refers to the same memory_query result.
+- Labels: 采纳 / 否定 / 修正 (or adopt / reject / correct).
+- Keep it plain text: no JSON, no code fence, no fact ids.
+- At most 20 lines. Omit the section when there was no explicit user reaction.`;
+
 function writeJson(res: http.ServerResponse, status: number, body: unknown): void {
   const text = JSON.stringify(body);
   res.writeHead(status, {
@@ -95,8 +111,23 @@ export function createMcpServer(deps: McpDeps): McpServer {
       instructions:
         'Local memory of this machine: ports, processes, packages, versions, paths and build ' +
         'results observed from previous sessions. Query it when a question depends on this ' +
-        "machine's current state.",
+        "machine's current state. " +
+        'When a memory_query result contains [M#] evidence and the user explicitly confirms, ' +
+        'rejects, or corrects one of those facts, the reply may end with a short human-readable ' +
+        'feedback section. Its format is resource moshi://protocol/feedback-v1.',
     },
+  );
+
+  server.resource(
+    'feedback-v1',
+    'moshi://protocol/feedback-v1',
+    {
+      mimeType: 'text/plain',
+      description: 'moshi feedback protocol v1: human-readable 【记忆反馈】 section, not JSON',
+    },
+    (uri) => ({
+      contents: [{ uri: uri.href, mimeType: 'text/plain', text: PROTOCOL_FEEDBACK_V1_TEXT }],
+    }),
   );
 
   server.resource(

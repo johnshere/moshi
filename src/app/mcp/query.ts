@@ -47,6 +47,11 @@ export interface EvidencePackJson {
   numbered_list: string;
   /** 采集协议提示：宿主可埋 ```moshi 块（详设 §5.12.1） */
   protocol_hint: string;
+  /**
+   * 人类可读反馈提醒。**只在有证据时出现**：没有 [M#] 就没有可反馈的对象，
+   * 空证据查询不应把反馈格式塞进上下文。
+   */
+  feedback_hint?: string;
   /** 会话内缓存命中（详设 §6.11） */
   cached: boolean;
   stats: { candidates: number; packed: number; tokens: number; latency_ms: number };
@@ -55,6 +60,23 @@ export interface EvidencePackJson {
 export const PROTOCOL_HINT =
   'Tip: embed structured facts in a ` ```moshi ` block to submit them deterministically. ' +
   'See resource `moshi://protocol/ann-v1` for the format.';
+
+/**
+ * 反馈提醒：给模型看的**人类可读文本格式**，不是 JSON、不是代码块。
+ * 与 `memory_feedback` 的字段有映射关系：`[M#]` ↔ `m_id`，采纳/否定/修正 ↔
+ * adopt/reject/correct，冒号后的原话 ↔ `note`。
+ */
+export const FEEDBACK_HINT =
+  'If the user explicitly confirms, rejects, or corrects a fact above, append a short ' +
+  'human-readable section at the end of the reply:\n' +
+  '【记忆反馈】\n' +
+  "[M1] 采纳：user's own words\n" +
+  'Labels: 采纳/否定/修正 (or adopt/reject/correct). One [M#] per line; ' +
+  'plain text, no JSON, no code fence.';
+
+export function feedbackHintFor(evidenceCount: number): string | null {
+  return evidenceCount > 0 ? FEEDBACK_HINT : null;
+}
 
 /** cfg → 编排参数（core 不认识 Config 类型，映射留在 app 层） */
 export function searchParamsOf(cfg: McpDeps['cfg']): Partial<SearchParams> {
@@ -76,6 +98,7 @@ export function searchParamsOf(cfg: McpDeps['cfg']): Partial<SearchParams> {
 }
 
 function toJson(pack: EvidencePackage, cached: boolean): EvidencePackJson {
+  const hint = feedbackHintFor(pack.evidence.length);
   return {
     schema: pack.schema,
     query_id: pack.query_id,
@@ -93,6 +116,7 @@ function toJson(pack: EvidencePackage, cached: boolean): EvidencePackJson {
     topic_hint: pack.topic_hint,
     numbered_list: pack.numbered_list.join('\n'),
     protocol_hint: PROTOCOL_HINT,
+    ...(hint === null ? {} : { feedback_hint: hint }),
     cached,
     stats: pack.stats,
   };
