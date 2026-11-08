@@ -15,7 +15,16 @@
  *    这里不做形状约束——约束在规范化器与基数性策略里，不在这层。
  */
 import { z } from 'zod';
-import { ENTITY_TYPE, FTYPE, VERDICT } from '../../domain/enums.js';
+import {
+  ADMISSION_REASON,
+  ENTITY_TYPE,
+  FTYPE,
+  RECHECK_KIND,
+  RETENTION_CLASS,
+  SOURCE_KIND,
+  VERDICT,
+  VOLATILITY,
+} from '../../domain/enums.js';
 
 const isoDateTime = z.string().datetime({ offset: true });
 
@@ -38,6 +47,10 @@ export const queryShape = {
     .boolean()
     .default(false)
     .describe('Include superseded and invalidated facts'),
+  include_cache: z
+    .boolean()
+    .optional()
+    .describe('Include cache-class facts (volatile current state, e.g. git HEAD or process list)'),
   format: z.enum(['json', 'text']).default('json').describe('json = evidence pack, text = numbered list'),
 };
 
@@ -64,6 +77,13 @@ const annotateFact = z
     predicate: z.string().min(1).max(64).describe('snake_case relation, e.g. installed_version'),
     value: z.unknown().describe('Structured value of the predicate'),
     ftype: z.enum(FTYPE).default('semantic'),
+    retention_class: z.enum(RETENTION_CLASS).optional(),
+    volatility: z.enum(VOLATILITY).optional(),
+    admission_reason: z.enum(ADMISSION_REASON).optional(),
+    ttl_seconds: z.number().int().positive().optional(),
+    source_kind: z.enum(SOURCE_KIND).optional(),
+    recheck_kind: z.enum(RECHECK_KIND).optional(),
+    expired_at: isoDateTime.optional(),
     confidence: z.number().min(0).max(1).optional(),
     importance: z.number().min(0).max(1).optional(),
     valid_at: isoDateTime.optional(),

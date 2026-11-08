@@ -16,6 +16,7 @@ import { etypeHex, ftypeHex } from './palette.js';
 export const FTYPE_HEX = {
   semantic: ftypeHex('semantic'),
   episodic: ftypeHex('episodic'),
+  procedural: ftypeHex('procedural'),
   conditional: ftypeHex('conditional'),
 } as const;
 

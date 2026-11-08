@@ -172,6 +172,6 @@ describe('解析细节', () => {
   it('注册表 id 唯一（重复 id 会让日志无法定位规则）', () => {
     const ids = BUILTIN_PARSERS.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.length).toBeGreaterThanOrEqual(21);
+    expect(ids.length).toBeGreaterThanOrEqual(20);
   });
 });

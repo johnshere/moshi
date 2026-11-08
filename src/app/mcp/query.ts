@@ -152,6 +152,7 @@ export async function runMemoryQuery(
       scope: input.scope,
       topK: input.top_k,
       includeHistory: input.include_history,
+      includeCache: input.include_cache === true,
       ...(input.ftype === undefined ? {} : { ftype: input.ftype as readonly Ftype[] }),
       ...(input.time_range?.from === undefined ? {} : { timeFrom: input.time_range.from }),
       ...(input.time_range?.to === undefined ? {} : { timeTo: input.time_range.to }),

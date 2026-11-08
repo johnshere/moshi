@@ -84,13 +84,17 @@ export function findActiveBySubjectName(
 export function insertFact(db: Db, fact: Fact): void {
   db.prepare(
     `INSERT INTO fact (
-       id, content, ftype, confidence, confidence_source, strength, importance, pool,
+       id, content, ftype, retention_class, volatility, admission_reason, ttl_seconds,
+       source_kind, recheck_kind, expired_at,
+       confidence, confidence_source, strength, importance, pool,
        epistemic_status, attrs, canonical_key, value_hash, scope, superseded_by,
        valid_at, valid_to, recorded_at, community_id, degree, access_count,
        last_access_at, last_decay_at, source_episode, span_start, span_end,
        created_at, updated_at
      ) VALUES (
-       @id, @content, @ftype, @confidence, @confidence_source, @strength, @importance, @pool,
+       @id, @content, @ftype, @retention_class, @volatility, @admission_reason, @ttl_seconds,
+       @source_kind, @recheck_kind, @expired_at,
+       @confidence, @confidence_source, @strength, @importance, @pool,
        @epistemic_status, @attrs, @canonical_key, @value_hash, @scope, @superseded_by,
        @valid_at, @valid_to, @recorded_at, @community_id, 0, 0,
        NULL, @last_decay_at, @source_episode, @span_start, @span_end,
@@ -100,6 +104,15 @@ export function insertFact(db: Db, fact: Fact): void {
     id: fact.id,
     content: fact.content,
     ftype: fact.ftype,
+    retention_class: fact.retentionClass,
+    volatility: fact.volatility,
+    admission_reason: fact.admissionReason,
+    ttl_seconds: fact.ttlSeconds,
+    // V-05 的两列是 NOT NULL DEFAULT；`Fact` 上它们可选（兼容旧调用方/测试字面量），
+    // 这里按 DDL 默认值兜底，避免把"未分类"写成 NULL。
+    source_kind: fact.sourceKind ?? 'observation',
+    recheck_kind: fact.recheckKind ?? 'none',
+    expired_at: fact.expiredAt,
     confidence: fact.confidence,
     confidence_source: fact.confidenceSource,
     strength: fact.strength,

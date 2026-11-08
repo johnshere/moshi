@@ -5,7 +5,16 @@
  * 它要足够便宜（几百条 turn 里绝大多数匹配不上）；`extract` 才做真正的工作。
  * 合成一个方法会让"匹配上但抽不出东西"这种正常情况变得无法表达。
  */
-import type { ConfSource, EntityType, Ftype } from '../../domain/enums.js';
+import type {
+  ConfSource,
+  EntityType,
+  Ftype,
+  RetentionClass,
+  Volatility,
+  AdmissionReason,
+  SourceKind,
+  RecheckKind,
+} from '../../domain/enums.js';
 
 /** 一条待解析的"回合"：一条命令 + 它的输出。适配器（§5.2）产出这个形状 */
 export interface RawTurn {
@@ -36,6 +45,14 @@ export interface ExtractedFact {
   /** 先验（§5.8 表）；parser 自己最清楚这条抽得多准 */
   confidence: number;
   ftype: Ftype;
+  /** V-05 分层属性；parser 最清楚这条观测值不值得留 */
+  retentionClass?: RetentionClass;
+  volatility?: Volatility;
+  admissionReason?: AdmissionReason;
+  ttlSeconds?: number | null;
+  sourceKind?: SourceKind;
+  recheckKind?: RecheckKind;
+  expiredAt?: string | null;
   /** 默认 `tool_obs`；`derived` / `procedure` 由巩固任务产出，parser 不用 */
   confidenceSource?: ConfSource;
   importance?: number;

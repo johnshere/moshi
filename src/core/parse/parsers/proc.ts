@@ -37,6 +37,11 @@ const lsofParser: Parser = {
         value,
         confidence: 0.95,
         ftype: 'semantic',
+        retentionClass: 'event',
+        volatility: 'historical',
+        admissionReason: 'expensive',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'lsof', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       });
     }
@@ -62,6 +67,11 @@ const netstatParser: Parser = {
         value,
         confidence: 0.9,
         ftype: 'semantic',
+        retentionClass: 'event',
+        volatility: 'historical',
+        admissionReason: 'expensive',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'netstat', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       });
     }
@@ -108,6 +118,10 @@ const psParser: Parser = {
         value,
         confidence: 0.85,
         ftype: 'episodic',
+        retentionClass: 'cache',
+        volatility: 'volatile',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'ps', argv: argvOf(turn.cmd), raw_excerpt: excerpt(line) },
       });
     }
@@ -141,6 +155,11 @@ const eaddrinuseParser: Parser = {
         value: { port: Number(port) },
         confidence: 0.95,
         ftype: 'episodic',
+        retentionClass: 'event',
+        volatility: 'historical',
+        admissionReason: 'expensive',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'runtime', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];

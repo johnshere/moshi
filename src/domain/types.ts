@@ -18,6 +18,11 @@ import type {
   Degraded,
   Route,
   Verdict,
+  RetentionClass,
+  Volatility,
+  AdmissionReason,
+  SourceKind,
+  RecheckKind,
 } from './enums.js';
 
 export interface ProcedureStep {
@@ -40,6 +45,14 @@ export interface Fact {
   id: string;
   content: string;
   ftype: Ftype;
+  /** V-05：记忆分层（与 ftype 正交，不混入 ftype）；旧行可为 null/未定义 */
+  retentionClass?: RetentionClass | null;
+  volatility?: Volatility | null;
+  admissionReason?: AdmissionReason | null;
+  ttlSeconds?: number | null;
+  sourceKind?: SourceKind;
+  recheckKind?: RecheckKind;
+  expiredAt?: string | null;
   confidence: number;
   confidenceSource: ConfSource;
   strength: number;

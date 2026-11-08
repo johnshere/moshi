@@ -14,7 +14,17 @@
  * 所以"复活"只能是新行——这也是"追加式失效"这个名字的由来。
  */
 import { MoshiError } from '../../domain/errors.js';
-import type { Cardinality, ConfSource, EntityType, Ftype } from '../../domain/enums.js';
+import type {
+  Cardinality,
+  ConfSource,
+  EntityType,
+  Ftype,
+  RetentionClass,
+  Volatility,
+  AdmissionReason,
+  SourceKind,
+  RecheckKind,
+} from '../../domain/enums.js';
 import { newId } from '../../domain/ids.js';
 import { nowIso } from '../../domain/time.js';
 import type { Fact, FactAttrs } from '../../domain/types.js';
@@ -64,6 +74,13 @@ export interface FactDraft {
   value: unknown;
   content: string;
   ftype?: Ftype;
+  retentionClass?: RetentionClass | null;
+  volatility?: Volatility | null;
+  admissionReason?: AdmissionReason | null;
+  ttlSeconds?: number | null;
+  sourceKind?: SourceKind;
+  recheckKind?: RecheckKind;
+  expiredAt?: string | null;
   confidence: number;
   confidenceSource: ConfSource;
   scope?: string;
@@ -100,6 +117,21 @@ export interface UpsertDeps extends ResolveDeps {
   schema?: readonly RegisteredKeyDef[];
 }
 
+function defaultSourceKind(source: ConfSource): SourceKind {
+  switch (source) {
+    case 'user_confirm':
+    case 'human':
+      return 'user_statement';
+    case 'derived':
+    case 'procedure':
+      return 'derived';
+    case 'llm_claim':
+      return 'agent_inference';
+    default:
+      return 'observation';
+  }
+}
+
 function draftToFact(
   draft: FactDraft,
   parts: {
@@ -117,6 +149,23 @@ function draftToFact(
     id: parts.id,
     content: draft.content,
     ftype: draft.ftype ?? 'semantic',
+    retentionClass:
+      draft.retentionClass === undefined
+        ? (draft.ftype ?? 'semantic') === 'episodic'
+          ? 'event'
+          : 'durable'
+        : draft.retentionClass,
+    volatility:
+      draft.volatility === undefined
+        ? (draft.ftype ?? 'semantic') === 'episodic'
+          ? 'historical'
+          : 'slow'
+        : draft.volatility,
+    admissionReason: draft.admissionReason ?? null,
+    ttlSeconds: draft.ttlSeconds ?? null,
+    sourceKind: draft.sourceKind ?? defaultSourceKind(draft.confidenceSource),
+    recheckKind: draft.recheckKind ?? 'none',
+    expiredAt: draft.expiredAt ?? null,
     confidence: draft.confidence,
     confidenceSource: draft.confidenceSource,
     strength: draft.strength ?? 0.5,
@@ -415,6 +464,13 @@ export interface AnnotatePayload {
   confidence?: number;
   confidenceSource?: ConfSource;
   ftype?: Ftype;
+  retentionClass?: RetentionClass | null;
+  volatility?: Volatility | null;
+  admissionReason?: AdmissionReason | null;
+  ttlSeconds?: number | null;
+  sourceKind?: SourceKind;
+  recheckKind?: RecheckKind;
+  expiredAt?: string | null;
   scope?: string;
   validAt?: string;
   sourceEpisode?: string | null;
@@ -437,6 +493,30 @@ function quarantinePayload(
 }
 
 /** 落一条已筛过的事实；返回落库结果 */
+/**
+ * 采集闸门（V-05）：`tool_parse` 通道的 durable 事实若说不清准入理由，
+ * 说明它大概率是"现场可重查"的状态，降级为 cache，并要求读时复核。
+ * 独立成纯函数是为了让这条策略有单测，不必靠某个 parser 恰好命中。
+ */
+export function admissionGate(input: {
+  enforceAdmission?: boolean;
+  retentionClass?: RetentionClass | null;
+  admissionReason?: AdmissionReason | null;
+  recheckKind?: RecheckKind;
+}): { retentionClass: RetentionClass | null | undefined; recheckKind: RecheckKind | undefined } {
+  if (input.enforceAdmission !== true) {
+    return { retentionClass: input.retentionClass, recheckKind: input.recheckKind };
+  }
+  const retentionClass =
+    (input.retentionClass === undefined ? 'durable' : input.retentionClass) === 'durable' &&
+    (input.admissionReason === undefined || input.admissionReason === null)
+      ? 'cache'
+      : input.retentionClass;
+  const recheckKind =
+    retentionClass === 'cache' && input.recheckKind === undefined ? 'on_read' : input.recheckKind;
+  return { retentionClass, recheckKind };
+}
+
 function writeOne(
   db: Db,
   ctx: HarvestContext,
@@ -449,13 +529,30 @@ function writeOne(
     confidence: number;
     confidenceSource: ConfSource;
     ftype: Ftype;
+    retentionClass?: RetentionClass | null;
+    volatility?: Volatility | null;
+    admissionReason?: AdmissionReason | null;
+    ttlSeconds?: number | null;
+    sourceKind?: SourceKind;
+    recheckKind?: RecheckKind;
+    expiredAt?: string | null;
     scope?: string;
     validAt?: string;
     sourceEpisode?: string | null;
     importance?: number;
     ext?: Record<string, unknown>;
+    /** tool_parse 通道：durable 说不清准入理由时降级为 cache */
+    enforceAdmission?: boolean;
   },
 ): UpsertResult {
+  const gate = admissionGate({
+    ...(input.enforceAdmission === undefined ? {} : { enforceAdmission: input.enforceAdmission }),
+    ...(input.retentionClass === undefined ? {} : { retentionClass: input.retentionClass }),
+    ...(input.admissionReason === undefined ? {} : { admissionReason: input.admissionReason }),
+    ...(input.recheckKind === undefined ? {} : { recheckKind: input.recheckKind }),
+  });
+  const retentionClass = gate.retentionClass;
+  const recheckKind = gate.recheckKind;
   const draft: FactDraft = {
     subject: input.subject,
     etype: input.etype,
@@ -465,6 +562,13 @@ function writeOne(
     confidence: input.confidence,
     confidenceSource: input.confidenceSource,
     ftype: input.ftype,
+    ...(retentionClass === undefined ? {} : { retentionClass }),
+    ...(input.volatility === undefined ? {} : { volatility: input.volatility }),
+    ...(input.admissionReason === undefined ? {} : { admissionReason: input.admissionReason }),
+    ...(input.ttlSeconds === undefined ? {} : { ttlSeconds: input.ttlSeconds }),
+    ...(input.sourceKind === undefined ? {} : { sourceKind: input.sourceKind }),
+    ...(recheckKind === undefined ? {} : { recheckKind }),
+    ...(input.expiredAt === undefined ? {} : { expiredAt: input.expiredAt }),
     ...(input.scope === undefined ? {} : { scope: input.scope }),
     ...(input.validAt === undefined ? {} : { validAt: input.validAt }),
     ...(input.sourceEpisode === undefined ? {} : { sourceEpisode: input.sourceEpisode }),
@@ -531,6 +635,13 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
         confidence,
         confidenceSource: f.confidenceSource ?? 'llm_claim',
         ftype: f.ftype ?? 'semantic',
+        ...(f.retentionClass === undefined ? {} : { retentionClass: f.retentionClass }),
+        ...(f.volatility === undefined ? {} : { volatility: f.volatility }),
+        ...(f.admissionReason === undefined ? {} : { admissionReason: f.admissionReason }),
+        ...(f.ttlSeconds === undefined ? {} : { ttlSeconds: f.ttlSeconds }),
+        ...(f.sourceKind === undefined ? {} : { sourceKind: f.sourceKind }),
+        ...(f.recheckKind === undefined ? {} : { recheckKind: f.recheckKind }),
+        ...(f.expiredAt === undefined ? {} : { expiredAt: f.expiredAt }),
         ...(f.scope === undefined ? {} : { scope: f.scope }),
         ...(f.validAt === undefined ? {} : { validAt: f.validAt }),
         ...(f.sourceEpisode === undefined ? {} : { sourceEpisode: f.sourceEpisode }),
@@ -589,6 +700,14 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
       confidence: f.confidence,
       confidenceSource: f.confidenceSource ?? 'tool_obs',
       ftype: f.ftype,
+      ...(f.retentionClass === undefined ? {} : { retentionClass: f.retentionClass }),
+      ...(f.volatility === undefined ? {} : { volatility: f.volatility }),
+      ...(f.admissionReason === undefined ? {} : { admissionReason: f.admissionReason }),
+      ...(f.ttlSeconds === undefined ? {} : { ttlSeconds: f.ttlSeconds }),
+      ...(f.sourceKind === undefined ? {} : { sourceKind: f.sourceKind }),
+      ...(f.recheckKind === undefined ? {} : { recheckKind: f.recheckKind }),
+      ...(f.expiredAt === undefined ? {} : { expiredAt: f.expiredAt }),
+      enforceAdmission: true,
       ...(turn.episodeId === undefined ? {} : { sourceEpisode: turn.episodeId }),
       ...(f.importance === undefined ? {} : { importance: f.importance }),
       ...(f.ext === undefined ? {} : { ext: redactValue(f.ext, ctx.redact) as Record<string, unknown> }),

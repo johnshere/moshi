@@ -90,6 +90,8 @@ export interface SearchInput {
   scope?: string;
   topK?: number;
   includeHistory?: boolean;
+  /** 默认不返回 cache 类事实；调用方明确要当前状态缓存时才打开（V-05） */
+  includeCache?: boolean;
   ftype?: readonly Ftype[];
   timeFrom?: string;
   timeTo?: string;
@@ -200,6 +202,7 @@ function traceMeta(
 function passFilters(fact: Fact, input: SearchInput, scope: string): boolean {
   if (fact.scope !== scope) return false;
   if (input.ftype !== undefined && input.ftype.length > 0 && !input.ftype.includes(fact.ftype)) return false;
+  if (input.includeCache !== true && fact.retentionClass === 'cache') return false;
   if (input.includeHistory !== true && fact.epistemicStatus !== 'active') return false;
   if (input.timeFrom !== undefined && fact.validAt < input.timeFrom) return false;
   if (input.timeTo !== undefined && fact.validAt > input.timeTo) return false;
@@ -392,6 +395,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     shape: {
       top_k: topK,
       include_history: input.includeHistory === true,
+      include_cache: input.includeCache === true,
       ftype: input.ftype ?? null,
       time_from: input.timeFrom ?? null,
       time_to: input.timeTo ?? null,

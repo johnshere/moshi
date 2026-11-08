@@ -63,6 +63,13 @@ function toPayload(deps: McpDeps, fact: AnnotateFact): AnnotatePayload {
     ...(fact.confidence === undefined ? {} : { confidence: fact.confidence }),
     ...(fact.importance === undefined ? {} : { importance: fact.importance }),
     ftype: fact.ftype,
+    ...(fact.retention_class === undefined ? {} : { retentionClass: fact.retention_class }),
+    ...(fact.volatility === undefined ? {} : { volatility: fact.volatility }),
+    ...(fact.admission_reason === undefined ? {} : { admissionReason: fact.admission_reason }),
+    ...(fact.ttl_seconds === undefined ? {} : { ttlSeconds: fact.ttl_seconds }),
+    ...(fact.source_kind === undefined ? {} : { sourceKind: fact.source_kind }),
+    ...(fact.recheck_kind === undefined ? {} : { recheckKind: fact.recheck_kind }),
+    ...(fact.expired_at === undefined ? {} : { expiredAt: fact.expired_at }),
     ...(fact.valid_at === undefined ? {} : { validAt: fact.valid_at }),
     ...(fact.source_ref?.episode_id === undefined
       ? {}

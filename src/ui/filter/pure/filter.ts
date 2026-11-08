@@ -23,7 +23,7 @@ export const STRENGTH_BANDS = ['high', 'mid', 'low', 'invalid'] as const;
 export type StrengthBand = (typeof STRENGTH_BANDS)[number];
 
 /** 值域常量（UI 侧副本；UI 是独立 Vite 工程，不 import 后端 domain） */
-export const FILTER_FTYPES = ['semantic', 'episodic', 'conditional'] as const;
+export const FILTER_FTYPES = ['semantic', 'episodic', 'procedural', 'conditional'] as const;
 export const FILTER_STATUSES = ['active', 'archived', 'invalidated', 'pruned', 'disputed'] as const;
 export const FILTER_POOLS = ['utility', 'value_floor'] as const;
 

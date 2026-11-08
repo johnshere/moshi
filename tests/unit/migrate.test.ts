@@ -44,7 +44,7 @@ const CORE_TABLES = [
 ];
 
 describe('迁移（详设 §2.7）', () => {
-  it('空库一次建成，user_version=5', () => {
+  it('空库一次建成，user_version=6', () => {
     const { db, dir } = tempDb();
     const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
     expect(res.from).toBe(0);
@@ -55,8 +55,9 @@ describe('迁移（详设 §2.7）', () => {
       '003_protocol.sql',
       '004_edges.sql',
       '005_direct_write.sql',
+      '006_fact_semantics.sql',
     ]);
-    expect(db.pragma('user_version', { simple: true })).toBe(5);
+    expect(db.pragma('user_version', { simple: true })).toBe(6);
 
     const tables = listTables(db);
     for (const t of CORE_TABLES) expect(tables).toContain(t);
@@ -67,7 +68,7 @@ describe('迁移（详设 §2.7）', () => {
     const { db, dir } = tempDb();
     migrate(db, { backupsDir: path.join(dir, 'backups') });
     const second = migrate(db, { backupsDir: path.join(dir, 'backups') });
-    expect(second.from).toBe(5);
+    expect(second.from).toBe(6);
     expect(second.applied).toEqual([]);
     expect(second.backupPath).toBeNull();
   });
@@ -100,7 +101,7 @@ describe('迁移（详设 §2.7）', () => {
 
   it('迁移文件按版本号排序，且命名不合规的被忽略', () => {
     const files = listMigrations(path.resolve(import.meta.dirname, '../../migrations'));
-    expect(files.map((f) => f.version)).toEqual([1, 2, 3, 4, 5]);
+    expect(files.map((f) => f.version)).toEqual([1, 2, 3, 4, 5, 6]);
   });
 
   it('schema_rev 在事实 UPDATE、边写入时也递增（P1-25）', () => {

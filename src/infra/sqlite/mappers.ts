@@ -14,6 +14,11 @@ import type {
   EntityType,
   Ftype,
   Pool,
+  RetentionClass,
+  Volatility,
+  AdmissionReason,
+  SourceKind,
+  RecheckKind,
 } from '../../domain/enums.js';
 
 export type Row = Record<string, unknown>;
@@ -61,6 +66,13 @@ export function rowToFact(row: Row): Fact {
     id: str(row, 'id'),
     content: str(row, 'content'),
     ftype: str(row, 'ftype') as Ftype,
+    retentionClass: strOrNull(row, 'retention_class') as RetentionClass | null,
+    volatility: strOrNull(row, 'volatility') as Volatility | null,
+    admissionReason: strOrNull(row, 'admission_reason') as AdmissionReason | null,
+    ttlSeconds: numOrNull(row, 'ttl_seconds'),
+    sourceKind: str(row, 'source_kind') as SourceKind,
+    recheckKind: str(row, 'recheck_kind') as RecheckKind,
+    expiredAt: strOrNull(row, 'expired_at'),
     confidence: num(row, 'confidence'),
     confidenceSource: str(row, 'confidence_source') as ConfSource,
     strength: num(row, 'strength'),

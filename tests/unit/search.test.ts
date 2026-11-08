@@ -118,6 +118,23 @@ describe('searchWithPipeline · 局部路径', () => {
     expect(all.pack.evidence.map((e) => e.content).sort()).toEqual(['gamma now', 'gamma old']);
   });
 
+  it('retention 过滤：cache 默认不返回，include_cache 才带出（V-05）', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'theta durable', retentionClass: 'durable' });
+    insertFact(db, { content: 'theta cache', retentionClass: 'cache' });
+    syncFts(db);
+
+    const live = await searchWithPipeline(runtime(db), { query: 'theta', scope: 'global' });
+    expect(live.pack.evidence.map((e) => e.content)).toEqual(['theta durable']);
+
+    const withCache = await searchWithPipeline(runtime(db), {
+      query: 'theta',
+      scope: 'global',
+      includeCache: true,
+    });
+    expect(withCache.pack.evidence.map((e) => e.content).sort()).toEqual(['theta cache', 'theta durable']);
+  });
+
   it('scope 过滤：跨 scope 不出证据', async () => {
     const db = freshDb();
     insertFact(db, { content: 'delta port 53000', scope: 'proj-x' });

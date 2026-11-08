@@ -48,6 +48,7 @@ const INK = '#ffffff';
 const FTYPE_FALLBACK = {
   semantic: '#22d3ee',
   episodic: '#a78bfa',
+  procedural: '#34d399',
   conditional: '#f59e0b',
 } as const;
 

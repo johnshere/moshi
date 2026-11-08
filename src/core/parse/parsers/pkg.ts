@@ -48,6 +48,11 @@ function pkgFact(
     value: version,
     confidence,
     ftype: 'semantic',
+    retentionClass: 'durable',
+    volatility: 'slow',
+    admissionReason: 'context_needed',
+    sourceKind: 'observation',
+    recheckKind: 'command',
     ext: { tool, argv: argvOf(turn.cmd), raw_excerpt: excerpt(line) },
   };
 }
@@ -131,6 +136,11 @@ const lockfileParser: Parser = {
         value: lock.manager,
         confidence: 0.9,
         ftype: 'semantic',
+        retentionClass: 'durable',
+        volatility: 'static',
+        admissionReason: 'context_needed',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'lockfile', file: lock.file, argv: argvOf(turn.cmd) },
       });
     }
@@ -155,6 +165,11 @@ const nodeVersionParser: Parser = {
         value: group(m, 1),
         confidence: 0.98,
         ftype: 'semantic',
+        retentionClass: 'durable',
+        volatility: 'slow',
+        admissionReason: 'context_needed',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'node', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];
@@ -179,6 +194,11 @@ const pythonVersionParser: Parser = {
         value: group(m, 1),
         confidence: 0.98,
         ftype: 'semantic',
+        retentionClass: 'durable',
+        volatility: 'slow',
+        admissionReason: 'context_needed',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'python', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];
@@ -212,6 +232,11 @@ const genericVersionParser: Parser = {
         value: group(m, 2),
         confidence: 0.9,
         ftype: 'semantic',
+        retentionClass: 'durable',
+        volatility: 'slow',
+        admissionReason: 'context_needed',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: group(m, 1).toLowerCase(), argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];

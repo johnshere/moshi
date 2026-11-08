@@ -8,7 +8,7 @@ import * as annotationRepo from '../../src/infra/sqlite/annotationRepo.js';
 import * as factRepo from '../../src/infra/sqlite/factRepo.js';
 import * as quarantineRepo from '../../src/infra/sqlite/quarantineRepo.js';
 import * as episodeRepo from '../../src/infra/sqlite/episodeRepo.js';
-import { harvest, harvestQueueState, type AnnotatePayload } from '../../src/core/write/harvest.js';
+import { admissionGate, harvest, harvestQueueState, type AnnotatePayload } from '../../src/core/write/harvest.js';
 import type { ToolTurnPayload } from '../../src/core/write/ingest.js';
 import { DEFAULT_QUARANTINE } from '../../src/core/write/quarantine.js';
 
@@ -313,5 +313,38 @@ describe('harvest：队列状态', () => {
     });
     expect(r.quarantined).toBe(1);
     expect(countFacts(db)).toBe(0);
+  });
+});
+
+describe('admissionGate：tool_parse 的 durable 准入闸门（V-05）', () => {
+  it('durable 但没有准入理由 → 降级 cache，并要求读时复核', () => {
+    expect(admissionGate({ enforceAdmission: true })).toEqual({
+      retentionClass: 'cache',
+      recheckKind: 'on_read',
+    });
+    expect(admissionGate({ enforceAdmission: true, retentionClass: 'durable' })).toEqual({
+      retentionClass: 'cache',
+      recheckKind: 'on_read',
+    });
+  });
+
+  it('durable + 明确准入理由 → 原样保留', () => {
+    expect(
+      admissionGate({
+        enforceAdmission: true,
+        retentionClass: 'durable',
+        admissionReason: 'expensive',
+      }),
+    ).toEqual({ retentionClass: 'durable', recheckKind: undefined });
+  });
+
+  it('非 durable 与非 tool_parse 通道不受影响', () => {
+    expect(
+      admissionGate({ enforceAdmission: true, retentionClass: 'event', admissionReason: null }),
+    ).toEqual({ retentionClass: 'event', recheckKind: undefined });
+    expect(admissionGate({ retentionClass: 'durable' })).toEqual({
+      retentionClass: 'durable',
+      recheckKind: undefined,
+    });
   });
 });

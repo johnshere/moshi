@@ -80,7 +80,7 @@ function sequence(session: string, commands: readonly string[], cwd = '/work/app
 
 function activeProcedures(db: Db) {
   return factRepo
-    .searchFacts(db, { ftype: ['semantic'], limit: 100 })
+    .searchFacts(db, { ftype: ['procedural'], limit: 100 })
     .filter((fact) => fact.confidenceSource === 'procedure' && fact.validTo === null);
 }
 
@@ -139,7 +139,7 @@ describe('过程事实写入（P2-10）', () => {
     expect(facts).toHaveLength(1);
     const fact = facts[0]!;
     expect(fact).toMatchObject({
-      ftype: 'semantic',
+      ftype: 'procedural',
       confidence: 0.7,
       confidenceSource: 'procedure',
       sourceEpisode: null,

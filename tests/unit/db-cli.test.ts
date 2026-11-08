@@ -342,33 +342,33 @@ describe('db migrate（P2-19A-03）', () => {
     expect(real.out).toContain(`已是最新 (v${TARGET_VERSION})`);
   });
 
-  it('v4 库：dry-run 列出 005 且不写库，实跑迁到 v5 并留迁移前备份', async () => {
+  it('v5 库：dry-run 列出 006 且不写库，实跑迁到 v6 并留迁移前备份', async () => {
     const { home, dbFile } = fakeHome();
     const backups = path.join(path.dirname(dbFile), 'backups');
     const { db } = openDb({ file: dbFile });
     try {
-      migrate(db, { backupsDir: backups, target: 4 });
+      migrate(db, { backupsDir: backups, target: 5 });
     } finally {
       closeDb(db);
     }
 
     const dry = await cli(home, ['db', 'migrate', '--dry-run']);
     expect(dry.code).toBe(0);
-    expect(dry.out).toContain('待执行 1 个迁移（v4 → v5）');
-    expect(dry.out).toContain('005_');
+    expect(dry.out).toContain('待执行 1 个迁移（v5 → v6）');
+    expect(dry.out).toContain('006_');
     expect(dry.out).toContain('--dry-run：未写库');
 
     const before = openDb({ file: dbFile });
     try {
       const row = before.db.prepare('PRAGMA user_version').get() as { user_version: number };
-      expect(row.user_version).toBe(4);
+      expect(row.user_version).toBe(5);
     } finally {
       closeDb(before.db);
     }
 
     const real = await cli(home, ['db', 'migrate']);
     expect(real.code).toBe(0);
-    expect(real.out).toContain('迁移完成：v4 → v5（1 个文件）');
+    expect(real.out).toContain('迁移完成：v5 → v6（1 个文件）');
     expect(real.out).toContain('迁移前备份：');
 
     const after = openDb({ file: dbFile });
@@ -385,7 +385,7 @@ describe('db migrate（P2-19A-03）', () => {
     const { db } = openDb({ file: dbFile });
     try {
       migrate(db, { backupsDir: path.join(path.dirname(dbFile), 'backups') });
-      db.pragma('user_version = 6');
+      db.pragma(`user_version = ${String(TARGET_VERSION + 1)}`);
     } finally {
       closeDb(db);
     }

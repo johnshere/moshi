@@ -205,7 +205,7 @@ describe('写入闭环（P1-22）', () => {
 
     await runner.runOnce();
     const procedures = factRepo
-      .searchFacts(db, { ftype: ['semantic'], limit: 100 })
+      .searchFacts(db, { ftype: ['procedural'], limit: 100 })
       .filter((fact) => fact.confidenceSource === 'procedure');
     expect(procedures).toHaveLength(1);
     expect(procedures[0]?.attrs.frozen.predicate).toBe('procedure:build');
@@ -213,7 +213,7 @@ describe('写入闭环（P1-22）', () => {
     await runner.runOnce();
     expect(
       factRepo
-        .searchFacts(db, { ftype: ['semantic'], limit: 100 })
+        .searchFacts(db, { ftype: ['procedural'], limit: 100 })
         .filter((fact) => fact.confidenceSource === 'procedure'),
     ).toHaveLength(1);
   });

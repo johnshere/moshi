@@ -15,7 +15,7 @@ import type { Db } from './db.js';
 
 const FILE_RE = /^(\d{3})_.*\.sql$/;
 
-export const TARGET_VERSION = 5;
+export const TARGET_VERSION = 6;
 
 export interface MigrateOptions {
   migrationsDir?: string;
@@ -173,6 +173,11 @@ export function migrate(db: Db, opts: MigrateOptions = {}): MigrateResult {
   const applied: string[] = [];
   for (const item of pending) {
     const sql = readFileSync(item.file, 'utf8');
+    // 表重建迁移（如 006 扩 ftype CHECK）必须在事务外关掉外键，否则 DROP 父表
+    // 会被 edge/feedback/evidence_log/layout 的引用挡住。标记写在 SQL 第一行，
+    // 只有显式声明的迁移才关，其它迁移仍保持 foreign_keys=ON。
+    const fkOff = /^\s*--\s*moshi:foreign_keys_off\b/m.test(sql);
+    if (fkOff) db.pragma('foreign_keys = OFF');
     const run = db.transaction(() => {
       db.exec(sql);
       db.pragma(`user_version = ${item.version}`);
@@ -189,6 +194,8 @@ export function migrate(db: Db, opts: MigrateOptions = {}): MigrateResult {
         file: item.file,
         cause: (err as Error).message,
       });
+    } finally {
+      if (fkOff) db.pragma('foreign_keys = ON');
     }
     applied.push(path.basename(item.file));
   }

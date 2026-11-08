@@ -38,6 +38,10 @@ const branchParser: Parser = {
         value: branch,
         confidence: 0.95,
         ftype: 'semantic',
+        retentionClass: 'cache',
+        volatility: 'volatile',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'git', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];
@@ -65,6 +69,10 @@ const syncParser: Parser = {
         value,
         confidence: 0.9,
         ftype: 'episodic',
+        retentionClass: 'cache',
+        volatility: 'volatile',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'git', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];
@@ -89,6 +97,10 @@ const headParser: Parser = {
         value: sha,
         confidence: 0.9,
         ftype: 'episodic',
+        retentionClass: 'cache',
+        volatility: 'volatile',
+        sourceKind: 'observation',
+        recheckKind: 'command',
         ext: { tool: 'git', argv: argvOf(turn.cmd), raw_excerpt: excerpt(m[0]) },
       },
     ];

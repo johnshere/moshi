@@ -5,8 +5,42 @@
  * 字面量散落的直接后果是"加一个值要改十处，漏一处就是静默 bug"。
  */
 
-export const FTYPE = ['semantic', 'episodic', 'conditional'] as const;
+export const FTYPE = ['semantic', 'episodic', 'procedural', 'conditional'] as const;
 export type Ftype = (typeof FTYPE)[number];
+
+/** 保留策略：决定默认检索、TTL 与训练采样（V-05） */
+export const RETENTION_CLASS = ['durable', 'event', 'cache', 'session'] as const;
+export type RetentionClass = (typeof RETENTION_CLASS)[number];
+
+/** 变化速度：决定过期提示与重查策略（V-05） */
+export const VOLATILITY = ['static', 'slow', 'volatile', 'historical'] as const;
+export type Volatility = (typeof VOLATILITY)[number];
+
+/** 准入理由：durable 事实必须能说清“为什么值得记”（V-05） */
+export const ADMISSION_REASON = [
+  'non_rederivable',
+  'expensive',
+  'context_needed',
+  'human_intent',
+  'cross_object',
+] as const;
+export type AdmissionReason = (typeof ADMISSION_REASON)[number];
+
+/** 记忆的语义来源，与 confidence_source 不同轴（V-05） */
+export const SOURCE_KIND = [
+  'observation',
+  'user_statement',
+  'decision',
+  'reflection',
+  'document',
+  'derived',
+  'agent_inference',
+] as const;
+export type SourceKind = (typeof SOURCE_KIND)[number];
+
+/** 过期后如何确认（V-05） */
+export const RECHECK_KIND = ['none', 'command', 'manual', 'on_read'] as const;
+export type RecheckKind = (typeof RECHECK_KIND)[number];
 
 export const ETYPE = [
   'depends_on',

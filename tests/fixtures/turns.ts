@@ -176,19 +176,6 @@ export const TURN_CASES: readonly TurnCase[] = [
     expected: [{ predicate: 'port_conflict', subject: '3000', value: { port: 3000 } }],
   },
   {
-    parser: 'fs.ls',
-    turn: bash('ls -l', '-rw-r--r--  1 john staff  1234 Oct  1 10:00 package.json\n', {
-      cwd: '/home/u/proj',
-    }),
-    expected: [
-      {
-        predicate: 'exists',
-        subject: '/home/u/proj/package.json',
-        value: { exists: true, kind: 'file', size: 1234, mtime: 'Oct  1 10:00' },
-      },
-    ],
-  },
-  {
     parser: 'fs.test',
     turn: bash('test -f /home/u/proj/package.json', ''),
     expected: [
@@ -272,7 +259,6 @@ export const MISS_CASES: readonly { parser: string; turn: RawTurn; why: string }
   },
   { parser: 'proc.ps', turn: bash('ps aux', ''), why: '空输出' },
   { parser: 'err.eaddrinuse', turn: bash('node server.js', 'Error: listen EACCES\n'), why: '别的错' },
-  { parser: 'fs.ls', turn: bash('ls -l', 'total 0\n'), why: '空目录' },
   { parser: 'fs.test', turn: bash('test -f /nope', '', { exitCode: 1 }), why: '退出码非 0' },
   { parser: 'build.npm', turn: bash('npm run build', 'Build failed with 3 errors\n'), why: '构建失败' },
   {

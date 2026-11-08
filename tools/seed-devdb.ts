@@ -26,6 +26,15 @@ import { dataPaths, loadConfig, resolveSources } from '../src/app/config.js';
 import { ensureDataDirs } from '../src/app/lifecycle.js';
 import { runCli } from '../src/app/cli/index.js';
 import { callTool } from '../src/app/mcp/tools.js';
+import { harvest } from '../src/core/write/harvest.js';
+import type {
+  AdmissionReason,
+  Ftype,
+  RecheckKind,
+  RetentionClass,
+  SourceKind,
+  Volatility,
+} from '../src/domain/enums.js';
 import { closeDb, openDb, type Db } from '../src/infra/sqlite/db.js';
 import { migrate } from '../src/infra/sqlite/migrate.js';
 
@@ -62,7 +71,6 @@ interface RepoSpec {
   syncCommits: number;
   head: string;
   pkgs: Array<{ name: string; base: string }>;
-  files: Array<{ sub: string; entries: Array<{ name: string; size: number; mtime: string }> }>;
   proc: { name: string; pid: number };
   proc2: { name: string; pid: number } | null;
 }
@@ -92,7 +100,6 @@ const PKG_NAMES: readonly (readonly string[])[] = [
 
 const TOOLS = ['vite', 'eslint', 'tsx', 'prettier', 'vitest', 'tsup', 'nodemon', 'rollup'] as const;
 const PROCS = ['node', 'vite', 'esbuild', 'tsx', 'vitest', 'nodemon', 'rollup', 'tsup'] as const;
-const MONTHS = ['Oct', 'Oct', 'Oct', 'Oct', 'Oct', 'Oct', 'Nov', 'Nov'] as const;
 
 function sha1(input: string): string {
   return createHash('sha1').update(input).digest('hex');
@@ -124,25 +131,6 @@ export const REPOS: readonly RepoSpec[] = REPO_NAMES.map((name, i) => ({
     name: pkg,
     base: `${2 + ((i + k) % 4)}.${(k * 3 + i) % 10}.${(k + i) % 9}`,
   })),
-  files: [
-    ...['src', 'tests'].map((sub) => ({
-      sub,
-      entries: Array.from({ length: 6 }, (_, k) => ({
-        name: `${sub}-${name}-${k}.ts`,
-        size: 512 + k * 137 + i * 11,
-        mtime: `${MONTHS[i]}  ${1 + k} 1${i % 6}:0${k}`,
-      })),
-    })),
-    // 第三个子目录：只为让带 episode 的 exists 事实在总量里占更高比例（S4 要求 ≥90%）
-    {
-      sub: 'config',
-      entries: Array.from({ length: 4 }, (_, k) => ({
-        name: `config-${name}-${k}.json`,
-        size: 300 + k * 97 + i * 7,
-        mtime: `${MONTHS[i]}  ${2 + k} 0${k}:1${i % 6}`,
-      })),
-    },
-  ],
   proc: { name: PROCS[i]!, pid: 4200 + i * 7 },
   proc2: i % 2 === 0 ? { name: 'java', pid: 5000 + i } : null,
 }));
@@ -273,17 +261,8 @@ export function generateSessions(seed: number, sessionCount = DAYS * SESSIONS_PE
       `pnpm add ${picked.map((p) => p.name).join(' ')}`,
       `dependencies:\n${picked.map((p, k) => `+ ${p.name} ${versionOn(p.base, day, k)}`).join('\n')}\n`,
     );
-    // 6) 文件清单：三个子目录全列，size 每天变化 ⇒ 每次观察都是新事实。
-    // 每会话多产 16 条 exists 事实并串进本 episode 的工具序列，把子图撑到 30+ 节点
-    // （P3-12 密度门槛）；值随 day 单调，不会复活旧值（I3）。
-    for (const dir of repo.files) {
-      add(
-        `ls -l ${dir.sub}`,
-        dir.entries
-          .map((e) => `-rw-r--r--  1 dev dev ${String(e.size + day * 7).padStart(5)} ${e.mtime} ${e.name}`)
-          .join('\n') + '\n',
-      );
-    }
+    // 6) 项目标记存在性：V-05 起 `fs.ls` 不再产出事实，目录项改由显式 `test` 观测。
+    add('test -f package.json', '');
     // 7) 构建：耗时每会话都不同 ⇒ 单值谓词触发 invalidate + supersedes + 裁决
     // 耗时按会话序号单调递增：**同一仓库的值绝不复用**，否则"值复活"会插出重复行（I3 口径）
     const dur = (2.1 + s * 0.05 + rnd() * 0.001).toFixed(3);
@@ -491,6 +470,150 @@ export interface SeedOptions {
   home?: string;
 }
 
+// ── V-05 语义分层覆盖数据 ────────────────────────────────────────────────
+/**
+ * 覆盖用的固定谓词。只存在于测试库：每次重建测试库都会重新写入，
+ * 查询断言用它精确定位这批样本（不与真实采集事实混淆）。
+ */
+export const COVERAGE_PREDICATE = 'v05_coverage';
+
+export interface CoverageFact {
+  content: string;
+  subject: string;
+  subject_type: 'concept';
+  predicate: string;
+  value: Record<string, string>;
+  ftype: Ftype;
+  retention_class?: RetentionClass;
+  volatility?: Volatility;
+  admission_reason?: AdmissionReason;
+  ttl_seconds?: number;
+  source_kind: SourceKind;
+  recheck_kind: RecheckKind;
+  expired_at?: string;
+  confidence: number;
+}
+
+/**
+ * 枚举覆盖矩阵：`ftype` 四值、`retention_class` 四值、`volatility` 四值、
+ * `admission_reason` 五值、`source_kind` 七值、`recheck_kind` 四值全部至少出现一次；
+ * 另有一条 TTL 已过期样本和一条 cache 样本（默认检索不得返回）。
+ * 走 `memory_annotate` 直写，顺带验证 MCP 入参 → 落库 → 读回的整条链路。
+ */
+export function coverageFacts(): CoverageFact[] {
+  const base = { subject_type: 'concept' as const, predicate: COVERAGE_PREDICATE, confidence: 0.95 };
+  return [
+    {
+      ...base,
+      subject: 'v05:semantic',
+      content: 'V-05 覆盖：决策事实——测试库只做覆盖重建，不回填正式库',
+      value: { sample: 'semantic' },
+      ftype: 'semantic',
+      retention_class: 'durable',
+      volatility: 'static',
+      admission_reason: 'non_rederivable',
+      source_kind: 'decision',
+      recheck_kind: 'none',
+    },
+    {
+      ...base,
+      subject: 'v05:episodic',
+      content: 'V-05 覆盖：2026-11-08 执行了测试库重建（事件样本）',
+      value: { sample: 'episodic' },
+      ftype: 'episodic',
+      retention_class: 'event',
+      volatility: 'historical',
+      admission_reason: 'expensive',
+      source_kind: 'observation',
+      recheck_kind: 'command',
+    },
+    {
+      ...base,
+      subject: 'v05:procedural',
+      content: 'V-05 覆盖：重建测试库的步骤是删库 → 迁移 → 导入 → seed → eval',
+      value: { sample: 'procedural' },
+      ftype: 'procedural',
+      retention_class: 'durable',
+      volatility: 'static',
+      admission_reason: 'context_needed',
+      source_kind: 'derived',
+      recheck_kind: 'none',
+    },
+    {
+      ...base,
+      subject: 'v05:conditional',
+      content: 'V-05 覆盖：若 durable 事实没有准入理由，则降级为 cache',
+      value: { sample: 'conditional' },
+      ftype: 'conditional',
+      retention_class: 'durable',
+      volatility: 'slow',
+      admission_reason: 'human_intent',
+      source_kind: 'reflection',
+      recheck_kind: 'manual',
+    },
+    {
+      ...base,
+      subject: 'v05:cache',
+      content: 'V-05 覆盖：当前 git HEAD 为 abc123（cache 样本，默认检索不应返回）',
+      value: { sample: 'cache' },
+      ftype: 'semantic',
+      retention_class: 'cache',
+      volatility: 'volatile',
+      source_kind: 'observation',
+      recheck_kind: 'command',
+    },
+    {
+      ...base,
+      subject: 'v05:session',
+      content: 'V-05 覆盖：本次会话的临时上下文（session 样本）',
+      value: { sample: 'session' },
+      ftype: 'episodic',
+      retention_class: 'session',
+      volatility: 'volatile',
+      source_kind: 'agent_inference',
+      recheck_kind: 'on_read',
+    },
+    {
+      ...base,
+      subject: 'v05:expired',
+      content: 'V-05 覆盖：已过期事件样本（TTL 60 秒）',
+      value: { sample: 'expired' },
+      ftype: 'episodic',
+      retention_class: 'event',
+      volatility: 'volatile',
+      admission_reason: 'expensive',
+      ttl_seconds: 60,
+      source_kind: 'observation',
+      recheck_kind: 'command',
+      expired_at: '2026-10-01T00:00:00.000Z',
+    },
+    {
+      ...base,
+      subject: 'v05:cross-object',
+      content: 'V-05 覆盖：跨对象文档事实（关联两个仓库的迁移说明）',
+      value: { sample: 'cross_object' },
+      ftype: 'semantic',
+      retention_class: 'durable',
+      volatility: 'slow',
+      admission_reason: 'cross_object',
+      source_kind: 'document',
+      recheck_kind: 'none',
+    },
+    {
+      ...base,
+      subject: 'v05:reflection',
+      content: 'V-05 覆盖：反思——分类字段应正交，不应新增 memory_kind',
+      value: { sample: 'reflection' },
+      ftype: 'conditional',
+      retention_class: 'durable',
+      volatility: 'slow',
+      admission_reason: 'non_rederivable',
+      source_kind: 'reflection',
+      recheck_kind: 'manual',
+    },
+  ];
+}
+
 function makeLogger(sink: string[]): (line: string) => void {
   return (line: string) => {
     sink.push(line);
@@ -617,6 +740,23 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
   const queries: SeedResult['queries'] = [];
   const feedback: SeedResult['feedback'] = [];
   try {
+    // 3.5) V-05 覆盖数据：四种 ftype / retention / volatility 与五种准入理由各至少一条。
+    // 只写测试库；重复跑 seed 时按固定谓词判重，不重复写。
+    const covered = db
+      .prepare("SELECT COUNT(*) AS n FROM fact WHERE json_extract(attrs,'$.frozen.predicate') = ?")
+      .get(COVERAGE_PREDICATE) as { n: number };
+    if (covered.n === 0) {
+      // 生产通路是「annotate 入队 → harvest 合并」；直写闸门默认关，这里不依赖它。
+      const res = await callTool({ db, cfg }, 'memory_annotate', { facts: coverageFacts() });
+      if (res.isError === true) {
+        log(`[seed:devdb] V-05 覆盖数据：入队失败（${JSON.stringify(res.content)}）`);
+      } else {
+        const h = await harvest(db, { yieldBetweenBatches: false });
+        log(`[seed:devdb] V-05 覆盖数据：入队 + harvest → 新增 ${String(h.created)} 条`);
+      }
+    } else {
+      log(`[seed:devdb] V-05 覆盖数据：已有 ${covered.n} 条，跳过`);
+    }
     const ask = async (type: string, query: string): Promise<SeedResult['queries'][number]> => {
       const rec: SeedResult['queries'][number] = {
         type,

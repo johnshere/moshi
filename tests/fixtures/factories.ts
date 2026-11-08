@@ -13,6 +13,14 @@ export interface FactSeed {
   id?: string;
   content?: string;
   ftype?: string;
+  /** V-05 分层字段；不传走 DDL 默认值（source_kind=observation / recheck_kind=none） */
+  retentionClass?: string | null;
+  volatility?: string | null;
+  admissionReason?: string | null;
+  ttlSeconds?: number | null;
+  sourceKind?: string;
+  recheckKind?: string;
+  expiredAt?: string | null;
   confidence?: number;
   confidenceSource?: string;
   strength?: number;
@@ -53,13 +61,17 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
 
   db.prepare(
     `INSERT INTO fact (
-       id, content, ftype, confidence, confidence_source, strength, importance, pool,
+       id, content, ftype, retention_class, volatility, admission_reason, ttl_seconds,
+       source_kind, recheck_kind, expired_at,
+       confidence, confidence_source, strength, importance, pool,
        epistemic_status, attrs, canonical_key, value_hash, scope, superseded_by,
        valid_at, valid_to, recorded_at, community_id, degree, access_count,
        last_access_at, last_decay_at, source_episode, span_start, span_end,
        created_at, updated_at
      ) VALUES (
-       @id, @content, @ftype, @confidence, @confidence_source, @strength, @importance, @pool,
+       @id, @content, @ftype, @retention_class, @volatility, @admission_reason, @ttl_seconds,
+       COALESCE(@source_kind, 'observation'), COALESCE(@recheck_kind, 'none'), @expired_at,
+       @confidence, @confidence_source, @strength, @importance, @pool,
        @epistemic_status, @attrs, @canonical_key, @value_hash, @scope, @superseded_by,
        @valid_at, @valid_to, @recorded_at, NULL, 0, 0,
        NULL, @last_decay_at, NULL, NULL, NULL,
@@ -69,6 +81,13 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
     id,
     content: seed.content ?? `${subject.name} ${predicate} = ${String(value)}`,
     ftype: seed.ftype ?? 'semantic',
+    retention_class: seed.retentionClass ?? null,
+    volatility: seed.volatility ?? null,
+    admission_reason: seed.admissionReason ?? null,
+    ttl_seconds: seed.ttlSeconds ?? null,
+    source_kind: seed.sourceKind ?? null,
+    recheck_kind: seed.recheckKind ?? null,
+    expired_at: seed.expiredAt ?? null,
     confidence: seed.confidence ?? 0.9,
     confidence_source: seed.confidenceSource ?? 'tool_obs',
     strength: seed.strength ?? 0.5,
