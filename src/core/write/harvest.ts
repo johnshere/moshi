@@ -48,6 +48,7 @@ import { extractEdges, totalCreated } from './edges.js';
 import { mergeOnReobserve, type Priors, DEFAULT_PRIORS } from './confidence.js';
 import { buildIdentity } from './identity.js';
 import type { ToolTurnPayload } from './ingest.js';
+import { GLOBAL_SCOPE, normalizeScope, projectScopeOf } from '../../domain/scope.js';
 import {
   DEFAULT_QUARANTINE,
   enqueue,
@@ -201,7 +202,7 @@ function draftToFact(
 
 export function upsertFact(db: Db, draft: FactDraft, deps: UpsertDeps = {}): UpsertResult {
   const priors = deps.priors ?? DEFAULT_PRIORS;
-  const scope = draft.scope ?? 'global';
+  const scope = normalizeScope(draft.scope ?? GLOBAL_SCOPE);
   const ts = nowIso();
 
   // 先校验、后落库：类型/基数性不符必须在实体消解之前拦住。校验失败抛 E_SCHEMA，
@@ -708,6 +709,8 @@ function applyAnnotation(db: Db, row: AnnotationRow, ctx: HarvestContext, stats:
       ...(f.recheckKind === undefined ? {} : { recheckKind: f.recheckKind }),
       ...(f.expiredAt === undefined ? {} : { expiredAt: f.expiredAt }),
       enforceAdmission: true,
+      // 工具回合按 cwd 判项目（V-01）；没有 cwd 的回合落 global
+      scope: projectScopeOf(turn.cwd),
       ...(turn.episodeId === undefined ? {} : { sourceEpisode: turn.episodeId }),
       ...(f.importance === undefined ? {} : { importance: f.importance }),
       ...(f.ext === undefined ? {} : { ext: redactValue(f.ext, ctx.redact) as Record<string, unknown> }),

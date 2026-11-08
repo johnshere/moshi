@@ -199,6 +199,42 @@ describe('harvest：三种出口', () => {
   });
 });
 
+describe('harvest：scope 继承（V-01）', () => {
+  it('工具回合按 cwd 落项目 scope，没有 cwd 落 global', async () => {
+    const db = freshDb();
+    enqueueTurn(db, { cwd: 'C:\\Work\\RepoA\\', output: '+ alpha@1.0.0\n' });
+    enqueueTurn(db, { output: '+ beta@1.0.0\n' });
+
+    await harvest(db, { yieldBetweenBatches: false });
+
+    const rows = db
+      .prepare("SELECT scope, content FROM fact ORDER BY content")
+      .all() as { scope: string; content: string }[];
+    expect(rows).toEqual([
+      { scope: 'project:c:/work/repoa', content: expect.stringContaining('alpha') },
+      { scope: 'global', content: expect.stringContaining('beta') },
+    ]);
+  });
+
+  it('同一事实在两个 scope 各存一份，跨 scope 不建互斥边', async () => {
+    const db = freshDb();
+    enqueueTurn(db, { cwd: 'C:\\Work\\RepoA', output: '+ shared@1.0.0\n' });
+    enqueueTurn(db, { cwd: 'C:\\Work\\RepoB', output: '+ shared@1.0.0\n' });
+
+    await harvest(db, { yieldBetweenBatches: false });
+
+    const scopes = db
+      .prepare("SELECT scope FROM fact WHERE json_extract(attrs, '$.frozen.subject.name') = 'pkg:shared'")
+      .pluck()
+      .all() as string[];
+    expect(scopes.sort()).toEqual(['project:c:/work/repoa', 'project:c:/work/repob']);
+    const mutex = db
+      .prepare("SELECT COUNT(*) AS n FROM edge WHERE etype = 'mutually_exclusive'")
+      .get() as { n: number };
+    expect(mutex.n).toBe(0);
+  });
+});
+
 describe('harvest：annotate 通道（R1）', () => {
   it('落库时用 llm_claim 先验 0.55', async () => {
     const db = freshDb();

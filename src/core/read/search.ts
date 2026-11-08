@@ -38,6 +38,7 @@ import { recallPpr, type PprResult } from './recall/ppr.js';
 import { fuseRank, fusedScores, type FusedItem, type RecallChannel } from './fuse.js';
 import { buildSubgraph } from './subgraph.js';
 import { buildPayloadFromSubgraph } from './subgraph-payload.js';
+import { GLOBAL_SCOPE, normalizeScope, scopeCandidates } from '../../domain/scope.js';
 import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
 import { adjudicate, type AdjudicateResult, type AdjudicatedFact } from './adjudicate.js';
 import { applyNeuralDeltas } from './gate-delta.js';
@@ -199,8 +200,8 @@ function traceMeta(
 }
 
 /** 候选过滤：scope / ftype / 生命周期 / 有效时间窗（§4.1.1 入参语义） */
-function passFilters(fact: Fact, input: SearchInput, scope: string): boolean {
-  if (fact.scope !== scope) return false;
+function passFilters(fact: Fact, input: SearchInput, scopes: readonly string[]): boolean {
+  if (!scopes.includes(fact.scope)) return false;
   if (input.ftype !== undefined && input.ftype.length > 0 && !input.ftype.includes(fact.ftype)) return false;
   if (input.includeCache !== true && fact.retentionClass === 'cache') return false;
   if (input.includeHistory !== true && fact.epistemicStatus !== 'active') return false;
@@ -243,12 +244,17 @@ const EMPTY_TOPIC_HINT: TopicHint = { community_id: null, label: null, fact_coun
 function buildGlobalPack(
   db: Db,
   queryId: string,
-  scope: string,
+  scopes: readonly string[],
   params: SearchParams,
   signals: InternalSignal[],
   latencyMs: number,
 ): EvidencePackage {
-  const rows = listTopSummaries(db, scope, params.globalTopicLimit);
+  // 项目优先、全局兜底：本项目没有主题摘要时才用 global 的
+  let rows: ReturnType<typeof listTopSummaries> = [];
+  for (const s of scopes) {
+    rows = listTopSummaries(db, s, params.globalTopicLimit);
+    if (rows.length > 0) break;
+  }
   // 摘要过期判据：生成时的 source_rev 落后于当前库版本（§6.10 第 2 步）
   const rev = schemaRev(db);
   const fresh = rows.filter((r) => r.sourceRev >= rev);
@@ -312,7 +318,8 @@ type Stage =
 export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput): Promise<SearchOutcome> {
   const db = rt.db;
   const params: SearchParams = { ...DEFAULT_PARAMS, ...(rt.params ?? {}) };
-  const scope = input.scope ?? 'global';
+  const scope = normalizeScope(input.scope ?? GLOBAL_SCOPE);
+  const scopes = scopeCandidates(scope);
   const topK = input.topK ?? 8;
   const now = (rt.now ?? nowIso)();
   const startedAt = performance.now();
@@ -331,7 +338,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
     const signals: InternalSignal[] = [];
     if (countFact(db) === 0) signals.push('cold_start');
     const queryId = newQueryId();
-    const pack = buildGlobalPack(db, queryId, scope, params, signals, Math.round(performance.now() - startedAt));
+    const pack = buildGlobalPack(db, queryId, scopes, params, signals, Math.round(performance.now() - startedAt));
     mark('global');
     // 全局路径没有事实级证据链，但仍记一条空 trace：前端轮询任意 query_id 都有回放，
     // 不会因为「这次是话题概览」而 404（§12.2「trace 缺失返回空而非报错」）。
@@ -525,7 +532,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
 
   // ── 5) 候选加载与过滤（三路并集）──
   const unionIds = [...new Set([...vectorIds, ...bm25Ids, ...pprIds])];
-  const filtered = listByIds(db, unionIds).filter((f) => passFilters(f, input, scope));
+  const filtered = listByIds(db, unionIds).filter((f) => passFilters(f, input, scopes));
   // 惰性衰减：查询返回前算一次（详设 §8.1）。候选只有几十条，且 Δ≤1e-3 不落库，
   // 所以这一步对读路径的代价是 O(候选数) 的浮点运算，不是一次批量 UPDATE。
   // 衰减后的强度直接进融合与裁决，否则排序用的是「上次查询时」的旧值。
@@ -558,7 +565,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   const nodeIds = sub.nodes.map((n) => n.fact_id);
   // 邻居节点同样要过过滤器；顺序按子图全序（§6.6 的稳定性要求）
   const nodeFacts = listByIds(db, nodeIds)
-    .filter((f) => passFilters(f, input, scope))
+    .filter((f) => passFilters(f, input, scopes))
     .sort((a, b) => nodeIds.indexOf(a.id) - nodeIds.indexOf(b.id));
   mark('subgraph');
 
@@ -633,9 +640,18 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   // 先按 finalScore 全序切 top_k，再装箱。反过来的话：装箱先按预算挑，
   // 挑完再切，等于"预算花在不会返回的事实上"，且排第 10 的直命中连机会都没有。
   const utilBudget = Math.round(params.tokenBudget * params.utilityRatio);
-  const shortlist: AdjudicatedFact[] = [...adj.kept]
-    .sort((a, b) => b.finalScore - a.finalScore || (a.fact.id < b.fact.id ? -1 : 1))
-    .slice(0, topK);
+  // 项目优先、全局兜底（概设 §3.6.4）：给项目事实加一个排名层优先值。
+  // 不能只靠 shortlist 的数组顺序——`packFacts` 会按 finalScore 重新排序，
+  // 顺序会在装箱这一步被抹掉。finalScore 的数学上界是 1（0.55+0.3+0.15），
+  // 所以 +1 足以让项目命中整体排在 global 兜底之前，且不影响池内相对排序。
+  const ranked: AdjudicatedFact[] = [...adj.kept]
+    .map((a) =>
+      scopes.length > 1 && a.fact.scope === scope
+        ? { ...a, finalScore: a.finalScore + 1 }
+        : a,
+    )
+    .sort((a, b) => b.finalScore - a.finalScore || (a.fact.id < b.fact.id ? -1 : 1));
+  const shortlist: AdjudicatedFact[] = ranked.slice(0, topK);
   const items: PackItem[] = packFacts(shortlist, {
     budget: params.tokenBudget,
     utilBudget,

@@ -135,17 +135,37 @@ describe('searchWithPipeline · 局部路径', () => {
     expect(withCache.pack.evidence.map((e) => e.content).sort()).toEqual(['theta cache', 'theta durable']);
   });
 
-  it('scope 过滤：跨 scope 不出证据', async () => {
+  it('scope 过滤：全局查询不返回项目事实', async () => {
     const db = freshDb();
-    insertFact(db, { content: 'delta port 53000', scope: 'proj-x' });
+    insertFact(db, { content: 'delta port 53000', scope: 'project:c:/work/a' });
     syncFts(db);
 
     const global = await searchWithPipeline(runtime(db), { query: 'delta', scope: 'global' });
     expect(global.pack.evidence).toHaveLength(0);
 
-    const scoped = await searchWithPipeline(runtime(db), { query: 'delta', scope: 'proj-x' });
+    const scoped = await searchWithPipeline(runtime(db), {
+      query: 'delta',
+      scope: 'project:c:/work/a',
+    });
     expect(scoped.pack.evidence).toHaveLength(1);
     expect(scoped.pack.evidence[0]!.content).toContain('delta');
+  });
+
+  it('项目查询：项目优先、全局兜底', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'delta global port 53000', scope: 'global' });
+    insertFact(db, { content: 'delta project port 53001', scope: 'project:c:/work/a' });
+    syncFts(db);
+
+    const scoped = await searchWithPipeline(runtime(db), {
+      query: 'delta',
+      scope: 'project:c:/work/a',
+      topK: 10,
+    });
+    expect(scoped.pack.evidence).toHaveLength(2);
+    // 项目命中排在全局兜底之前
+    expect(scoped.pack.evidence[0]!.content).toContain('project');
+    expect(scoped.pack.evidence[1]!.content).toContain('global');
   });
 
   it('top_k 截断 + token 预算不越界', async () => {

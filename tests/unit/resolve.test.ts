@@ -6,7 +6,8 @@ import { isMoshiError } from '../../src/domain/errors.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import * as entityRepo from '../../src/infra/sqlite/entityRepo.js';
-import { assertScope, buildIdentity, PHASE0_SCOPE } from '../../src/core/write/identity.js';
+import { GLOBAL_SCOPE, assertScope } from '../../src/domain/scope.js';
+import { buildIdentity } from '../../src/core/write/identity.js';
 import { resolveEntity, type VectorResolver } from '../../src/core/write/resolve.js';
 
 const opened: Db[] = [];
@@ -53,12 +54,15 @@ describe('身份键（详设 §5.6）', () => {
     ).toThrow(/谓词规范化失败/);
   });
 
-  it('Phase 0 只允许 global', () => {
-    expect(() => assertScope('repo')).toThrow(/只允许 scope/);
+  it('scope 只允许 global 与 project:<cwd>', () => {
+    expect(() => assertScope('repo')).toThrow(/非法 scope/);
+    expect(() => assertScope('project:')).toThrow(/非法 scope/);
     expect(() =>
       buildIdentity({ scope: 'repo', entityId: 'en_1', predicate: 'p', value: 1 }),
-    ).toThrow(/Phase 0/);
-    expect(PHASE0_SCOPE).toBe('global');
+    ).toThrow(/非法 scope/);
+    expect(assertScope(GLOBAL_SCOPE)).toBeUndefined();
+    expect(assertScope('project:c:/work/a')).toBeUndefined();
+    expect(GLOBAL_SCOPE).toBe('global');
   });
 
   it('实体不同 → key 不同（身份键的主体部分生效）', () => {
