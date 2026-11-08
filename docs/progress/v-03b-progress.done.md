@@ -23,7 +23,7 @@
 - 修复：`spawn("cmd.exe", ["/d","/s","/c", command])` 会被 Node 再包一层引号，与 `cmd /s` 冲突导致安装器不执行；改 `spawn(command, {shell:true})`，带空格路径的真实 .bat 用例通过。
 - 生产 daemon（9836）`GET /api/update?force=1` → `moshi-update/1`、`current=0.1.0`、`ok=false`、`error="GitHub HTTP 403"`；匿名配额为 0，错误按设计折叠。
 - 浏览器 `/ui/settings`：「软件更新 / 当前版本：0.1.0 / 检查失败：GitHub HTTP 403 / 检查更新」渲染正确（仅 favicon 404 控制台噪声）。
-- Release `v0.1.0` 已发布，资产 `moshi-setup-0.1.0.exe` 已上传（6094395 字节）；真实 authenticated latest payload 经 `statusFromRelease` 解析为 `ok=true`、`latest=0.1.0`、`asset_size=6094395`、`available=false`。
+- Release `v0.1.0` 已发布，资产 `moshi-setup-0.1.0.exe` 已上传（6095091 字节）；真实 authenticated latest payload 经 `statusFromRelease` 解析为 `ok=true`、`latest=0.1.0`、`asset_size=6095091`、`available=false`。
 
 ## 遗留
 
