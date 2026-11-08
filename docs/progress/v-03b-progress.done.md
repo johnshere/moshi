@@ -25,7 +25,15 @@
 - 浏览器 `/ui/settings`：「软件更新 / 当前版本：0.1.0 / 检查失败：GitHub HTTP 403 / 检查更新」渲染正确（仅 favicon 404 控制台噪声）。
 - Release `v0.1.0` 已发布，资产 `moshi-setup-0.1.0.exe` 已上传（6095091 字节）；真实 authenticated latest payload 经 `statusFromRelease` 解析为 `ok=true`、`latest=0.1.0`、`asset_size=6095091`、`available=false`。
 
+## 全链路复验（2026-11-08，仓库临时 public）
+
+1. 发布测试 Release `v0.1.1`（代码同 0.1.0，仅版本号 0.1.1），资产 `moshi-setup-0.1.1.exe` 6095192 字节。
+2. 静默安装 0.1.0 到真实 `%LOCALAPPDATA%\Programs\moshi`，启动后 `GET /api/update?force=1` → `ok=true`、`latest=0.1.1`、`available=true`。
+3. `POST /api/update/download` → `~/.moshi/updates/moshi-setup-0.1.1.exe`，6095192 字节，与 release 记录一致。
+4. `POST /api/update/install` → `{"ok":true,"version":"0.1.1"}`；安装器 `/S` 替换文件后 `launch.vbs init` 重启，`daemon.lock` pid=7144 / port=9836 / version=0.1.1，安装目录 `package.json` version=0.1.1。
+5. 卸载测试安装：程序目录与 HKCU Run 消失，`~/.moshi/moshi.db` 37.8MB 保留；删除 `~/.moshi/updates` 测试包；删除 `v0.1.1` 测试 Release 与 tag，latest 回到 `v0.1.0`。
+
 ## 遗留
 
-- 仓库仍 private（用户 2026-11-08：待完善后开放），客户机匿名检查暂不可用；开放后复验「发现新版本 → 下载 → 安装重启」全链路。
-- 未在真实升级（0.1.0 → 更高版本）上执行覆盖安装，避免扰动生产安装；命令组装由单测覆盖，安装器静默模式在 V-03 已验证。
+- 仓库恢复 private 后匿名检查将再次不可用（用户 2026-11-08 计划：先测通，再改回 private），正式开放前客户机自动更新不可用。
+- GitHub `/releases/latest` 对新发布有约 1–2 分钟传播延迟；匿名 API 限额 60/h 会被频繁手动检查耗尽（403），客户端正常使用频率远低于此。
