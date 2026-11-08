@@ -132,6 +132,7 @@ export async function main(argv: readonly string[]): Promise<number> {
           sidecar,
           breaker,
           onEnqueued: () => runner?.wake(),
+          onStop: () => void shutdown('http.stop'),
         });
         return server;
       },

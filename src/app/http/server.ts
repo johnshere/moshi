@@ -58,6 +58,11 @@ export interface HttpDeps {
   traceStore?: TraceStore;
   /** 模型熔断（P3-10）：daemon 注入进程内单例；不传则按配置档位、不熔断 */
   breaker?: Breaker;
+  /**
+   * 远程优雅停止（V-03）：安装器/卸载器先让 daemon 释放 `.node` 与数据库再替换文件。
+   * 不传（CLI/测试实例）时 `/api/control/stop` 返回 501，不假装支持。
+   */
+  onStop?: () => void;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -143,6 +148,19 @@ export async function buildHttpApp(deps: HttpDeps) {
     };
     // P2-19A-08：模型/任务/MCP 时间戳等扩展字段（只增字段）
     return reply.send({ ...status, ...buildStatusExtras(deps.db, deps) });
+  });
+
+  // ── 远程停止（V-03）：先回包再停，避免调用方把「连接被断」误判成失败 ──
+  app.post('/api/control/stop', async (_req, reply) => {
+    if (deps.onStop === undefined) {
+      return reply
+        .code(501)
+        .send({ error: 'E_NO_STOP', message: '当前实例不支持远程停止（非 daemon 进程）' });
+    }
+    const stop = deps.onStop;
+    reply.send({ ok: true });
+    setImmediate(stop);
+    return reply;
   });
 
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──

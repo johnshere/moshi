@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "pnpm build:ui && tsc -p tsconfig.build.json && node tools/copy-assets.mjs",
+    "build:installer": "node scripts/build-installer.mjs",
     "build:ui": "pnpm --filter moshi-ui build",
     "dev": "tsx watch src/app/main.ts daemon",
     "start": "node dist/app/main.js daemon",
