@@ -13,13 +13,14 @@
 - `src/app/http/routes/update.ts`：`GET /api/update`（60s 缓存，`?force=1`）、`POST /api/update/download`、`POST /api/update/install`（先回包再停 daemon）。
 - `src/app/config.ts`：`[update] enabled/repo/feed_url`；`src/domain/errors.ts` 增 `E_UPDATE`。
 - `src/ui/settings/UpdatePanel.tsx`：检查 / 下载 / 安装并重启；接入设置页。
-- 测试：`update-domain.test.ts`（5）、`update-api.test.ts`（8）、`update-install.test.ts`（2）。
+- 测试：`update-domain.test.ts`（5）、`update-api.test.ts`（9）、`update-install.test.ts`（2）、`update-install-spawn.test.ts`（1，真实执行）。
 
 ## 验证
 
-- `pnpm verify`：138 files / 1618 tests 全绿（首轮曾有 1 次时序型偶发失败，连续两轮复跑全绿）。
+- `pnpm verify`：139 files / 1620 tests 全绿（首轮曾有 1 次时序型偶发失败，复跑全绿）。
 - `pnpm build`：0。
-- 安装包：`temp/installer/moshi-setup-0.1.0.exe`（5.8MB）。
+- 安装包：`temp/installer/moshi-setup-0.1.0.exe`（5.8MB，已重建含 spawn 修复）。
+- 修复：`spawn("cmd.exe", ["/d","/s","/c", command])` 会被 Node 再包一层引号，与 `cmd /s` 冲突导致安装器不执行；改 `spawn(command, {shell:true})`，带空格路径的真实 .bat 用例通过。
 - 生产 daemon（9836）`GET /api/update?force=1` → `moshi-update/1`、`current=0.1.0`、`ok=false`、`error="GitHub HTTP 403"`；匿名配额为 0，错误按设计折叠。
 - 浏览器 `/ui/settings`：「软件更新 / 当前版本：0.1.0 / 检查失败：GitHub HTTP 403 / 检查更新」渲染正确（仅 favicon 404 控制台噪声）。
 - Release `v0.1.0` 已发布，资产 `moshi-setup-0.1.0.exe` 已上传（6094395 字节）；真实 authenticated latest payload 经 `statusFromRelease` 解析为 `ok=true`、`latest=0.1.0`、`asset_size=6094395`、`available=false`。

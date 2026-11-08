@@ -33,7 +33,10 @@ export function spawnInstaller(installer: string): void {
   const vbs = launchScript();
   const restart = vbs === null ? '' : ` && start "" "${wscript}" //nologo "${vbs}" init`;
   const command = `"${installer}" /S${restart}`;
-  const child = spawn('cmd.exe', ['/d', '/s', '/c', command], {
+  // 走 shell 而不是 spawn('cmd.exe', [...])：Node 会把带空格的参数再包一层引号，
+  // 与 cmd /s 的剥引号规则冲突，实测安装器根本不会执行。
+  const child = spawn(command, {
+    shell: true,
     detached: true,
     stdio: 'ignore',
     windowsHide: true,

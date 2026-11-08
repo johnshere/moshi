@@ -120,6 +120,21 @@ describe('GET /api/update（V-03B）', () => {
     await app.close();
   });
 
+  it('tag 含 shell 非法字符时拒绝（ok:false）', async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ tag_name: 'v1.0.0-&calc', assets: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ) as unknown as typeof fetch;
+    const { app } = await setup({ fetchImpl });
+    const res = await app.inject({ method: 'GET', url: '/api/update?force=1', headers });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: false, available: false });
+    expect(res.json().error).toMatch(/非法字符/);
+    await app.close();
+  });
+
   it('无 token 401', async () => {
     const { app } = await setup({});
     const res = await app.inject({ method: 'GET', url: '/api/update' });

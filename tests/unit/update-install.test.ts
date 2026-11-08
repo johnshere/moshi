@@ -38,18 +38,15 @@ describe('spawnInstaller（V-03B）', () => {
     spawnInstaller(installer);
 
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    const [cmd, args, opts] = spawnMock.mock.calls[0] as unknown as [
+    const [command, opts] = spawnMock.mock.calls[0] as unknown as [
       string,
-      string[],
-      { detached?: boolean; stdio?: string; windowsHide?: boolean },
+      { shell?: boolean; detached?: boolean; stdio?: string; windowsHide?: boolean },
     ];
-    expect(cmd).toBe('cmd.exe');
-    expect(args[0]).toBe('/d');
-    expect(args[1]).toBe('/s');
-    expect(args[2]).toBe('/c');
-    expect(args[3]).toContain(`"${installer}" /S`);
+    expect(command).toContain(`"${installer}" /S`);
     // 开发目录没有 launch.vbs 时不应拼重启命令（避免误起安装器）
-    if (launchScript() === null) expect(args[3]).not.toContain('wscript');
+    if (launchScript() === null) expect(command).not.toContain('wscript');
+    // 必须走 shell：spawn('cmd.exe', [...]) 的再引号与 cmd /s 冲突，实测装不上
+    expect(opts.shell).toBe(true);
     expect(opts.detached).toBe(true);
     expect(opts.stdio).toBe('ignore');
   });

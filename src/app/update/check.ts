@@ -106,6 +106,10 @@ export function statusFromRelease(
     throw new Error('release 缺少可解析的 tag_name');
   }
   const latest = r.tag_name.replace(/^v/, '');
+  // 版本号直接参与文件名与 shell 命令；只放行 semver 字符，挡住 `&` / 引号之类的注入面
+  if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]*)?$/.test(latest)) {
+    throw new Error('release tag_name 含非法字符');
+  }
   const assets = parseAssets(r.assets);
   const asset = pickUpdateAsset(assets, latest);
   const body = typeof r.body === 'string' ? r.body : '';
