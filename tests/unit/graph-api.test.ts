@@ -514,3 +514,41 @@ describe('GET /api/graph/neighbors/:id（P2-19A-18）', () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe('GET /api/graph?scope（V-02）', () => {
+  it('按 scope 精确过滤节点与边，总数同步', async () => {
+    const db = freshDb();
+    insertFact(db, { id: 'fact_g', importance: 0.9, content: '全局事实', scope: 'global' });
+    insertFact(db, { id: 'fact_p1', importance: 0.8, content: '项目事实一', scope: 'project:c:/a' });
+    insertFact(db, { id: 'fact_p2', importance: 0.7, content: '项目事实二', scope: 'project:c:/a' });
+    putLayout(db, 'fact_g', 0, 0, 0);
+    putLayout(db, 'fact_p1', 1, 0, 0);
+    putLayout(db, 'fact_p2', 2, 0, 0);
+    insertEdge(db, 'fact_g', 'fact_p1', 'co_occur');
+    insertEdge(db, 'fact_p1', 'fact_p2', 'co_occur');
+    const app = await makeApp(db);
+
+    const project = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/graph?scope=project:c:/a',
+        headers: { 'x-moshi-token': TOKEN },
+      })
+    ).json<GraphBody>();
+    expect(project.nodes.map((n) => n.id).sort()).toEqual(['fact_p1', 'fact_p2']);
+    expect(project.edges.map((e) => `${e.src}-${e.dst}`)).toEqual(['fact_p1-fact_p2']);
+    expect(project.meta.total_nodes).toBe(2);
+    expect(project.meta.total_edges).toBe(1);
+
+    const global = (
+      await app.inject({
+        method: 'GET',
+        url: '/api/graph?scope=global',
+        headers: { 'x-moshi-token': TOKEN },
+      })
+    ).json<GraphBody>();
+    expect(global.nodes.map((n) => n.id)).toEqual(['fact_g']);
+    expect(global.edges).toEqual([]);
+    expect(global.meta.total_edges).toBe(0);
+  });
+});

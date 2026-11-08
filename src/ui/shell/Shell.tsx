@@ -9,6 +9,7 @@ import { PAGES, lightColor, pageHref, queueBadge, statusLights, type PageKey, ty
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { SearchBox } from './SearchBox.js';
+import { ScopeSwitcher } from './ScopeSwitcher.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
 import { FirstRun } from './FirstRun.js';
 import { ToastHost } from './ToastHost.js';
@@ -202,6 +203,7 @@ export function Shell({ route, children }: ShellProps): ReactElement {
         <header style={topbarStyle}>
           <SearchBox />
           <div style={{ flex: 1 }} />
+          <ScopeSwitcher />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
             {lights.map((light) => (
               <span

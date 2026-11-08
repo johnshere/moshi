@@ -12,6 +12,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Db } from '../../../infra/sqlite/db.js';
 import { loadGraphNeighborhood, loadGraphPage } from '../../../infra/sqlite/graphRepo.js';
+import { normalizeScope } from '../../../domain/scope.js';
 import type { GraphCursor } from '../../../infra/sqlite/graphRepo.js';
 import type {
   GraphEdgeRow,
@@ -112,12 +113,17 @@ export async function graphRoutes(app: FastifyInstance, opts: GraphRoutesOpts): 
     const query = req.query as Record<string, string>;
     const limit = parseLimit(query.limit);
     const cursor = decodeCursor(query.cursor);
+    const scope = query.scope === undefined || query.scope === '' ? undefined : normalizeScope(query.scope);
 
     if (cursor === null) {
       return reply.code(400).send({ error: 'E_BAD_CURSOR', message: 'cursor 无法解析' });
     }
 
-    const page = loadGraphPage(db, cursor === undefined ? { limit } : { limit, cursor });
+    const page = loadGraphPage(db, {
+      limit,
+      ...(cursor === undefined ? {} : { cursor }),
+      ...(scope === undefined ? {} : { scope }),
+    });
     const last = page.nodes[page.nodes.length - 1];
     const nextCursor = page.hasMore && last !== undefined ? encodeCursor(last) : null;
 

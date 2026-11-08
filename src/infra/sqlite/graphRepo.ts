@@ -48,6 +48,8 @@ export interface GraphCursor {
 export interface GraphPageQuery {
   limit: number;
   cursor?: GraphCursor;
+  /** 精确作用域过滤（V-02）：`global` / `project:*`；缺省 = 不限 */
+  scope?: string;
 }
 
 export interface GraphPage {
@@ -77,6 +79,9 @@ const NODE_COLUMNS = `
 export function loadGraphPage(db: Db, query: GraphPageQuery): GraphPage {
   const limit = Math.max(1, Math.floor(query.limit));
   const cursor = query.cursor;
+  // 作用域过滤：可选，SQL 片段与参数一起拼，避免出现两个几乎相同的分支
+  const scopeClause = query.scope === undefined ? '' : ' AND f.scope = ?';
+  const scopeArgs = query.scope === undefined ? [] : [query.scope];
 
   const rows =
     cursor === undefined
@@ -85,35 +90,36 @@ export function loadGraphPage(db: Db, query: GraphPageQuery): GraphPage {
             `SELECT ${NODE_COLUMNS}
                FROM fact f
                JOIN layout l ON l.fact_id = f.id
-              WHERE ${VISIBLE}
+              WHERE ${VISIBLE}${scopeClause}
               ORDER BY f.importance DESC, f.id ASC
               LIMIT ?`,
           )
-          .all(limit) as GraphNodeRow[])
+          .all(...scopeArgs, limit) as GraphNodeRow[])
       : (db
           .prepare(
             `SELECT ${NODE_COLUMNS}
                FROM fact f
                JOIN layout l ON l.fact_id = f.id
-              WHERE ${VISIBLE}
+              WHERE ${VISIBLE}${scopeClause}
                 AND (f.importance < ? OR (f.importance = ? AND f.id > ?))
               ORDER BY f.importance DESC, f.id ASC
               LIMIT ?`,
           )
-          .all(cursor.importance, cursor.importance, cursor.id, limit) as GraphNodeRow[]);
+          .all(...scopeArgs, cursor.importance, cursor.importance, cursor.id, limit) as GraphNodeRow[]);
 
   const total = db
     .prepare(
-      `SELECT COUNT(*) AS n FROM fact f JOIN layout l ON l.fact_id = f.id WHERE ${VISIBLE}`,
+      `SELECT COUNT(*) AS n FROM fact f JOIN layout l ON l.fact_id = f.id
+        WHERE ${VISIBLE}${scopeClause}`,
     )
-    .get() as { n: number };
+    .get(...scopeArgs) as { n: number };
 
   const missing = db
     .prepare(
       `SELECT COUNT(*) AS n FROM fact f LEFT JOIN layout l ON l.fact_id = f.id
-        WHERE ${VISIBLE} AND l.fact_id IS NULL`,
+        WHERE ${VISIBLE}${scopeClause} AND l.fact_id IS NULL`,
     )
-    .get() as { n: number };
+    .get(...scopeArgs) as { n: number };
 
   const layoutVersionRow = db
     .prepare('SELECT COALESCE(MAX(layout_version), 0) AS v FROM layout')
@@ -149,11 +155,11 @@ export function loadGraphPage(db: Db, query: GraphPageQuery): GraphPage {
          JOIN fact fd ON fd.id = e.dst AND fd.epistemic_status IN ('active','disputed')
          JOIN layout ls ON ls.fact_id = e.src
          JOIN layout ld ON ld.fact_id = e.dst
-        WHERE e.valid_to IS NULL`,
+        WHERE e.valid_to IS NULL${query.scope === undefined ? '' : ' AND fs.scope = ? AND fd.scope = ?'}`,
     )
-    .get() as { n: number };
+    .get(...(query.scope === undefined ? [] : [query.scope, query.scope])) as { n: number };
 
-  const hasMore = hasMoreAfter(db, rows[rows.length - 1]);
+  const hasMore = hasMoreAfter(db, rows[rows.length - 1], query.scope);
 
   return {
     nodes: rows,
@@ -339,17 +345,17 @@ export function loadGraphNeighborhood(db: Db, query: GraphNeighborhoodQuery): Gr
  *
  * `LIMIT 1` + 与主查询同序的条件，命中即停，代价只有几毫秒。
  */
-function hasMoreAfter(db: Db, last: GraphNodeRow | undefined): boolean {
+function hasMoreAfter(db: Db, last: GraphNodeRow | undefined, scope?: string): boolean {
   if (last === undefined) return false;
   const row = db
     .prepare(
       `SELECT 1 AS more
          FROM fact f
          JOIN layout l ON l.fact_id = f.id
-        WHERE ${VISIBLE}
+        WHERE ${VISIBLE}${scope === undefined ? '' : ' AND f.scope = ?'}
           AND (f.importance < ? OR (f.importance = ? AND f.id > ?))
         LIMIT 1`,
     )
-    .get(last.importance, last.importance, last.id);
+    .get(...(scope === undefined ? [] : [scope]), last.importance, last.importance, last.id);
   return row !== undefined;
 }

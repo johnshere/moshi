@@ -301,20 +301,25 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
    * 反过来触发一次取数（否则刷新按钮每点一次都会自增两轮请求）。
    */
   const dataRef = useRef<GraphPayload | null>(null);
+  /** 已拿到的图数据对应的 scope：scope 变了要重拉，切视图回来则复用 */
+  const loadedScopeRef = useRef<string | null | undefined>(undefined);
+  /** 当前生效的作用域筛选（V-02）：列表与图谱读同一份 */
+  const scope = useFilter((s) => s.filter.scope);
 
-  const load = useCallback(async (requestLimit: number): Promise<void> => {
+  const load = useCallback(async (requestLimit: number, requestScope: string | null): Promise<void> => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
     setError(null);
     try {
-      const payload = await fetchGraph(requestLimit, controller.signal);
+      const payload = await fetchGraph(requestLimit, requestScope, controller.signal);
       // 事件源②：这一份比上一份多出来的访问计数 = 「刚刚被调用的那条」（详设 §10.3.1 / D-89）。
       // 首屏没有上一份 → `pickAccessRise` 返回 null，不点亮任何东西（默认沉默）。
       const rise = pickAccessRise(prevNodesRef.current, payload.nodes);
       prevNodesRef.current = payload.nodes;
       dataRef.current = payload;
+      loadedScopeRef.current = requestScope;
       setData(payload);
       setLimit(requestLimit);
       if (rise !== null) useActivity.getState().hit(rise);
@@ -330,10 +335,10 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
     // 表格视图自己走 `/api/facts`（游标分页），这里不拉图：深链 `?view=table` 的
     // 首屏预算（< 500ms）不该被 1000 节点 / 3000 边的 `/api/graph` 占掉。
     if (view === 'table') return;
-    // 图数据还在 → 切回来直接复用（表格卸载时并没有清空 data）
-    if (dataRef.current !== null) return;
-    void load(initialLimit());
-  }, [view, load]);
+    // 图数据还在且 scope 未变 → 切回来直接复用（表格卸载时并没有清空 data）
+    if (dataRef.current !== null && loadedScopeRef.current === scope) return;
+    void load(initialLimit(), scope);
+  }, [view, scope, load]);
 
   // P2-25：每 3s 拉一次「最近查询」的 trace（daemon 内存 ring buffer，无落库）。
   // 外部查询没有推送通道（D-118 不加 SSE/WebSocket），轮询是唯一能让"刚查完"立刻
@@ -510,13 +515,13 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
             {!is2d && <Badge label="标签" value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
             {is2d && <Badge label="选中" value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
             <span style={{ pointerEvents: 'auto' }}>
-              <button type="button" onClick={() => void load(limit)} style={buttonStyle}>
+              <button type="button" onClick={() => void load(limit, scope)} style={buttonStyle}>
                 {loading ? '加载中…' : '刷新'}
               </button>
               {meta !== undefined && meta.returned_nodes < meta.total_nodes && (
                 <button
                   type="button"
-                  onClick={() => void load(FULL_LIMIT)}
+                  onClick={() => void load(FULL_LIMIT, scope)}
                   style={{ ...buttonStyle, background: 'var(--color-bg-raised)', color: 'var(--color-warning)', border: '1px solid var(--color-warning-dim)', marginLeft: 6 }}
                 >
                   加载全量（{FULL_LIMIT}）

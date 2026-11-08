@@ -47,6 +47,17 @@ export interface FactSuggestion {
   ftype: string;
 }
 
+/** 作用域清单（V-02）：`GET /api/scopes` 的 `moshi-scopes/1` 契约 */
+export interface ScopeItem {
+  scope: string;
+  fact_count: number;
+}
+
+export async function fetchScopes(signal?: AbortSignal): Promise<ScopeItem[]> {
+  const body = await getJson<{ items?: ScopeItem[] }>('/api/scopes', signal);
+  return Array.isArray(body.items) ? body.items : [];
+}
+
 export async function fetchSuggestions(
   query: string,
   limit = 6,

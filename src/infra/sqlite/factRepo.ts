@@ -726,3 +726,20 @@ export function listSuperseding(db: Db, id: string, limit = 50): FactDigest[] {
     .all(id, limit) as { id: string; content: string; valid_at: string; valid_to: string | null }[];
   return rows.map((r) => ({ id: r.id, content: r.content, validAt: r.valid_at, validTo: r.valid_to }));
 }
+
+/**
+ * 作用域清单（V-02）：当前可见事实按 scope 分组，`global` 排最前。
+ * 只读、只走 `idx_fact_scope_community` 的 scope 前缀；给 UI 的项目切换器用。
+ */
+export function listScopes(db: Db): { scope: string; factCount: number }[] {
+  const rows = db
+    .prepare(
+      `SELECT scope, COUNT(*) AS n
+         FROM fact
+        WHERE epistemic_status IN ('active','disputed')
+        GROUP BY scope
+        ORDER BY scope = 'global' DESC, scope`,
+    )
+    .all() as { scope: string; n: number }[];
+  return rows.map((r) => ({ scope: r.scope, factCount: r.n }));
+}

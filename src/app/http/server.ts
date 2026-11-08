@@ -27,6 +27,7 @@ import { createMcpHttpHandler } from '../mcp/server.js';
 import { buildEvidenceCache, encodeViaSidecar, scoreViaSidecar, scoreWithBreaker, type McpDeps } from '../mcp/deps.js';
 import type { Breaker } from '../../core/read/breaker.js';
 import { factRoutes } from './routes/facts.js';
+import { scopeRoutes } from './routes/scopes.js';
 import { graphRoutes } from './routes/graph.js';
 import { batchRoutes } from './routes/batch.js';
 import { queueRoutes } from './routes/queues.js';
@@ -87,6 +88,7 @@ export async function buildHttpApp(deps: HttpDeps) {
 
   // ── API 路由 ──
   await app.register(factRoutes, { prefix: '/api/facts', db: deps.db });
+  await app.register(scopeRoutes, { prefix: '/api/scopes', db: deps.db });
   await app.register(searchRoutes, { prefix: '/api/search', db: deps.db });
   // 批量动作与 factRoutes 同前缀、不同路由（Fastify 允许多插件共享前缀）
   await app.register(batchRoutes, {

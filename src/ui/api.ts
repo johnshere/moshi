@@ -123,8 +123,14 @@ export function resolveToken(): string {
   }
 }
 
-export async function fetchGraph(limit: number, signal?: AbortSignal): Promise<GraphPayload> {
-  const res = await fetch(`/api/graph?limit=${String(limit)}`, {
+export async function fetchGraph(
+  limit: number,
+  scope: string | null,
+  signal?: AbortSignal,
+): Promise<GraphPayload> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (scope !== null) params.set('scope', scope);
+  const res = await fetch(`/api/graph?${params.toString()}`, {
     headers: { 'X-Moshi-Token': resolveToken() },
     ...(signal === undefined ? {} : { signal }),
   });
