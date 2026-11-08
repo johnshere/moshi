@@ -601,6 +601,18 @@ export function coverageFacts(): CoverageFact[] {
     },
     {
       ...base,
+      subject: 'v05:user-statement',
+      content: 'V-05 覆盖：用户明确说测试库只用于覆盖验证（user_statement 样本）',
+      value: { sample: 'user_statement' },
+      ftype: 'semantic',
+      retention_class: 'durable',
+      volatility: 'slow',
+      admission_reason: 'human_intent',
+      source_kind: 'user_statement',
+      recheck_kind: 'none',
+    },
+    {
+      ...base,
       subject: 'v05:reflection',
       content: 'V-05 覆盖：反思——分类字段应正交，不应新增 memory_kind',
       value: { sample: 'reflection' },
@@ -741,21 +753,29 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
   const feedback: SeedResult['feedback'] = [];
   try {
     // 3.5) V-05 覆盖数据：四种 ftype / retention / volatility 与五种准入理由各至少一条。
-    // 只写测试库；重复跑 seed 时按固定谓词判重，不重复写。
-    const covered = db
-      .prepare("SELECT COUNT(*) AS n FROM fact WHERE json_extract(attrs,'$.frozen.predicate') = ?")
-      .get(COVERAGE_PREDICATE) as { n: number };
-    if (covered.n === 0) {
+    // 只写测试库；重复跑 seed 时按主体判重，只补缺失项。
+    const coveredSubjects = new Set(
+      db
+        .prepare(
+          "SELECT json_extract(attrs,'$.frozen.subject.name') AS s FROM fact WHERE json_extract(attrs,'$.frozen.predicate') = ?",
+        )
+        .pluck()
+        .all(COVERAGE_PREDICATE) as string[],
+    );
+    const missing = coverageFacts().filter((f) => !coveredSubjects.has(f.subject));
+    if (missing.length > 0) {
       // 生产通路是「annotate 入队 → harvest 合并」；直写闸门默认关，这里不依赖它。
-      const res = await callTool({ db, cfg }, 'memory_annotate', { facts: coverageFacts() });
+      const res = await callTool({ db, cfg }, 'memory_annotate', { facts: missing });
       if (res.isError === true) {
         log(`[seed:devdb] V-05 覆盖数据：入队失败（${JSON.stringify(res.content)}）`);
       } else {
         const h = await harvest(db, { yieldBetweenBatches: false });
-        log(`[seed:devdb] V-05 覆盖数据：入队 + harvest → 新增 ${String(h.created)} 条`);
+        log(
+          `[seed:devdb] V-05 覆盖数据：补 ${String(missing.length)} 条 → 新增 ${String(h.created)} 条`,
+        );
       }
     } else {
-      log(`[seed:devdb] V-05 覆盖数据：已有 ${covered.n} 条，跳过`);
+      log(`[seed:devdb] V-05 覆盖数据：${String(coveredSubjects.size)} 条已齐，跳过`);
     }
     const ask = async (type: string, query: string): Promise<SeedResult['queries'][number]> => {
       const rec: SeedResult['queries'][number] = {
