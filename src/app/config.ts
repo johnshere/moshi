@@ -249,6 +249,18 @@ const LogSchema = z
   .strict();
 
 /**
+ * 自动更新（V-03B）：GitHub Releases 的 latest 作为 manifest。
+ * `feed_url` 非空时覆盖默认的 GitHub API 地址（测试/自建镜像用）。
+ */
+const UpdateSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    repo: z.string().min(3).default('johnshere/moshi'),
+    feed_url: z.string().default(''),
+  })
+  .strict();
+
+/**
  * MCP 直写闸门（P2-23 / 概设 §3.1.3）。
  *
  * 默认**关闭**：`memory_annotate` 只入队，事实要经 harvest 六步才进图。
@@ -325,6 +337,7 @@ export const ConfigSchema = z
     log: LogSchema.default({}),
     mcp: McpSchema.default({}),
     layout: LayoutSchema.default({}),
+    update: UpdateSchema.default({}),
   })
   .strict();
 

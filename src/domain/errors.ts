@@ -25,6 +25,8 @@ export const ERROR_CODES = [
   'E_QUOTA',
   /** P2-07 批量撤销窗口（30 秒）已过，op_id 作废，不可再撤销 */
   'E_OP_EXPIRED',
+  /** V-03B 自动更新：无可用更新 / 更新包缺失 / 下载或拉起安装器失败 */
+  'E_UPDATE',
 ] as const;
 
 export type ErrorCode = (typeof ERROR_CODES)[number];
@@ -91,6 +93,12 @@ export const ERROR_META: Readonly<Record<ErrorCode, ErrorMeta>> = {
     mcpCode: -32602,
     retryable: false,
     hint: '撤销窗口（30 秒）已过，op 作废，不可再撤销',
+  },
+  E_UPDATE: {
+    httpStatus: 502,
+    mcpCode: null,
+    retryable: true,
+    hint: '自动更新步骤失败（检查 / 下载 / 安装），可稍后重试',
   },
 };
 

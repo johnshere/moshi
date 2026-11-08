@@ -9,6 +9,7 @@ import { ConfigForm } from './ConfigForm.js';
 import { DiagPanel } from './DiagPanel.js';
 import { MaintenancePanel } from './MaintenancePanel.js';
 import { PrivacyPanel } from './PrivacyPanel.js';
+import { UpdatePanel } from './UpdatePanel.js';
 
 export function SettingsPage(): ReactElement {
   return (
@@ -24,6 +25,7 @@ export function SettingsPage(): ReactElement {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 18px 18px' }}>
         <ConfigForm />
+        <UpdatePanel />
         <MaintenancePanel />
         <PrivacyPanel />
         <DiagPanel />

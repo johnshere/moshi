@@ -38,6 +38,7 @@ import { entitiesRoutes } from './routes/entities.js';
 import { privacyRoutes, exportRoutes } from './routes/privacy.js';
 import { evalRoutes } from './routes/eval.js';
 import { configRoutes } from './routes/config.js';
+import { updateRoutes } from './routes/update.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
 import { buildStatusExtras } from '../../core/ops/status.js';
@@ -63,6 +64,13 @@ export interface HttpDeps {
    * 不传（CLI/测试实例）时 `/api/control/stop` 返回 501，不假装支持。
    */
   onStop?: () => void;
+  /** 自动更新的测试注入点（V-03B）：不联网、不真的起安装器 */
+  update?: {
+    fetchImpl?: typeof fetch;
+    runInstaller?: (installer: string) => void;
+    currentVersion?: string;
+    now?: () => Date;
+  };
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -119,6 +127,12 @@ export async function buildHttpApp(deps: HttpDeps) {
   });
   // 归档台账与 .proposed 三选一（P2-15）
   await app.register(archiveRoutes, { prefix: '/api/archive', db: deps.db, cfg: deps.cfg });
+  // 自动更新（V-03B）：检查 / 下载 / 安装；路由内部自带 60s 缓存
+  await app.register(updateRoutes, {
+    cfg: deps.cfg,
+    ...(deps.onStop === undefined ? {} : { onStop: deps.onStop }),
+    ...(deps.update ?? {}),
+  });
   await app.register(graphRoutes, { prefix: '/api/graph', db: deps.db });
   // 证据链回放（P2-24）：进程内 ring buffer 一份，MCP 采集 / HTTP 只读（D-118：无 SSE）
   const traceStore = deps.traceStore ?? new TraceStore();
