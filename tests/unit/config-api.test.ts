@@ -82,7 +82,7 @@ describe('GET /api/config', () => {
     expect(body.meta.config_path).toBe(env.configPath);
     expect(body.config['ingest']?.['harvest_cron']).toBe('0 3 * * *');
     expect(body.config['layout']?.['interval_ms']).toBeGreaterThanOrEqual(1000);
-    expect(body.config['http']?.['port']).toBe(53000);
+    expect(body.config['http']?.['port']).toBe(9836);
     expect(body.config['storage']?.['archive_dir']).toEqual(expect.any(String));
     expect(JSON.stringify(body)).not.toContain('token');
   });

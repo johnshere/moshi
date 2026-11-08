@@ -60,7 +60,7 @@ describe('moshi init（P0-21）', () => {
 
     // MCP 片段：http 型 + /mcp 端点
     expect(out.text()).toContain('mcpServers');
-    expect(out.text()).toContain('http://127.0.0.1:53000/mcp');
+    expect(out.text()).toContain('http://127.0.0.1:9836/mcp');
     expect(out.text()).toContain('数据库就绪');
   });
 

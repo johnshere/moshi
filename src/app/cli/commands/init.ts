@@ -24,8 +24,7 @@ const DEFAULT_CONFIG = `# 默识（moshi）配置。删掉整节 = 用默认值�
 
 [server]
 host = "127.0.0.1"
-port = 53000
-port_scan_max = 53020
+port = 9836
 
 [storage]
 data_dir = "~/.moshi"

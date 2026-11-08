@@ -9,10 +9,10 @@ import tailwindcss from '@tailwindcss/vite';
  * base 必须是 `/ui/graph/`：静态资源按绝对路径引用，浏览器直接从 `/ui/graph/assets/...`
  * 取，和 static.ts 的路由前缀对齐。dev 模式 Vite 自己按 base 挂载，同样通。
  *
- * `/api` 反代到 daemon：daemon 端口从 53000 起扫（见 `src/app/config.ts`），
- * 若实际端口不是 53000，用环境变量 `MOSHI_DAEMON` 覆盖（例如 `MOSHI_DAEMON=http://127.0.0.1:53002`）。
+ * `/api` 反代到 daemon：daemon 默认固定端口 9836（见 `src/app/config.ts`），
+ * 若实际端口不是 9836，用环境变量 `MOSHI_DAEMON` 覆盖（例如 `MOSHI_DAEMON=http://127.0.0.1:9837`）。
  */
-const daemon = process.env['MOSHI_DAEMON'] ?? 'http://127.0.0.1:53000';
+const daemon = process.env['MOSHI_DAEMON'] ?? 'http://127.0.0.1:9836';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],

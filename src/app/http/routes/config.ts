@@ -230,12 +230,6 @@ export async function configRoutes(
           issues: checked.issues,
         });
       }
-      if (checked.cfg.server.port > checked.cfg.server.port_scan_max) {
-        throw new MoshiError('E_INPUT', 'server.port 不能大于 server.port_scan_max', {
-          reason: 'port_invalid',
-        });
-      }
-
       writeConfigDocument(configPath, merged, roots);
       const restartRequired = applied.some((path) => RESTART_REQUIRED_PATHS.includes(path));
       return {

@@ -239,7 +239,7 @@ function escapeHtml(s) {
 // 首次运行三步引导（概设 §8.4）。文案纪律：只说「尚未观测到」，不说「没有」。
 function firstRunGuide() {
   const port = window.location.port;
-  const mcpUrl = `http://127.0.0.1:${port || 53000}/mcp`;
+  const mcpUrl = `http://127.0.0.1:${port || 9836}/mcp`;
   const snippet = JSON.stringify({ mcpServers: { moshi: { type: 'http', url: mcpUrl } } }, null, 2);
   return `
   <div class="guide">

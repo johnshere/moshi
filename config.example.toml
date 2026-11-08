@@ -4,8 +4,7 @@
 
 [server]
 host = "127.0.0.1"          # 只允许回环，非回环值直接拒绝启动
-port = 53000                # 起始端口
-port_scan_max = 53020       # 探测上界
+port = 9836                # 固定端口；被占用时启动失败，改端口后重启
 
 [storage]
 data_dir = "~/.moshi"

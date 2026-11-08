@@ -80,6 +80,27 @@ describe('端口探测（概设 §1.4）', () => {
       await new Promise<void>((r) => blocker.close(() => r()));
     }
   });
+
+  it('固定端口被占用时启动失败，不顺延', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'moshi-life-'));
+    const file = path.join(dir, 'config.toml');
+    const blocker = net.createServer();
+    const busy = await findFreePort('127.0.0.1', 53300, 53320);
+    await new Promise<void>((r) => blocker.listen(busy, '127.0.0.1', () => r()));
+    writeFileSync(
+      file,
+      `[storage]\ndata_dir = "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\n[server]\nport = ${String(busy)}\n`,
+      'utf8',
+    );
+    try {
+      await expect(boot(loadConfig({ file, home: dir }))).rejects.toMatchObject({
+        code: 'E_CONFIG',
+        detail: { reason: 'port_in_use', port: busy },
+      });
+    } finally {
+      await new Promise<void>((r) => blocker.close(() => r()));
+    }
+  });
 });
 
 describe('单实例锁（概设 §1.1 第 3 条）', () => {

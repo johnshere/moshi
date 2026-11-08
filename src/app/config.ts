@@ -32,8 +32,13 @@ const positiveInt = z.number().int().positive();
 const ServerSchema = z
   .object({
     host: z.string().default('127.0.0.1'),
-    port: z.number().int().min(1).max(65535).default(53000),
-    port_scan_max: z.number().int().min(1).max(65535).default(53020),
+    /**
+     * 固定端口：MCP 地址会被写进各 Agent 的配置，daemon 不能悄悄顺延。
+     * 被占用时启动失败，由用户在设置页改端口后重启。
+     */
+    port: z.number().int().min(1).max(65535).default(9836),
+    /** 已废弃，仅为兼容旧配置保留；daemon 不再扫描端口 */
+    port_scan_max: z.number().int().min(1).max(65535).default(9836),
   })
   .strict();
 
@@ -474,10 +479,6 @@ export function loadConfig(opts: LoadOptions = {}): Config {
       { file },
     );
   }
-  if (cfg.server.port > cfg.server.port_scan_max) {
-    throw new MoshiError('E_CONFIG', 'server.port 不能大于 server.port_scan_max', { file });
-  }
-
   for (const { section, key } of PATH_KEYS) {
     const bag = cfg[section] as unknown as Record<string, unknown>;
     const value = bag[key];

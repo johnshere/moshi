@@ -30,7 +30,7 @@ function expectConfigError(fn: () => unknown): string {
 describe('配置加载（详设 §3.6）', () => {
   it('文件不存在时全部走默认值', () => {
     const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'config.toml'), home: HOME });
-    expect(cfg.server.port).toBe(53000);
+    expect(cfg.server.port).toBe(9836);
     expect(cfg.model.gat_mode).toBe('off');
     expect(cfg.retrieval.rrf_k).toBe(60);
     expect(cfg.ingest.sources).toEqual(['claude-code']);
@@ -75,9 +75,9 @@ describe('配置加载（详设 §3.6）', () => {
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('回环');
   });
 
-  it('port 大于 port_scan_max 拒绝', () => {
-    const file = withToml('[server]\nport = 53030\nport_scan_max = 53020\n');
-    expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('port_scan_max');
+  it('废弃的 port_scan_max 仍可解析（旧配置兼容）', () => {
+    const file = withToml('[server]\nport = 12000\nport_scan_max = 53020\n');
+    expect(loadConfig({ file, home: HOME }).server.port).toBe(12000);
   });
 
   it('概率越界被 zod 拦下', () => {

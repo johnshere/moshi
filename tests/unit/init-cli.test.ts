@@ -118,8 +118,8 @@ describe('moshi init --json（P2-19A-16）', () => {
     };
     expect(payload.command).toBe('init');
     expect(payload.ok).toBe(true);
-    expect(payload.ui_url).toBe('http://127.0.0.1:53000/ui/graph');
-    expect(payload.mcp_url).toBe('http://127.0.0.1:53000/mcp');
+    expect(payload.ui_url).toBe('http://127.0.0.1:9836/ui/graph');
+    expect(payload.mcp_url).toBe('http://127.0.0.1:9836/mcp');
     expect(payload.daemon.state).toBe('skipped');
     expect(payload.opened).toBe(false);
     expect(payload.schema_version).toBeGreaterThan(0);
@@ -135,8 +135,8 @@ describe('moshi init 文案（P2-19A-16）', () => {
     expect(run.code).toBe(0);
     expect(run.out).toContain('数据库就绪');
     expect(run.out).toContain('mcpServers');
-    expect(run.out).toContain('http://127.0.0.1:53000/mcp');
-    expect(run.out).toContain('UI: http://127.0.0.1:53000/ui/graph');
+    expect(run.out).toContain('http://127.0.0.1:9836/mcp');
+    expect(run.out).toContain('UI: http://127.0.0.1:9836/ui/graph');
     expect(run.out).toContain('--no-daemon');
   });
 

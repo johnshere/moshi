@@ -2,9 +2,9 @@
  * 启动序列与实例生命周期（详设 §3.4 / 概设 §11.5）。
  *
  * 顺序是有讲究的：
- *   读配置 → 建目录 → 抢锁（独占创建）→ 探测端口 → 绑定 → 回写锁 → 起服务
- * 抢锁必须在绑端口之前：两个进程同时从 53000 起探，各自都能绑到不同端口，
- * 只靠端口无法互斥。
+ *   读配置 → 建目录 → 抢锁（独占创建）→ 绑定固定端口 → 回写锁 → 起服务
+ * 抢锁必须在绑端口之前：只靠端口无法互斥两个进程。
+ * 端口不再顺延：MCP 地址写死在 Agent 侧，静默换端口会让外部客户端全部失联。
  */
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
@@ -60,7 +60,7 @@ export async function findFreePort(host: string, start: number, max: number): Pr
   }
   throw new MoshiError(
     'E_CONFIG',
-    `端口 ${start}–${max} 全部被占用，无法启动（改 server.port / port_scan_max）`,
+    `端口 ${start}–${max} 全部被占用，无法启动（改 server.port）`,
   );
 }
 
@@ -179,15 +179,29 @@ export async function boot(cfg: Config, opts: BootOptions = {}): Promise<Instanc
   }
 
   const factory = opts.serverFactory ?? (await makeFactory(opts.handlerFactory, { db, cfg, token }));
-  let port = 0;
+  const port = cfg.server.port;
   let server: http.Server | null = null;
   try {
-    port = await findFreePort(cfg.server.host, cfg.server.port, cfg.server.port_scan_max);
     server = factory(port);
     await listen(server, cfg.server.host, port);
   } catch (err) {
     closeDb(db);
     removeLock(lockFile, [paths.root]);
+    const errno = (err as NodeJS.ErrnoException).code;
+    if (errno === 'EADDRINUSE') {
+      throw new MoshiError(
+        'E_CONFIG',
+        `端口 ${cfg.server.port} 已被占用。请关闭占用进程，或在设置页修改端口后重启。`,
+        { reason: 'port_in_use', port: cfg.server.port },
+      );
+    }
+    if (errno === 'EACCES') {
+      throw new MoshiError(
+        'E_CONFIG',
+        `端口 ${cfg.server.port} 无权绑定。请改用 1024–49151 之间的端口。`,
+        { reason: 'port_permission', port: cfg.server.port },
+      );
+    }
     throw err instanceof MoshiError
       ? err
       : new MoshiError('E_CONFIG', `启动失败：${(err as Error).message}`, {

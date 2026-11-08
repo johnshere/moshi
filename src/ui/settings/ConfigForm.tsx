@@ -34,7 +34,9 @@ interface ConfigView {
 type LeafValue = string | number | boolean;
 type FlatConfig = Record<string, LeafValue>;
 
-const STARTUP_PATHS = new Set(['http.port', 'storage.data_dir', 'storage.archive_dir']);
+const STARTUP_PATHS = new Set(['storage.data_dir', 'storage.archive_dir']);
+const PORT_MIN = 1024;
+const PORT_MAX = 49151;
 
 const FIELD_GROUPS: readonly {
   title: string;
@@ -68,8 +70,8 @@ const FIELD_GROUPS: readonly {
     ],
   },
   {
-    title: '启动期配置（只读）',
-    hint: '端口 / 数据目录 / 归档目录在 daemon 启动时读取；修改需改配置文件后重启。',
+    title: '启动期配置',
+    hint: '端口可修改，保存后需重启 daemon；数据目录 / 归档目录仍只读。',
     fields: [
       { path: 'http.port', label: 'HTTP 端口', kind: 'number' },
       { path: 'storage.data_dir', label: '数据目录', kind: 'text' },
@@ -224,6 +226,16 @@ export function ConfigForm(): ReactElement {
 
   const save = async (): Promise<void> => {
     if (!dirty || saving) return;
+    const port = draft['http.port'];
+    if (
+      typeof port !== 'number' ||
+      !Number.isInteger(port) ||
+      port < PORT_MIN ||
+      port > PORT_MAX
+    ) {
+      setError(`端口必须是 ${PORT_MIN}–${PORT_MAX} 之间的整数`);
+      return;
+    }
     setSaving(true);
     setError(null);
     setToast(null);
@@ -304,6 +316,8 @@ export function ConfigForm(): ReactElement {
                     style={{ ...inputStyle, ...(readOnly ? { color: 'var(--color-text-muted)', cursor: 'not-allowed' } : {}) }}
                     value={String(value ?? '')}
                     readOnly={readOnly}
+                    min={field.path === 'http.port' ? PORT_MIN : undefined}
+                    max={field.path === 'http.port' ? PORT_MAX : undefined}
                     step={field.path.endsWith('confidence') ? 0.05 : 1}
                     onChange={(e) => {
                       const raw = e.target.value;
@@ -316,6 +330,15 @@ export function ConfigForm(): ReactElement {
           })}
         </div>
       ))}
+
+      {changed['http.port'] !== undefined && (
+        <div
+          data-testid="config-port-hint"
+          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px', lineHeight: 1.6 }}
+        >
+          重启后 MCP 地址变为 <code>http://127.0.0.1:{String(draft['http.port'])}/mcp</code>；需在 Claude Code / Magpie 等宿主同步更新，旧地址会立即失效。
+        </div>
+      )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button

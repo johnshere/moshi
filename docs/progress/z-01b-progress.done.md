@@ -43,3 +43,10 @@
 - 这是提醒，不强制；MCP 协议不约束模型响应。
 - 工具 description 保持非祈使（`lint:desc`）。
 - 适配器事后解析与 feedback 落库不在本任务。
+
+## 后续（2026-11-08）：固定端口 9836 + 设置页端口可编辑
+
+- 默认端口 `53000` → `9836`；daemon 不再顺延端口，被占用时报 `E_CONFIG` / `port_in_use`，由用户在设置页改端口后重启。
+- 设置页 `http.port` 从只读改为可编辑（1024–49151 校验），保存后提示重启与新的 MCP 地址。
+- 旧 `port_scan_max` 键保留解析但不再使用（旧配置兼容）。
+- 验收：`pnpm verify` 130 files / 1577 passed；`pnpm build` 通过；真实 daemon 在 9836 监听；`claude mcp list` ✔ Connected；Claude 实际调用 `memory_query("node version")` 返回 `[M1] node 版本 = 22.22.2`，query_log 新增 `q_01m6wj6bezgpm6qx9ajfar5z60`；无头浏览器渲染 `/ui/settings`，端口输入框 `value=9836`、`min=1024`、`max=49151` 且非只读。

@@ -37,8 +37,8 @@ Block format:
 \`\`\`moshi
 {"v":1,
  "facts":[
-   {"subject":"daemon","predicate":"port","value":"53000",
-    "content":"daemon listens on port 53000","confidence":0.95,"source":"tool_obs"}
+   {"subject":"daemon","predicate":"port","value":"9836",
+    "content":"daemon listens on port 9836","confidence":0.95,"source":"tool_obs"}
  ],
  "edges":[
    {"from":"k:daemon.port","to":"k:proxy.noproxy","etype":"depends_on",
