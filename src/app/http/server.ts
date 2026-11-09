@@ -43,6 +43,11 @@ import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
 import { buildStatusExtras } from '../../core/ops/status.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
+import { HookTraceStore } from '../../core/hook/trace.js';
+import { hookRoutes, createHookConnection, type HookConnection } from './routes/hook.js';
+import { HOOK_PAGE_PATH, renderHookPage } from './hookPage.js';
+import type { HookDeps } from '../hook/service.js';
+import { dataPaths, defaultConfigPath } from '../config.js';
 
 export interface HttpDeps {
   db: Db;
@@ -71,14 +76,37 @@ export interface HttpDeps {
     currentVersion?: string;
     now?: () => Date;
   };
+  /** 钩子注入台账（Z-01C）：与证据链 traceStore 分开，测试可注入 */
+  hookTrace?: HookTraceStore;
+  /** F8 连接态（内存）；测试可注入以复现"断开后打开界面" */
+  hookConnection?: HookConnection;
+  /** 配置文件路径（`/hook/api/config` 写这里）；默认按 `defaultConfigPath()` */
+  configFile?: string;
+  /**
+   * 自建 `.moshi/project.yaml` 的额外可写白名单（数据目录之外）。
+   *
+   * 生产上由 `moshi hook` 的启动方按需传入；测试要往临时目录落标志也用它。
+   * 不传 = 只允许数据目录内，写不进去时身份会如实降级，而不是 500。
+   */
+  markerRoots?: string[];
+  /** 钩子脚本路径（界面展示给用户） */
+  hookEntry?: string;
+  /** 钩子召回用的编码器（测试注入假实现；不传 = 只有 BM25/PPR 通道） */
+  encode?: (text: string) => Promise<Float32Array | null>;
+  /** 钩子召回的模型打分（同上） */
+  score?: McpDeps['score'];
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
   const app = Fastify({ logger: false });
 
   // ── 鉴权：/api/* 全部要 token ──
+  // `/hook/api/*` 与 `/ui/hook` 同口径校验：hook.js 手里必须有 token，否则任意网页
+  // 都能把任意对话文本灌进台账、把记忆读出来。
   app.addHook('onRequest', async (req, reply) => {
-    if (!req.url.startsWith('/api/')) return;
+    const url = req.url;
+    const guarded = url.startsWith('/api/') || url.startsWith('/hook/api/') || url.startsWith('/ui/hook');
+    if (!guarded) return;
     const given = req.headers['x-moshi-token'];
     if (given !== deps.token) {
       return reply.code(401).send({ error: 'E_UNAUTHORIZED', message: 'Missing or invalid token' });
@@ -137,6 +165,54 @@ export async function buildHttpApp(deps: HttpDeps) {
   // 证据链回放（P2-24）：进程内 ring buffer 一份，MCP 采集 / HTTP 只读（D-118：无 SSE）
   const traceStore = deps.traceStore ?? new TraceStore();
   await app.register(traceRoutes, { prefix: '/api/trace', store: traceStore });
+
+  // ── 钩子服务面（Z-01C）：`/hook/api/*` 与 `/ui/hook` ──
+  // 钩子台账是**另一个** ring buffer（只记计数与枚举，不记文本），与证据链那份分开。
+  const hookTrace = deps.hookTrace ?? new HookTraceStore();
+  const connection = deps.hookConnection ?? createHookConnection(deps.cfg.hook.magpie_enabled);
+  const hookDeps: HookDeps = {
+    db: deps.db,
+    cfg: deps.cfg,
+    hookDir: dataPaths(deps.cfg).hook,
+    dataRoot: dataPaths(deps.cfg).root,
+    // 自建标志要落在被测工程自己的目录里（那是数据目录之外的路径，必须显式放行）
+    ...(deps.markerRoots === undefined ? {} : { markerRoots: deps.markerRoots }),
+    ...(deps.encode === undefined ? {} : { encode: deps.encode }),
+    ...(deps.score === undefined ? {} : { score: deps.score }),
+    ...(deps.breaker === undefined ? {} : { breaker: deps.breaker }),
+  };
+  await app.register(hookRoutes, {
+    prefix: '/hook/api',
+    deps: hookDeps,
+    trace: hookTrace,
+    configFile: deps.configFile ?? defaultConfigPath(),
+    token: deps.token,
+    connection,
+  });
+  // `?from=magpie` 是"连接"的唯一自动入口；断开态下**不自动连回去**（F8）
+  app.get(HOOK_PAGE_PATH, async (req, reply) => {
+    const query = (req.query ?? {}) as Record<string, string>;
+    const fromMagpie = query['from'] === 'magpie';
+    // F8：从 magpie.cmd 拉起 = 视为连接。这是"连接"的唯一自动入口。
+    if (fromMagpie) {
+      connection.markConnected();
+      deps.cfg.hook.magpie_enabled = true;
+    }
+    const needsConnect =
+      !connection.connected && (connection.explicitlyDisconnected || !deps.cfg.hook.magpie_enabled);
+    return reply
+      .type('text/html; charset=utf-8')
+      .header('cache-control', 'no-cache')
+      .send(
+        renderHookPage({
+          token: deps.token,
+          fromMagpie,
+          needsConnect,
+          port: deps.cfg.server.port,
+          hookEntry: deps.hookEntry ?? '(未打包)',
+        }),
+      );
+  });
 
   // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──
   app.get('/api/status', async (_req, reply) => {

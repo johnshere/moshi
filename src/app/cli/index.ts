@@ -13,6 +13,7 @@ import { dbCommand } from './commands/db.js';
 import { schemaCommand } from './commands/schema.js';
 import { samplesCommand } from './commands/samples.js';
 import { doctorCommand } from './commands/doctor.js';
+import { hookCommand } from './commands/hook.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
@@ -29,6 +30,7 @@ export const COMMANDS: readonly Command[] = [
   schemaCommand,
   samplesCommand,
   doctorCommand,
+  hookCommand,
 ];
 
 export function usage(): string {

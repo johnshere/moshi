@@ -1,0 +1,25 @@
+{
+  "name": "magpie-moshi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "moshi 记忆台账 × Magpie 网关钩子（Z-01C）：请求前注入既有事实，响应后投递信号",
+  "license": "MIT",
+  "main": "index.cjs",
+  "files": [
+    "index.cjs",
+    "hook.cjs",
+    "identity.cjs",
+    "README.md",
+    "magpie.json"
+  ],
+  "magpie": {
+    "hooks": "./hook.cjs",
+    "id": "moshi-ledger",
+    "kind": "middleware",
+    "label": "moshi 记忆台账",
+    "description": "在每轮对话前注入本工程沉淀的既有事实，并把回复投递为记忆信号。"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

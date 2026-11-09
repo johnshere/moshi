@@ -11,8 +11,8 @@
 | --- | --- | --- | --- |
 | 1 | 设计文档落盘 | 完成 | 见 `docs/设计-Hook台账节点与Magpie适配器.md` |
 | 2 | 台账加节点 Z-01C | 完成 | §1 / §1.1 / §3 / §4 卡片 / §9.2 / 决策 / 日志 |
-| 3 | 首次 commit + push（文档 + 台账） | 进行中 | |
-| 4 | 实现 Magpie 侧 | 待开始 | domain/identity → core/hook → http routes → cli hook → ui /hook/ → packages/magpie-moshi |
+| 3 | 首次 commit + push（文档 + 台账） | commit 完成 / push 失败 | `0ecdaa9`；github.com:443 不可达，按用户预案继续 |
+| 4 | 实现 Magpie 侧 | 进行中 | domain/identity → core/hook → http routes → cli hook → ui /hook/ → packages/magpie-moshi |
 | 5 | 实现完 commit + push（不测） | 待开始 | |
 | 6 | 本机测试 | 待开始 | 结果写 `docs/测试-Hook台账节点-2026-11-10.md` |
 | 7 | 有网则再 commit + push | 待开始 | |

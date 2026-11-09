@@ -315,6 +315,37 @@ const LayoutSchema = z
   })
   .strict();
 
+/**
+ * Hook 台账节点（Z-01C / 设计 §10）。
+ *
+ * 三个开关逐字对齐用户 F7 的要求：功能总开关 / 用户对话注入（注入已有事实）/
+ * 输出记忆（把模型回复写成信号）。`magpie_enabled` 不是第四个功能开关，而是
+ * "是否已连接 Magpie"的**连接态**（F8：用户在界面里断开后，再点 magpie.cmd
+ * 打开也只提示「连接 Magpie 才能使用」，不会自动置回 true）。
+ *
+ * `recall_timeout_ms` 的默认 600 是算出来的：Magpie 单钩子默认预算 1000ms，
+ * 留 400ms 给 hook.js 自己的序列化与改写（设计 §4.1）。
+ */
+const HookSchema = z
+  .object({
+    /** 功能总开关；false = 所有钩子放行原请求，不落库、不注入 */
+    enabled: z.boolean().default(true),
+    /** 用户对话注入：每轮用户消息前插入既有事实 */
+    inject_existing: z.boolean().default(true),
+    /** 输出记忆：把模型回复原文写成信号 */
+    capture_reply: z.boolean().default(false),
+    /** 是否已连接 Magpie（由 magpie.cmd / 页面「连接」按钮写） */
+    magpie_enabled: z.boolean().default(false),
+    /** 单次召回预算（毫秒，≤ 1000 = Magpie 单钩子默认超时） */
+    recall_timeout_ms: z.number().int().min(100).max(1000).default(600),
+    top_k: z.number().int().min(1).max(20).default(5),
+    /** 注入文本上限（UTF-8 字节） */
+    max_inject_bytes: z.number().int().min(256).max(16000).default(4000),
+    /** 输出记忆是否包含工具输出正文（默认关：工具输出体积大） */
+    capture_tool_output: z.boolean().default(false),
+  })
+  .strict();
+
 export const ConfigSchema = z
   .object({
     server: ServerSchema.default({}),
@@ -336,6 +367,7 @@ export const ConfigSchema = z
     ui: UiSchema.default({}),
     log: LogSchema.default({}),
     mcp: McpSchema.default({}),
+    hook: HookSchema.default({}),
     layout: LayoutSchema.default({}),
     update: UpdateSchema.default({}),
   })
@@ -526,6 +558,8 @@ export function dataPaths(cfg: Config): {
   backups: string;
   /** golden set 所在目录（seed 写 `<goldenDir>/golden.v1.jsonl`） */
   goldenDir: string;
+  /** 钩子入口的本地状态与回退缓存（Z-01C；设计 §3.6、§4） */
+  hook: string;
 } {
   const root = cfg.storage.data_dir;
   return {
@@ -543,6 +577,7 @@ export function dataPaths(cfg: Config): {
     // P3-A8：golden 跟着 eval.golden_set 走；空串（理论上的未配置形态）退回 data_dir
     goldenDir:
       cfg.eval.golden_set === '' ? path.join(root, 'golden') : path.dirname(cfg.eval.golden_set),
+    hook: path.join(root, 'hook'),
   };
 }
 
