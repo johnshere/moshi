@@ -2,7 +2,7 @@
 title: Hook 台账节点与 Magpie 适配器 · 方案设计
 project: moshi
 doc_type: 设计（方案层，不复制详设字段表）
-status: 设计定稿 · 待实现（Z-01C 方向 1）
+status: 设计定稿 · 待实现（Z-01C 方向 1；§16 入驻与界面 IA 为设计稿，落地 Z-01C-g/h/i）
 date: 2026-11-10
 upstream: docs/概设.md §3.1 采集线 · docs/详设.md §5.2 适配器 · docs/任务台账/任务详述.md Z-01A
 tags: [hook, magpie, injection, identity, design]
@@ -22,6 +22,7 @@ tags: [hook, magpie, injection, identity, design]
 4. **身份 = 会话级 `moshi_id` + 项目级 `project_id`，都取 `sha256` 前 32 位十六进制**；不放盐、不做设备哈希、不回传任何明文 ID。哈希的输入在白名单内，`identity_source` 记录可信度（`vcs` / `local` / `unknown` 三档）。
 5. **注入的硬边界**：Magpie 单钩子预算默认 1000ms、总预算 `min(10000, max(2000, Σ))`，且改写后 `tools/model/stream` 等字段必须与原请求一致否则整次结果作废。因此注入只能在**已经存在 `system` 消息**里追加、其余键一律不碰，超预算直接放弃注入并 `report('unavailable')`。
 6. **开关必须能从 magpie.cmd 点进图形界面**（用户新增要求 F7）：`GET /hook/` + `/hook/api/*` 是**无 token 的同源页面**，复用 `x-moshi-token` 页面下发机制与 CORS 白名单，**不放行任何全局免鉴权路由**。
+7. **入驻与界面 IA 是另一件事，单列一章（§16）**：首启弹窗（探测 → 勾选 → 二次确认 → 安装 → 跳接入页）、设置从一个大融合页拆成**五个二级**（接入/配置/维护/隐私/诊断）、左侧菜单**树展开**、Hook 页从服务端内联 HTML 迁成 React 组件并**一组件挂两路由**（`/ui/hook` 独立整页 + `/ui/settings/access` 设置内嵌）。本轮只出设计，落地拆 **U-IA → ONBOARD → INSTALL** 三个节点。
 
 ---
 
@@ -40,6 +41,8 @@ tags: [hook, magpie, injection, identity, design]
 | R7 | 台账加节点；文档先行、commit push；实现后再 commit push；测试结果单独成文 | m00153 |
 | F7 | **图形界面开关**：从 magpie.cmd 能打开 moshi 的图形界面，总开关 + 两个时机开关 | m00153 追加 |
 | F8 | **Magpie 打开 moshi 界面时视为连接 Magpie**；用户在设置里"断开连接"后再打开则提示"连接 Magpie 才能使用" | m00153 追加 |
+| F9 | **首启入驻弹窗**：探测本机 Agent 宿主 → 勾选 → 二次确认 → 立刻安装 → 跳接入页显示结果；可关，关掉即算已触发 | m01470–m01482 |
+| F10 | **界面 IA 重构**：设置拆五个二级；左侧菜单树展开；Hook 页独立整页 + 设置内嵌（同一 React 组件） | m01485 / m01506 |
 
 ### 1.2 本轮范围（明确不做）
 
@@ -48,6 +51,7 @@ tags: [hook, magpie, injection, identity, design]
 - ❌ 不做后台 LM 抽取 worker（本轮只"投递信号"入 episode + annotation）。
 - ❌ 不做 PreToolUse 拦截与"回复生成中"的实时注入（Magpie 只有请求前/响应后两个时机）。
 - ❌ 不改 `episode` 表结构（不新增迁移；哈希与标志位落 `raw_path` 的 URI，见 §6.4）。
+- ❌ **§16 的入驻引导与界面 IA 本轮只出设计**，不落代码——落地是 Z-01C-g/h/i 三个节点（§16.8）。
 
 ---
 
@@ -525,10 +529,12 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
 `magpie.cmd` 启动后打开浏览器：
 
 ```
-http://127.0.0.1:9836/hook/?from=magpie
+http://127.0.0.1:9836/ui/hook?from=magpie
 ```
 
-**为什么不能直接开 `/ui/graph`**：`/ui` 首屏会把 daemon token 写进 HTML（`src/app/http/server.ts` 的 `/ui` 路由），token 是**全库读写凭据**，不能因为"从 Magpie 点进来"就下发。所以 `/hook/` 是**独立最小页面**，只访问白名单内的 `/hook/api/*`（§8.1），token 同样写在首屏 HTML 里，但**只被这个页面使用**。
+**为什么不能直接开 `/ui/graph`**：`/ui` 首屏会把 daemon token 写进 HTML（`src/app/http/server.ts` 的 `/ui` 路由），token 是**全库读写凭据**，不能因为"从 Magpie 点进来"就下发。所以 `/ui/hook` 是**独立最小页面**，只访问白名单内的 `/hook/api/*`（§8.1），token 同样写在首屏 HTML 里，但**只被这个页面使用**。
+
+> **地址不变承诺**（§16.5.5）：U-IA 把这一页从服务端内联 HTML 迁成 React 组件后，`/ui/hook?from=magpie` 的路径与"视为连接"语义**逐字不变**——它已被 `magpie.cmd` 写进用户机器（`src/app/cli/launch.ts:63`）。
 
 ### 9.2 两态（F8）
 
@@ -693,3 +699,181 @@ capture_tool_output = false    # 输出记忆是否包含工具输出正文（�
 - **Z-01C-d**：`moshi_id` 做成 `episode` 可查询列（需迁移）。
 - **Z-01C-e**：注入台账持久化。
 - **Z-01C-f**：设备指纹与用户 ID（等 D-174 的口子）。
+- **Z-01C-g（U-IA）**：界面信息架构重构——路由树化、设置拆五个二级、Hook 页从内联 HTML 迁成 React 组件（§16.5）。
+- **Z-01C-h（ONBOARD）**：首启入驻引导——三路探测、`onboarding.json` 落盘、首屏弹窗、二次确认、跳转接入页（§16.3 / §16.4）。
+- **Z-01C-i（INSTALL）**：Magpie 插件安装器——写盘例外通道、卸载回滚、两类手动安装文案（§16.6）。
+
+---
+
+## 16 客户端入驻与界面信息架构（F9 / F10）
+
+> 本章是**设计**，不是本轮实现。落地拆三个后续节点（§16.8），顺序 **U-IA → ONBOARD → INSTALL**：弹窗和跳转都指向新的接入页，页面没建好没地方跳。
+
+### 16.1 需求（用户 11-10 追加）
+
+| # | 需求 | 来源 |
+| --- | --- | --- |
+| R8 | 客户第一次装完软件、打开界面时弹窗：检测到哪些 Agent、要装哪些 | m01470 |
+| R9 | 探测要全：**目录 + 进程 + 端口**三种手段都试，不靠单一信号 | m01482 |
+| R10 | 勾选 → **二次确认**（列出将写入哪些文件）→ 立刻安装 → 跳到接入页显示结果，**失败也跳** | m01482 |
+| R11 | 接入页**实时显示** Hook 与 MCP 的安装情况；每个客户端条目下有「查看手动安装」 | m01482 |
+| R12 | 手动安装文案**分两类**：各客户端插件版 / 各客户端 MCP 版；接入页也相应分两大类 | m01485 |
+| R13 | 设置页从一个大融合页拆成子菜单 | m01485 |
+| F9 | 首启入住弹窗**可关**，关掉即算已触发、不再自动弹；触发标记落 `~/.moshi/` | m01482 |
+| F10 | Hook 页既能**独立打开**，又是**设置的下级页面**（内嵌，非外链）；左侧菜单可直接进；**菜单层级做成左侧菜单树展开** | m01485 / m01506 |
+| R14 | 本轮只真装 **Magpie**；MCP 类只显示不处理 | m01485 |
+
+### 16.2 现状：三处挡住这件事的结构
+
+| # | 现状 | 位置 | 挡什么 |
+| --- | --- | --- | --- |
+| S1 | 路由是**扁平 5 页**：`PageKey` 只有 graph/memories/inbox/archive/settings，`pageFromPath` 只认 `/ui/<单段>`，多段路径回落默认页 | `src/ui/shell/pure.ts:12`、`:22-28`、`:57-64` | 设置的下级页面**现在不存在**，要先把路由树化 |
+| S2 | Hook 页**不在 React 应用里**：服务端拼的 309 行内联 HTML，单独挂 `GET /ui/hook`；SPA fallback 只覆盖五个一级前缀 | `src/app/http/hookPage.ts:17`、`src/app/http/server.ts:193`、`src/app/http/static.ts:111` | 「内嵌」不能靠 iframe（token、样式、两套实现三笔债）→ 必须迁成 React 页面 |
+| S3 | 设置页是**一个长滚动**：配置表单 / 更新 / 维护 / 隐私 / 自检 五块平铺 | `src/ui/settings/SettingsPage.tsx:26-32` | 要拆五个二级子页 |
+
+**外部契约（不能破）**：`magpie.cmd` 拉起界面用的是 `/ui/hook?from=magpie`（`src/app/cli/launch.ts:63`），这串可能已经写进用户机器上的 Magpie 配置。**该 URL 与其 query 语义必须保持不变**——用户已裁决 `/ui/hook` 保留成独立整页（m01506），不改成重定向。
+
+### 16.3 探测（三路，结果落盘）
+
+| 目标 | 目录 | 端口 | 进程 |
+| --- | --- | --- | --- |
+| Magpie | `%USERPROFILE%\.cache\magpie\`（实测存在 `plugin-host\host-*.js`） | canal HTTP **3425** | `magpie-windows-amd64.exe`、`magpie-bun.exe` |
+| Claude Code | `%USERPROFILE%\.claude\`（有 `settings.json` 即命中） | — | — |
+| DSH | `%USERPROFILE%\.dsh\profiles\` | — | — |
+
+- **目录**：`existsSync`（`src/app/hook/projectIdentity.ts` 已有同类用法）。
+- **端口**：复用 `isPortOpen(host, port, timeoutMs=300)`（`src/app/lock.ts`）。
+- **进程**：新增 `src/infra/proc/processes.ts` —— `listProcessNames(): Promise<string[]>`，Windows 用 `tasklist /FO CSV /NH` 一次 spawn、其它平台 `ps -eo comm=`；**失败返回 `[]` 不抛**（探测是机会性的）。不引 `ps-list` 之类依赖。
+- **判定**：任一路命中即"检测到"，并记录命中了哪几路（`by: ["port","process"]`）——这是诊断证据，也是"误报"的唯一可排查线索。
+- **预算**：三路 `Promise.allSettled` 并行，总超时 1200ms。**不得塞进 `/hook/api/status` 的同步路径**（那页 5s 轮询一次，会把每次 300ms+ 的探测叠加成持续卡顿）→ 单独端点 `POST /hook/api/detect`，结果缓存内存 + 落盘，UI 提供「重新探测」。
+
+**状态文件 `~/.moshi/onboarding.json`**（`schema: 'moshi-onboarding/1'`，落盘走 `safeWriteFile(..., [dataPaths(cfg).root])`）：
+
+```json
+{
+  "schema": "moshi-onboarding/1",
+  "first_open_at": "2026-11-10T07:00:00.000Z",
+  "dialog_shown": true,
+  "dialog_closed_at": "2026-11-10T07:00:40.000Z",
+  "detected": {
+    "magpie": { "hit": true,  "by": ["port", "process"], "port": 3425, "exe": "magpie-windows-amd64.exe" },
+    "claude": { "hit": false, "by": [] },
+    "dsh":    { "hit": false, "by": [] }
+  },
+  "installs": {
+    "magpie-hook": { "state": "installed", "at": "2026-11-10T07:02:00.000Z", "path": "<实测后回填>", "version": "0.1.0" },
+    "magpie-mcp":  { "state": "unsupported" }
+  }
+}
+```
+
+为什么必须落盘（三件事都靠它）：① 首启弹窗"只弹一次"要有持久标记；② 卸载/回滚只能按记录的 `path` + `version` 反推（安装器不猜路径）；③ 诊断页可读，客户报障时直接看这份文件。文件缺失或解析失败**一律当"首次"**处理，不白屏。
+
+### 16.4 首启弹窗（F9，入口 A）
+
+- **触发**：`dialog_shown !== true` **且** `/api/status` 首帧返回成功（daemon 没起来时弹了也装不了）→ 延迟 1200ms 弹。
+- **结构**：标题一句「检测到 1 个 Agent 宿主」+ 两组列表（**Hook 插件类 / MCP 类**）；已检测到的行**默认勾选**，未检测到的行置灰并在右侧给「手动安装」；MCP 行**禁用勾选**并带「即将支持」角标（§16.7）。
+- **可关**：× / Esc / 点遮罩 → `dialog_shown=true` 落盘，本次会话不再弹；设置页入口永远可再用（入口 B）。
+- **二次确认**：勾选后点「安装」再弹一层清单——**逐条列出目标文件绝对路径 + 动作**（`新增` / `修改`），「确认安装」才进写盘。这是唯一写盘授权点，不确认什么都别写。
+- **跳转**：装完（成功或失败）→ `location.assign('/ui/hook?from=onboard&result=ok|fail')`；接入页读 `result` 顶部显示一行结果条。**失败也跳**，因为失败原因要显示在接入页的客户端条目上。
+- **与五态 banner 的关系**：弹窗存在时 `FirstRun` 的五态 banner 不渲染（`src/ui/shell/Shell.tsx:173` 同一挂载点），避免两层提示叠屏；弹窗关闭后 banner 恢复本职。
+
+### 16.5 界面信息架构（F10）
+
+#### 16.5.1 路由树化
+
+- `PageKey` 仍是五个一级（不动 `src/ui/shell/pure.ts:12` 的语义）；新增 `SettingsSection = 'access' | 'config' | 'maintain' | 'privacy' | 'diagnose'`。
+- `RouteInfo` 加 `section: SettingsSection | null`（`src/ui/shell/pure.ts:35-45`）。
+- `pageFromPath`（`src/ui/shell/pure.ts:57-64`）改为分段解析：`/ui/settings/<section>` 命中枚举 → `{page:'settings', section}`；**未知 section 归到 `access`，不回落 graph**（`/ui/settings/zzz` 跳去图谱会让人以为点错了）。
+- 新增 `settingsHref(section, search)`，与现有 `pageHref` 同口径保留 `?token=`。
+- 服务端：`/ui/settings/*` 已在 SPA fallback 通配内（`src/app/http/static.ts:111`），**不用改**；`/ui/hook` 要加进同一份 fallback 列表（`src/app/http/static.ts:111`），并删掉 `app.get(HOOK_PAGE_PATH)` 的内联 HTML 分支（`src/app/http/server.ts:193-215`）。`?from=magpie` 的"视为连接"语义搬进 React 页，调 `POST /hook/api/config {action:'connect'}`。
+- 鉴权不变：`/ui/hook` 已在 token 守卫前缀里（`src/app/http/server.ts:108`）。
+
+#### 16.5.2 左侧菜单树（用户裁决 m01506）
+
+- 现结构：`<aside>` 172px 宽，`PAGES.map` 平铺五项 `<a>`，`data-testid={nav-${key}}`、`aria-current`、`data-active`（`src/ui/shell/Shell.tsx:174-197`）。
+- 改为**树**：五个一级节点，`settings` 有孩子（五个二级），可展开/收起；父项高亮当且仅当 `page === 'settings'`；子项高亮当且仅当 `section` 匹配。
+- 展开态由 URL 驱动（在设置下自动展开），**不额外落 localStorage**（与「URL 是唯一真相源」一致，`src/ui/shell/pure.ts:8`）。
+- 二级菜单项仍用 `<a href>`（可中键新开），当前项 `aria-current="page"`。
+
+#### 16.5.3 设置五个二级
+
+| 二级 | 路由 | 内容 | 迁移自 |
+| --- | --- | --- | --- |
+| **接入** | `/ui/settings/access` | Hook 插件类 / MCP 类两栏，客户端条目 + 状态 + 手动安装 | 新（原 Hook 页 + 首启弹窗落点） |
+| **配置** | `/ui/settings/config` | 白名单键表单 | `ConfigForm` |
+| **维护** | `/ui/settings/maintain` | 索引重建、备份恢复、**自动更新** | `MaintenancePanel` + `UpdatePanel` |
+| **隐私** | `/ui/settings/privacy` | 采集与导出、脱敏、prune | `PrivacyPanel` |
+| **诊断** | `/ui/settings/diagnose` | 只读自检 I1–I10、图质量、模型归档 | `DiagPanel` |
+
+`/ui/settings` 无 section → 归 `access`（二级顺序即菜单顺序，第一项为默认）。
+
+#### 16.5.4 接入页（Hook 页）结构
+
+```
+接入
+├── Hook 类插件
+│   ├── Magpie          [已装 0.1.0 / 未装 / 失败+原因]   [查看手动安装]
+│   ├── Claude Code     [暂不支持]                       [查看手动安装]
+│   └── DSH             [暂不支持]                       [查看手动安装]
+└── MCP 类（本轮只显示）
+    └── 检测到的客户端 + 状态；勾选框禁用 + 「即将支持」   [查看手动安装]
+```
+
+- 状态来源：`installs`（落盘记录）+ `POST /hook/api/detect`（探测缓存）+ `/hook/api/status`（连接态、四开关）。轮询沿用现有 5s，但**探测结果不参与轮询**（§16.3 预算）。
+- 「查看手动安装」→ 弹窗，内容按两类各一份：插件版给「包放哪 + 宿主配置段怎么写」，MCP 版给「MCP server 配置段怎么写」。文案直接来自设计文档 §7 / §11，不另起一套说法。
+- 保留现有能力，一个都不能少：F8 遮罩（断开态「连接 Magpie 才能使用」）、F7 四个开关、注入台账表格、连接/断开按钮（`src/app/http/hookPage.ts:111-251`，迁移时逐项对照，见 §16.9 AC-13）。
+
+#### 16.5.5 独立打开 vs 内嵌：一组件两路由
+
+同一个 React 组件 `AccessPage` 挂两处，**不是 iframe、不是两份代码**：
+
+| 入口 | 路由 | 外壳 |
+| --- | --- | --- |
+| 独立整页 | `/ui/hook`（＋`?from=magpie` / `?from=onboard&result=…`） | 无设置二级导航，自带标题与返回 |
+| 设置内嵌 | `/ui/settings/access` | 套设置页外壳（二级导航），同一内容区 |
+
+两者共享数据层与轮询，只有外壳不同。`/ui/hook` 旧地址行为（`from=magpie` 自动置连接态、断开后出遮罩）**逐字不变**。
+
+### 16.6 安装器（本轮只 Magpie，入口 A/B 同一底层）
+
+- **目标**：把 `packages/magpie-moshi` 落到 Magpie 的插件目录并启用。**目录位置本轮未证实**（已知 `%USERPROFILE%\.cache\magpie\plugin-host\` 是 host 自身缓存，不是用户插件位）→ 风险 K7：实现前先 `moshi hook doctor --detect` 实测，实测结果回填本节。
+- **写盘**：现在 `assertWritablePath(file, roots)`（`src/infra/fs/safeWrite.ts:35`）白名单外一律抛 `E_ACCESS`。安装器要写 Magpie 自己的目录，所以要一条**显式例外通道**：`WriteRoots` 仅在"用户在二次确认里勾了该客户端"时，把该客户端的**单一目标目录**追加进去；**不得**放宽成全局可写，也不得复用 `dataRootsOf()` 顺手扩大。
+- **卸载/回滚**：按 `onboarding.json` 的 `installs[].path` + `version` 反推删除，并恢复被改动的 Magpie 配置段（改动前的原文要一起存进 `installs[].backup`，否则卸载即破坏）。
+- **手动文案两类**（R12）：插件版 vs MCP 版，各客户端各一段，与 §7.3 / §11 一致，不另编。
+- **失败姿态**：装失败不抛到 UI 崩，落到 `installs[].state='failed'` + `reason`，接入页行上显示原因，手动文案仍可用。
+
+### 16.7 MCP 类：只显示不处理（R12）
+
+列出探测到的客户端与状态（`已检测到 / 未检测到`），**勾选框禁用**，角标「即将支持」。首启弹窗里同理：MCP 行出现但不可选。理由：能勾、确认后什么也没发生，比没有这行更伤信任。
+
+### 16.8 拆三个节点与顺序
+
+| 节点 | 内容 | 依赖 | 验收要点 |
+| --- | --- | --- | --- |
+| **U-IA** | 路由树化 + 设置拆五二级 + Hook 页迁 React + 左侧菜单树 | 无（先做） | 纯重构**不加功能**；`/ui/hook?from=magpie` 行为不变；F8/F7/台账/连接断开逐项对照 |
+| **ONBOARD** | 三路探测 + `onboarding.json` + 首屏弹窗 + 二次确认 + 跳转 | U-IA | 首次打开弹一次、关掉不再弹、跳转带 `result` |
+| **INSTALL** | Magpie 安装器 + 卸载 + 白名单例外通道 + 两类手动文案 | U-IA、ONBOARD | 二次确认清单与实际写入**逐条一致**；卸载后 Magpie 配置复原 |
+
+MCP 只读项挂在 ONBOARD（探测+显示），不产生写动作。
+
+### 16.9 验收口径（暂定，落地时细化）
+
+| # | 验收项 | 判定 |
+| --- | --- | --- |
+| AC-9 | 探测三路可单测 | 目录/端口/进程各桩一次，`by` 数组与命中一致；进程枚举失败返回 `[]` 不抛 |
+| AC-10 | 首启弹窗只弹一次 | 首帧后弹；关闭 → `onboarding.json.dialog_shown=true`；重开界面不弹 |
+| AC-11 | 二次确认与写入一致 | 确认清单里的路径集合 === 实际写过的路径集合（测试断言，非肉眼） |
+| AC-12 | 设置二级深链 | `/ui/settings/{access,config,maintain,privacy,diagnose}` 直达；未知 section → access |
+| AC-13 | Hook 页迁移不丢功能 | F8 遮罩、四个开关 toggle 生效、台账表格有数据、断开/连接可用；`/ui/hook?from=magpie` 仍置连接态 |
+
+### 16.10 风险
+
+| # | 风险 | 处置 |
+| --- | --- | --- |
+| K7 | Magpie 插件目录位置未证实 | 实现前 `doctor --detect` 实测；未证实前安装器只做 dry-run（列出将写路径），不真写 |
+| K8 | 首启弹窗打扰 | 可关、只弹一次、延时 1200ms；设置页入口常驻 |
+| K9 | 探测误报（端口被占 / 进程名近似） | 记录 `by` 命中证据；条目可手动忽略（`installs[].ignored`） |
+| K10 | MCP 显示但不可用 | 勾选框禁用 + 「即将支持」，不给"确认"错觉 |
+| K11 | Hook 页迁 React 时静默丢功能 | AC-13 逐项对照；迁移前后用同一份 `/hook/api/*` 断言 |
+| K12 | 首启弹窗在 daemon 未起时弹出却装不了 | 前置条件 `/api/status` 成功；否则 banner 报错，不弹 |
