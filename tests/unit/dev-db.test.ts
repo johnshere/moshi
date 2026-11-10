@@ -103,7 +103,9 @@ describe('devPaths / buildDevToml', () => {
     expect(toml).toContain(`id = "${SOURCE_SESSION_ID}"`);
     expect(toml).toContain(`adapter = "${SOURCE_SESSION_ADAPTER}"`);
     expect(toml).toContain(`root = "${paths.sessionsRoot.replace(/\\/g, '/')}"`);
-    expect(toml).not.toContain('~');
+    // 只禁 `~/` 形式的家目录简写。Windows 8.3 短名（如 C:/Users/ADMINI~1/…）
+    // 路径里天然带 `~1`，那不是简写；按裸 `~` 断言会让同一份测试在短名机器上误红。
+    expect(toml).not.toContain('~/');
     expect(toml).not.toContain(path.join(home, '.moshi').replace(/\\/g, '/'));
   });
 });

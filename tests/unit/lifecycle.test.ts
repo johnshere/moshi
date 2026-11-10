@@ -13,20 +13,25 @@ afterEach(async () => {
   for (const inst of opened.splice(0)) await inst.close();
 });
 
-function makeCfg(): { cfg: Config; dir: string } {
+async function makeCfg(): Promise<{ cfg: Config; dir: string }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'moshi-life-'));
   const file = path.join(dir, 'config.toml');
+  // 端口不能落在 Windows 动态端口段（49152–65535）：本机代理内核会拿它做
+  // 出站连接的本地端口，撞上时 bind 报 EACCES（m1 实测 53100 曾被 verge-mihomo 占用）。
+  // 这里在固定段内现取一个空闲端口，保证同一份测试在任何机器上都稳定。
+  const port = await findFreePort('127.0.0.1', 40100, 49100);
+  const scanMax = Math.min(port + 20, 49151);
   writeFileSync(
     file,
-    `[storage]\ndata_dir = "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\n[server]\nport = 53100\nport_scan_max = 53120\n`,
+    `[storage]\ndata_dir = "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\n[server]\nport = ${String(port)}\nport_scan_max = ${String(scanMax)}\n`,
     'utf8',
   );
   return { cfg: loadConfig({ file, home: dir }), dir };
 }
 
 describe('数据目录（详设 §3.4 第 2 步）', () => {
-  it('建出必需子目录，且不建 archive_dir', () => {
-    const { cfg } = makeCfg();
+  it('建出必需子目录，且不建 archive_dir', async () => {
+    const { cfg } = await makeCfg();
     const paths = ensureDataDirs(cfg);
     expect(existsSync(paths.root)).toBe(true);
     expect(existsSync(paths.logs)).toBe(true);
@@ -38,7 +43,7 @@ describe('数据目录（详设 §3.4 第 2 步）', () => {
 
 describe('启动即建库（详设 §3.4 第 4 步）', () => {
   it('首次启动建库并迁移到 v6', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const inst = await boot(cfg);
     opened.push(inst);
     expect(existsSync(inst.paths.db)).toBe(true);
@@ -72,10 +77,10 @@ describe('启动即建库（详设 §3.4 第 4 步）', () => {
 describe('端口探测（概设 §1.4）', () => {
   it('跳过被占用端口', async () => {
     const blocker = net.createServer();
-    const busy = await findFreePort('127.0.0.1', 53150, 53180);
+    const busy = await findFreePort('127.0.0.1', 41100, 41180);
     await new Promise<void>((r) => blocker.listen(busy, '127.0.0.1', () => r()));
     try {
-      const next = await findFreePort('127.0.0.1', busy, 53180);
+      const next = await findFreePort('127.0.0.1', busy, 41180);
       expect(next).toBeGreaterThan(busy);
     } finally {
       await new Promise<void>((r) => blocker.close(() => r()));
@@ -86,7 +91,7 @@ describe('端口探测（概设 §1.4）', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'moshi-life-'));
     const file = path.join(dir, 'config.toml');
     const blocker = net.createServer();
-    const busy = await findFreePort('127.0.0.1', 53300, 53320);
+    const busy = await findFreePort('127.0.0.1', 41300, 41320);
     await new Promise<void>((r) => blocker.listen(busy, '127.0.0.1', () => r()));
     writeFileSync(
       file,
@@ -106,7 +111,7 @@ describe('端口探测（概设 §1.4）', () => {
 
 describe('单实例锁（概设 §1.1 第 3 条）', () => {
   it('第二个实例拿到 AlreadyRunningError，带 pid 与 port', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const first = await boot(cfg);
     opened.push(first);
 
@@ -127,7 +132,7 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
   });
 
   it('关掉第一个之后能接管', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const first = await boot(cfg);
     const port = first.port;
     await first.close();
@@ -140,7 +145,7 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
   });
 
   it('陈旧锁：pid 不存在 → 直接接管', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const paths = ensureDataDirs(cfg);
     writeLock(paths.lock, {
       pid: 999_999,
@@ -157,10 +162,10 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
   });
 
   it('陈旧锁：pid 在但端口连不上 → 直接接管', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const paths = ensureDataDirs(cfg);
     const dead = net.createServer();
-    const deadPort = await findFreePort('127.0.0.1', 53200, 53220);
+    const deadPort = await findFreePort('127.0.0.1', 41200, 41220);
     await new Promise<void>((r) => dead.listen(deadPort, '127.0.0.1', () => r()));
     await new Promise<void>((r) => dead.close(() => r()));
 
@@ -179,7 +184,7 @@ describe('单实例锁（概设 §1.1 第 3 条）', () => {
   });
 
   it('坏锁文件（半个 JSON）也按陈旧处理', async () => {
-    const { cfg } = makeCfg();
+    const { cfg } = await makeCfg();
     const paths = ensureDataDirs(cfg);
     writeFileSync(paths.lock, '{"pid": 1, "po', 'utf8');
     const inst = await boot(cfg);
