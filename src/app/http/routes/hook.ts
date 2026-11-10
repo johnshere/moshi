@@ -18,6 +18,7 @@
  * 的台账都留不下来。
  */
 import type { FastifyInstance } from 'fastify';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import {
   HOOK_HOSTS,
@@ -28,18 +29,23 @@ import {
   type HookCaps,
   type HookEnvelope,
   type HookHost,
+  type HookReportCode,
+  type HookTraceItem,
+  type TraceSink,
 } from '../../../core/hook/index.js';
+import { redactText } from '../../../core/write/redact.js';
 import type { HookTraceStore } from '../../../core/hook/trace.js';
 import type { Config } from '../../config.js';
 import { mergeConfigDocument, readConfigDocument, writeConfigDocument } from '../../config.js';
 import type { HookDeps } from '../../hook/service.js';
 import { resolveProjectIdentity } from '../../hook/projectIdentity.js';
-import { safeAppendFile } from '../../../infra/fs/safeWrite.js';
 import { recallForHook, signalForHook } from '../../hook/service.js';
 
 export interface HookRoutesOpts {
   deps: HookDeps;
   trace: HookTraceStore;
+  /** 台账落盘（`<data_dir>/hook/trace-YYYY-MM-DD.jsonl`，三档裁剪在 core 里做） */
+  sink: TraceSink;
   /** 配置文件路径（`/hook/api/config` 写这里） */
   configFile: string;
   token: string;
@@ -133,7 +139,7 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     const problem = badEnvelope(body);
     if (problem !== null) {
       // 参数不对也不能让入口崩：回一个"不注入"，把原因写进台账
-      trace.push({
+      const invalid: HookTraceItem = {
         ts: new Date().toISOString(),
         host: 'magpie',
         turn: 'user_prompt',
@@ -143,7 +149,9 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
         degraded: [problem],
         identity_source: 'unknown',
         latency_ms: 0,
-      });
+      };
+      trace.push(invalid);
+      opts.sink.append(invalid);
       return reply.send({
         schema: HOOK_SCHEMA,
         inject: false,
@@ -159,15 +167,22 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     const started = Date.now();
     const outcome = await recallForHook(deps, body as HookEnvelope);
     const latency = Date.now() - started;
-    trace.push({ ...outcome.trace, ts: new Date(started).toISOString(), latency_ms: latency });
-    // 服务端台账也落一份 JSONL：进程重启后界面还能看到最近发生过什么
-    await appendTraceLine(opts.deps.hookDir, {
-      ts: new Date(started).toISOString(),
-      ...outcome.trace,
-      latency_ms: latency,
-    });
+    // 回执号：入口存进请求级 state，response 时回带，把注入与落库对上（Z-01C-e）
+    const corrId = randomBytes(8).toString('hex');
+    const item: HookTraceItem = redactTrace(
+      {
+        ...outcome.trace,
+        ts: new Date(started).toISOString(),
+        latency_ms: latency,
+        corr_id: corrId,
+      },
+      cfg(),
+    );
+    // 内存 ring 与落盘各一份；落盘档位/轮转/清理在 TraceSink 里（off 档不写盘）
+    trace.push(item);
+    opts.sink.append(item);
     // 诊断回包多带一个服务端算定的身份：moshi hook recall 与页面要看这个
-    return reply.send({ ...outcome.injection, identity: outcome.identity });
+    return reply.send({ ...outcome.injection, identity: outcome.identity, corr_id: corrId });
   });
 
   // ── signal：落 episode（幂等） ──
@@ -177,7 +192,35 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     if (problem !== null) {
       return reply.code(400).send({ error: 'E_INPUT', message: problem });
     }
-    const result = signalForHook(deps, body as HookEnvelope);
+    const envelope = body as HookEnvelope;
+    const started = Date.now();
+    const result = signalForHook(deps, envelope);
+    const replyText = envelope.payload.reply;
+    const item: HookTraceItem = redactTrace(
+      {
+        ts: new Date(started).toISOString(),
+        host: envelope.host,
+        turn: envelope.turn,
+        status: signalStatus(result),
+        inject_bytes: 0,
+        evidence: 0,
+        degraded: result.reason === undefined ? [] : [result.reason],
+        identity_source: envelope.identity.identity_source,
+        latency_ms: Date.now() - started,
+        captured: result.captured,
+        duplicate: result.duplicate,
+        ...(envelope.corr === undefined ? {} : { corr_id: envelope.corr }),
+        ...(typeof replyText === 'string'
+          ? {
+              reply_sha256: sha16(replyText),
+              ...(cfg().debug.trace_level === 'full' ? { reply_text: replyText } : {}),
+            }
+          : {}),
+      },
+      cfg(),
+    );
+    trace.push(item);
+    opts.sink.append(item);
     return reply.send(result);
   });
 
@@ -278,9 +321,14 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     return reply.send(trace.snapshot(Number.isFinite(limit) ? limit : 20));
   });
 
-  app.post('/trace', async (_req, reply) => {
+  app.post('/trace', async (req, reply) => {
     trace.clear();
-    return reply.send({ schema: HOOK_SCHEMA, cleared: true });
+    // 默认只清内存；要连磁盘一起清必须显式带 disk（`?disk=1` 或 body {disk:true}）
+    const q = (req.query ?? {}) as Record<string, string>;
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const disk = q['disk'] === '1' || body['disk'] === true;
+    const removed = disk ? opts.sink.clearDisk() : 0;
+    return reply.send({ schema: HOOK_SCHEMA, cleared: true, disk_removed: removed });
   });
 }
 
@@ -295,16 +343,36 @@ function traceSize(trace: HookTraceStore): number {
 }
 
 /**
- * 服务端台账落盘：`<data_dir>/hook/trace.jsonl`，只追加、不轮转。
- *
- * 轮转留给 Z-01C-f（设计 §15 遗留）；这里刻意**只 append 不动其它文件**，
- * 出现任何写失败都吞掉——台账写不进去不能反过来影响注入。
+ * 台账落盘已迁到 `core/hook/traceSink.ts`（Z-01C-e：按日轮转 + 保留期清理，
+ * 写盘异步补写，不占 recall 的 800ms 预算）。这里只剩两个纯函数：
  */
-async function appendTraceLine(hookDir: string, item: Record<string, unknown>): Promise<void> {
-  try {
-    safeAppendFile(path.join(hookDir, 'trace.jsonl'), `${JSON.stringify(item)}\n`, [hookDir]);
-  } catch {
-    // 忽略：见注释
+
+/** 台账用的短哈希（前 16 hex） */
+function sha16(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
+}
+
+/** signal 结果 → 回执枚举（供界面统计"注入了但没落库"这类断点） */
+function signalStatus(result: { captured: boolean; reason?: string }): HookReportCode {
+  if (result.captured) return 'ready';
+  if (result.reason === 'disabled' || result.reason === 'capture_reply_disabled') return 'skipped';
+  return 'empty';
+}
+
+/** full 档的正文落盘前必过脱敏（summary/off 没有正文，原样返回） */
+function redactTrace(item: HookTraceItem, cfg: Config): HookTraceItem {
+  if (item.query_text === undefined && item.inject_text === undefined && item.reply_text === undefined) {
+    return item;
   }
+  const opts = { enabled: cfg.redact.enabled, privateIp: cfg.redact.private_ip };
+  return {
+    ...item,
+    ...(item.query_text === undefined ? {} : { query_text: redactText(item.query_text, opts).text }),
+    ...(item.inject_text === undefined ? {} : { inject_text: redactText(item.inject_text, opts).text }),
+    ...(item.reply_text === undefined ? {} : { reply_text: redactText(item.reply_text, opts).text }),
+    ...(item.evidence_text === undefined
+      ? {}
+      : { evidence_text: item.evidence_text.map((text) => redactText(text, opts).text) }),
+  };
 }
 

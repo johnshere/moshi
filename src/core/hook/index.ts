@@ -44,5 +44,7 @@ export {
 export type { RenderOptions, RenderedMail } from './mail.js';
 export { HookTraceStore, HOOK_TRACE_CAPACITY } from './trace.js';
 export type { HookTraceItem, HookTraceSnapshot } from './trace.js';
+export { TraceSink, TRACE_LEVELS, trimTrace, dateOf } from './traceSink.js';
+export type { TraceLevel, TraceSinkOptions } from './traceSink.js';
 export { hookRawPath, hookRawHash, captureSignal } from './capture.js';
 export type { SignalOptions, SignalOutcome } from './capture.js';

@@ -207,6 +207,21 @@ function recalledIdentity(ctx) {
   };
 }
 
+/** 注入回执号（Z-01C-e）：daemon 在 recall 回包里给，response 时原样带回，便于对账 */
+function rememberCorr(ctx, corr) {
+  try {
+    if (typeof corr !== 'string' || corr === '') return;
+    if (ctx && ctx.state && typeof ctx.state === 'object') ctx.state.moshiCorrId = corr;
+  } catch {
+    // 存不下就不带，signal 仍可正常落库，只是对不上 recall
+  }
+}
+
+function recalledCorr(ctx) {
+  const s = ctx && ctx.state && typeof ctx.state === 'object' ? ctx.state : {};
+  return str(s.moshiCorrId);
+}
+
 function baseUrl(ctx, lock) {
   const explicit = optionOf(ctx, 'daemonUrl') || process.env.MOSHI_DAEMON;
   if (explicit) return explicit;
@@ -245,7 +260,7 @@ async function post(ctx, path, payload, budgetMs) {
 }
 
 /** 信封：project_id 由 daemon 侧按 cwd 解析；moshi_id 也由 daemon 从会话标志重算 */
-function envelopeOf(turn, info, payload, budgetMs, phaseMs) {
+function envelopeOf(turn, info, payload, budgetMs, phaseMs, corr) {
   return {
     schema: SCHEMA,
     host: HOST,
@@ -263,6 +278,7 @@ function envelopeOf(turn, info, payload, budgetMs, phaseMs) {
     budget: { deadlineMs: budgetMs, phaseTimeoutMs: phaseMs },
     session: { id: info.sessionId, source: info.sessionSource || HOST },
     project: { cwd: info.cwd, identitySource: 'unknown' },
+    ...(typeof corr === 'string' && corr !== '' ? { corr: corr } : {}),
     payload: payload,
   };
 }
@@ -342,6 +358,7 @@ async function onRequest(body, ctx) {
     report(ctx, 'unavailable', 0);
     return undefined;
   }
+  rememberCorr(ctx, result.corr_id);
   if (!result.inject || typeof result.text !== 'string' || result.text === '') {
     report(ctx, Array.isArray(result.degraded) && result.degraded.length > 0 ? 'empty' : 'skipped', 0);
     return undefined;
@@ -387,7 +404,7 @@ function onResponse(reply, ctx) {
     report(ctx, 'skipped', 0);
     return undefined;
   }
-  const env = envelopeOf('response', info, { reply: text }, SIGNAL_BUDGET_MS, 1000);
+  const env = envelopeOf('response', info, { reply: text }, SIGNAL_BUDGET_MS, 1000, recalledCorr(ctx));
   void post(ctx, '/hook/api/signal', env, SIGNAL_BUDGET_MS).then((r) => {
     if (!r) report(ctx, 'unavailable', 0);
     else report(ctx, r.captured === true ? 'ready' : 'skipped', 0);

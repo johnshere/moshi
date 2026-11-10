@@ -12,6 +12,7 @@
  * 失败姿态（设计 §4.2 / Z-01A 验收）：**任何失败都降级为"不注入、原请求不变"**，
  * 绝不抛错到入口层。入口层拿到 `inject:false` 就原样放行。
  */
+import { createHash } from 'node:crypto';
 import type { Breaker } from '../../core/read/breaker.js';
 import type { EvidenceCache } from '../../core/read/cache.js';
 import { searchWithPipeline, type SearchOutcome } from '../../core/read/search.js';
@@ -67,6 +68,14 @@ function identityOf(envelope: HookEnvelope): HookEnvelope['identity'] {
   if (raw === null) return envelope.identity;
   const id = sessionMoshiId({ id: raw });
   return id === null ? envelope.identity : { ...envelope.identity, moshi_id: id };
+}
+
+/**
+ * 台账用的短哈希（前 16 hex）：summary 档靠它在不落正文的前提下定位
+ * "这一次注入/查询/回复是哪一段"。
+ */
+function sha16(text: string): string {
+  return createHash('sha256').update(text).digest('hex').slice(0, 16);
 }
 
 /** cwd 的取法：信封里没有就降级 unknown（**绝不拿 daemon 自己的 cwd 充数**） */
@@ -176,6 +185,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
   const scope = projectId === null || project.root === null ? 'global' : projectScopeOf(project.root);
 
   let outcome: SearchOutcome;
+  const searchStarted = now();
   try {
     outcome = await withTimeout(
       searchWithPipeline(
@@ -207,10 +217,13 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
     };
   }
 
+  const searchMs = now() - searchStarted;
+  const renderStarted = now();
   const mail = renderHookMail(outcome.pack.evidence, {
     projectId,
     maxBytes: deps.cfg.hook.max_inject_bytes,
   });
+  const renderMs = now() - renderStarted;
   if (mail.evidence.length === 0) {
     return {
       injection: emptyInjection(mergedIdentity, deadline - (now() - startedAt), ['no_evidence']),
@@ -237,6 +250,20 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
       inject_bytes: mail.bytes,
       evidence: mail.evidence.length,
       degraded: [...outcome.pack.degraded],
+      evidence_ids: mail.evidence.map((item) => item.m_id),
+      evidence_scores: mail.evidence.map((item) => item.confidence),
+      ...(mail.dropped === 0 ? {} : { drop_reasons: { inject_bytes: mail.dropped } }),
+      stage_ms: { search: searchMs, render: renderMs, total: now() - startedAt },
+      inject_sha256: sha16(mail.text),
+      query_sha256: sha16(query),
+      // 正文只有 full 档才带出来；落盘前的脱敏在 routes 层做（core 不碰写盘）
+      ...(deps.cfg.debug.trace_level === 'full'
+        ? {
+            query_text: query,
+            inject_text: mail.text,
+            evidence_text: mail.evidence.map((item) => item.content),
+          }
+        : {}),
     },
     project,
     identity: mergedIdentity,

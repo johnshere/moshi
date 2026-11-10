@@ -44,6 +44,7 @@ import { traceRoutes } from './routes/trace.js';
 import { buildStatusExtras } from '../../core/ops/status.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
 import { HookTraceStore } from '../../core/hook/trace.js';
+import { TraceSink } from '../../core/hook/traceSink.js';
 import { hookRoutes, createHookConnection, type HookConnection } from './routes/hook.js';
 import { onboardRoutes } from '../onboard/routes.js';
 import type { HookDeps } from '../hook/service.js';
@@ -78,6 +79,8 @@ export interface HttpDeps {
   };
   /** 钩子注入台账（Z-01C）：与证据链 traceStore 分开，测试可注入 */
   hookTrace?: HookTraceStore;
+  /** 钩子台账落盘（三档裁剪 + 按日轮转）；测试可注入，不传按 `debug` 段自建 */
+  hookTraceSink?: TraceSink;
   /** F8 连接态（内存）；测试可注入以复现"断开后打开界面" */
   hookConnection?: HookConnection;
   /** 配置文件路径（`/hook/api/config` 写这里）；默认按 `defaultConfigPath()` */
@@ -187,8 +190,19 @@ export async function buildHttpApp(deps: HttpDeps) {
   const encode = sidecar === undefined ? undefined : encodeViaSidecar(sidecar);
 
   // ── 钩子服务面（Z-01C）：`/hook/api/*` 与 `/ui/hook` ──
-  // 钩子台账是**另一个** ring buffer（只记计数与枚举，不记文本），与证据链那份分开。
+  // 钩子台账是**另一个** ring buffer（默认只记计数与枚举），与证据链那份分开；
+  // 落盘档位由 `debug.trace_level` 决定（off 不写盘，summary/full 见 traceSink）。
   const hookTrace = deps.hookTrace ?? new HookTraceStore();
+  const hookTraceSink =
+    deps.hookTraceSink ??
+    new TraceSink({
+      dir: dataPaths(deps.cfg).hook,
+      level: deps.cfg.debug.trace_level,
+      maxBytes: deps.cfg.debug.trace_max_bytes,
+      keepDays: deps.cfg.debug.trace_keep_days,
+    });
+  // 启动时清一次超期文件；跨日的清理在每次追加时顺带做（traceSink.cleanupOnce）
+  hookTraceSink.cleanup();
   const connection = deps.hookConnection ?? createHookConnection(deps.cfg.hook.magpie_enabled);
   const hookDeps: HookDeps = {
     db: deps.db,
@@ -205,6 +219,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     prefix: '/hook/api',
     deps: hookDeps,
     trace: hookTrace,
+    sink: hookTraceSink,
     configFile: deps.configFile ?? defaultConfigPath(),
     token: deps.token,
     connection,

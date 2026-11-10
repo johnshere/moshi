@@ -4,12 +4,13 @@
  * 走真的 Fastify 实例（`app.inject`），DB 是临时文件——不 mock 管线，因为
  * "开没开开关、降级成什么、注入文本长什么样"这几件事正是端到端才看得出来。
  */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildHttpApp } from '../../src/app/http/server.js';
 import { loadConfig } from '../../src/app/config.js';
+import { TraceSink } from '../../src/core/hook/traceSink.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { HOOK_SCHEMA, MAGPIE_CAPS, type HookEnvelope } from '../../src/core/hook/protocol.js';
@@ -299,5 +300,42 @@ describe('/hook/api/trace', () => {
     expect(items[0].turn).toBe('user_prompt');
     // 台账里不能出现用户原话
     expect(JSON.stringify(items)).not.toContain('范围模型是什么');
+  });
+
+  it('召回带回执号，signal 回带后进同一条台账（Z-01C-e）', async () => {
+    await makeApp();
+    const recalled = await call('POST', '/hook/api/recall', envelope());
+    const corr = recalled.json().corr_id as string;
+    expect(corr).toMatch(/^[0-9a-f]{16}$/);
+    await call(
+      'POST',
+      '/hook/api/signal',
+      envelope({ turn: 'response', payload: { reply: '我答完了' }, corr }),
+    );
+    const items = (await call('GET', '/hook/api/trace?limit=5')).json().items as Record<string, unknown>[];
+    const signalItem = items.find((item) => item['turn'] === 'response');
+    expect(signalItem).toBeDefined();
+    expect(signalItem?.['corr_id']).toBe(corr);
+    expect(String(signalItem?.['reply_sha256'])).toMatch(/^[0-9a-f]{16}$/);
+    expect(JSON.stringify(signalItem)).not.toContain('我答完了');
+  });
+
+  it('summary 档落盘但不含正文；清盘要显式带 disk', async () => {
+    const dir = tempDir();
+    const sink = new TraceSink({ dir, level: 'summary', maxBytes: 4096, keepDays: 7 });
+    await makeApp({ hookTraceSink: sink });
+    await call('POST', '/hook/api/recall', envelope());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const name = readdirSync(dir).find((entry) => entry.startsWith('trace-'));
+    expect(name).toBeDefined();
+    const raw = readFileSync(path.join(dir, name as string), 'utf8').trim();
+    const record = JSON.parse(raw) as Record<string, unknown>;
+    expect(record['corr_id']).toMatch(/^[0-9a-f]{16}$/);
+    expect(raw).not.toContain('范围模型是什么');
+    // 默认只清内存；显式 disk=1 才删文件
+    expect((await call('POST', '/hook/api/trace')).json().disk_removed).toBe(0);
+    expect(readdirSync(dir).some((entry) => entry.startsWith('trace-'))).toBe(true);
+    expect((await call('POST', '/hook/api/trace?disk=1')).json().disk_removed).toBe(1);
+    expect(readdirSync(dir).some((entry) => entry.startsWith('trace-'))).toBe(false);
   });
 });

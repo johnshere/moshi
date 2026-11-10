@@ -148,3 +148,14 @@ layout:
   jitter_radius: 5           # 新事实相对质心的初始偏移半径（种子 = hash(fact_id)）
   extent: 100                # 归一化范围，100 即 [-100,100]³
   displacement_threshold: 15 # 增量平均位移超过它 → 转全量重算
+
+# 诊断追踪（Z-01C-e / 用户 m01321：不声明环境，只在这开、默认关）。
+# off     = 与历史一致：内存台账只记计数与枚举，不落盘；
+# summary = 落 <数据目录>/hook/trace-YYYY-MM-DD.jsonl，多带证据 id/分数、分阶段耗时与
+#           query/inject/reply 的 sha256 前 16 hex（仍不落正文）；
+# full    = 再落 query/inject/evidence/reply 正文，落盘前必过 redact 段。
+debug:
+  trace_level: "off"         # off | summary | full
+  trace_max_bytes: 16777216  # 单文件上限，超过按 trace-<日期>.<n>.jsonl 切下一个
+  trace_keep_days: 14        # 按文件名日期清理超过天数的文件
+

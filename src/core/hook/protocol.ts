@@ -108,6 +108,12 @@ export interface HookEnvelope {
   budget: HookBudget;
   session: { id: string | null; source: string };
   project: { cwd: string | null; identitySource: IdentitySource };
+  /**
+   * 注入回执号（Z-01C-e）：recall 时 daemon 生成、入口存进请求级 state，
+   * 同一个请求的 response 再回带，用于把"注入了什么"与"落库了什么"对上。
+   * 服务端只透传，不校验。
+   */
+  corr?: string;
   payload: {
     text?: string;
     tool?: { name: string; input: unknown; output?: string };
@@ -131,6 +137,8 @@ export interface HookInjection {
   evidence: HookEvidence[];
   degraded: string[];
   identity: HookIdentity;
+  /** 注入回执号（16 hex）；入口回带在 signal 信封的 `corr` 里 */
+  corr_id?: string;
   /** 剩余可用毫秒，入口据此决定是否还来得及改动请求 */
   deadline_ms: number;
 }

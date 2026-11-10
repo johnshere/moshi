@@ -5,9 +5,11 @@
  * **这不是账本，是诊断窗口**——真正落库的是 `episode`，持久化版本留作遗留项
  * （Z-01C-e）。
  *
- * 一条纪律：**只记计数与枚举，不记查询文本、不记注入文本**。Magpie 的
- * `ctx.report` 注释明确禁止把查询/scope/凭据/召回内容带出宿主，我们自己的台账
- * 也不该成为绕过这个约定的后门——否则 `moshi hook trace` 一打印就是满屏用户原话。
+ * 一条纪律（用户 m01321 改为分档）：**默认 off 不记查询文本、不记注入文本**。
+ * Magpie 的 `ctx.report` 注释明确禁止把查询/scope/凭据/召回内容带出宿主，
+ * 我们自己的台账也不该成为绕过这个约定的后门。需要诊断时由 `debug.trace_level`
+ * 显式打开 `summary`/`full`：`summary` 只多带证据 id/分数、耗时与哈希（仍无正文），
+ * `full` 才落正文且落盘前必过脱敏。
  */
 import { HOOK_TRACE_SCHEMA, type HookHost, type HookReportCode, type HookTurn } from './protocol.js';
 
@@ -28,6 +30,25 @@ export interface HookTraceItem {
   /** 落库轮次产生的字段（`/hook/signal`）；`/hook/recall` 时为 undefined */
   captured?: boolean;
   duplicate?: boolean;
+  /** 注入回执号（Z-01C-e）：把 recall 与随后的 signal 对上 */
+  corr_id?: string;
+  /** 注入证据的 m_id（summary 档起；off 档没有） */
+  evidence_ids?: number[];
+  /** 与 `evidence_ids` 一一对应的置信度 */
+  evidence_scores?: number[];
+  /** 因预算/地板等原因丢弃的条数，按原因分组 */
+  drop_reasons?: Record<string, number>;
+  /** 分阶段耗时（summary 档起）：检索 / 渲染 / 总耗时 */
+  stage_ms?: { search?: number; render?: number; total?: number };
+  /** 注入文本、查询、回复的 sha256 前 16 hex（summary 档起） */
+  inject_sha256?: string;
+  query_sha256?: string;
+  reply_sha256?: string;
+  /** 正文（只有 full 档才有，落盘前过脱敏） */
+  query_text?: string;
+  inject_text?: string;
+  evidence_text?: string[];
+  reply_text?: string;
 }
 
 export interface HookTraceSnapshot {

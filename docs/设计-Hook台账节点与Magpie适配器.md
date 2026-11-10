@@ -526,15 +526,29 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
 
 ### 8.4 `/hook/trace` 契约
 
-环形缓冲（进程内，与 `TraceStore` 同类，`src/core/read/trace.ts`），保留最近 200 条：
+环形缓冲（进程内，`src/core/hook/trace.ts` 的 `HookTraceStore`），保留最近 200 条；同一条记录也按 `[debug] trace_level` 落到磁盘（`src/core/hook/traceSink.ts`）：
 
 ```json
 { "schema":"moshi-hook-trace/1", "items":[
    {"ts":"…","host":"magpie","turn":"user_prompt","status":"ready","inject_bytes":1320,
-    "evidence":3,"degraded":[],"identity_source":"vcs","latency_ms":41} ] }
+    "evidence":3,"degraded":[],"identity_source":"vcs","latency_ms":41,
+    "corr_id":"…16 hex…","evidence_ids":[101,102,103],"evidence_scores":[0.91,0.87,0.8],
+    "stage_ms":{"search":18,"render":3,"total":26},
+    "inject_sha256":"…","query_sha256":"…"} ] }
 ```
 
-**只记计数与枚举，不记查询文本、不记注入文本**（与 `report` 的纪律一致）。
+三档（`debug.trace_level`）：
+
+| 档位 | 记录内容 | 用途 |
+| --- | --- | --- |
+| `off`（默认） | 只有计数与枚举，与旧版一致 | 正式使用 |
+| `summary` | 再加 `corr_id`、`evidence_ids`、`evidence_scores`、`stage_ms`、`inject_sha256/query_sha256/reply_sha256`、`drop_reasons` | 开发机排查"为什么注入了这几条 / 慢在哪" |
+| `full` | 再加 `query_text`、`inject_text`、`evidence_text`、`reply_text`（落盘前过 `redact`） | 只应出现在开发机 |
+
+- **默认只记计数与枚举，不记正文**（与 `report` 的纪律一致）；正文只在 `full` 出现。
+- 落盘 `<data_dir>/hook/trace-YYYY-MM-DD.jsonl`；单文件超过 `debug.trace_max_bytes` 切 `trace-YYYY-MM-DD.<n>.jsonl`；`debug.trace_keep_days` 之前的按文件名清理。写盘异步补写，不占召回预算。
+- `signal` 也记一条（`turn: "response"`，带回 `corr_id`，只存 `reply_sha256`；`full` 才有 `reply_text`）。
+- `POST /hook/api/trace` 默认只清内存；`?disk=1`（或 body `{"disk":true}`）才清磁盘，响应带 `disk_removed`。
 
 ---
 

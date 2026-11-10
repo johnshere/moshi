@@ -346,6 +346,24 @@ const HookSchema = z
   })
   .strict();
 
+/**
+ * 诊断追踪（Z-01C-e / 用户 m01321）。
+ *
+ * 用户拍板：**不声明环境**（不做 dev/test/prod 标记），只加这一段、默认关。
+ * `off` 与历史行为完全一致（内存 ring 仍记计数与枚举，不落正文）；
+ * `summary` 落盘时多带证据 id/分数、分阶段耗时与哈希；`full` 才落正文，且落盘前必过脱敏。
+ */
+const DebugSchema = z
+  .object({
+    /** 落盘档位；默认 off = 不写正文（与历史一致） */
+    trace_level: z.enum(['off', 'summary', 'full']).default('off'),
+    /** 单个台账文件字节上限，超过后按序号切下一个（默认 16 MB） */
+    trace_max_bytes: z.number().int().min(1024).max(64 * 1024 * 1024).default(16 * 1024 * 1024),
+    /** 台账文件保留天数（按文件名里的日期清理） */
+    trace_keep_days: z.number().int().min(1).max(365).default(14),
+  })
+  .strict();
+
 export const ConfigSchema = z
   .object({
     server: ServerSchema.default({}),
@@ -368,6 +386,7 @@ export const ConfigSchema = z
     log: LogSchema.default({}),
     mcp: McpSchema.default({}),
     hook: HookSchema.default({}),
+    debug: DebugSchema.default({}),
     layout: LayoutSchema.default({}),
     update: UpdateSchema.default({}),
   })
