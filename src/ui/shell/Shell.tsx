@@ -112,6 +112,8 @@ export interface ShellProps {
 export function Shell({ route, section, children }: ShellProps): ReactElement {
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
+  /** 首启弹窗开着时压掉首屏提示条：弹窗讲的正是同一件事，两条并排太吵 */
+  const [onboardOpen, setOnboardOpen] = useState(false);
   const badgeCount = badge?.total ?? 0;
   /** `g` 序列的起点时刻；600ms 内按第二个键才跳页（见 keyboard.ts） */
   const pendingGRef = useRef<number | null>(null);
@@ -198,8 +200,8 @@ export function Shell({ route, section, children }: ShellProps): ReactElement {
 
   return (
     <div style={shellStyle}>
-      <FirstRun />
-      <OnboardModal />
+      {onboardOpen ? null : <FirstRun />}
+      <OnboardModal onOpenChange={setOnboardOpen} />
       <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
         <div style={brandStyle}>默识</div>
         {NAV.map((node) => {

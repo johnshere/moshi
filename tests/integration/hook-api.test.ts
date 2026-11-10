@@ -123,10 +123,14 @@ describe('/hook/api 鉴权', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('/ui/hook 也要 token（页面里带的是首屏注入的那一个）', async () => {
+  it('/ui/hook 的 HTML 壳不校验 token（浏览器直接打开，带不上请求头）', async () => {
     await makeApp();
     const res = await app().inject({ method: 'GET', url: '/ui/hook' });
-    expect(res.statusCode).toBe(401);
+    expect(res.statusCode).toBe(200);
+    expect(res.payload).toContain('<div id="root">');
+    // 边界在 API：壳能拿，接口不能
+    const api = await app().inject({ method: 'GET', url: '/hook/api/status' });
+    expect(api.statusCode).toBe(401);
   });
 });
 

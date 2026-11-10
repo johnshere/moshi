@@ -103,12 +103,17 @@ export interface HttpDeps {
 export async function buildHttpApp(deps: HttpDeps) {
   const app = Fastify({ logger: false });
 
-  // ── 鉴权：/api/* 全部要 token ──
-  // `/hook/api/*` 与 `/ui/hook` 同口径校验：hook.js 手里必须有 token，否则任意网页
-  // 都能把任意对话文本灌进台账、把记忆读出来。
+  // ── 鉴权：/api/* 与 /hook/api/* 全部要 token ──
+  // 只有 API 校验 token：`/hook/api/*` 与 `/api/*` 同口径（hook.js 手里必须有 token，
+  // 否则任意网页都能把任意对话文本灌进台账、把记忆读出来）。
+  //
+  // `/ui/*` 的 HTML 壳**不校验**——`magpie.cmd --open` 是浏览器直接打开
+  // `/ui/hook?from=magpie`，带不上请求头；而壳里本来就注入了 token（`static.ts` 的
+  // `sendIndex`），所以校验壳既挡不住本机进程（`/ui/graph` 同样能拿到 token），
+  // 又会让外部契约打不开。真正的边界在 API：`/hook/api/status` 无 token 仍是 401。
   app.addHook('onRequest', async (req, reply) => {
     const url = req.url;
-    const guarded = url.startsWith('/api/') || url.startsWith('/hook/api/') || url.startsWith('/ui/hook');
+    const guarded = url.startsWith('/api/') || url.startsWith('/hook/api/');
     if (!guarded) return;
     const given = req.headers['x-moshi-token'];
     if (given !== deps.token) {

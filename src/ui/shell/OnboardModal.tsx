@@ -126,7 +126,12 @@ function buttonStyle(primary = false, disabled = false): CSSProperties {
 
 type Phase = 'hidden' | 'pick' | 'confirm';
 
-export function OnboardModal(): ReactElement | null {
+export interface OnboardModalProps {
+  /** 弹窗开合变化：外壳据此抑制首屏提示条（弹窗里已经在做同一件事，两条并排太吵） */
+  onOpenChange?: (open: boolean) => void;
+}
+
+export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactElement | null {
   const [phase, setPhase] = useState<Phase>('hidden');
   const [onboard, setOnboard] = useState<OnboardPayload | null>(null);
   const [plans, setPlans] = useState<PlanPayload | null>(null);
@@ -161,6 +166,11 @@ export function OnboardModal(): ReactElement | null {
     askedRef.current = true;
     void load().catch(() => undefined);
   }, [load]);
+
+  // 开合上报放在 phase 之后：只在真正显示/关闭时通知一次
+  useEffect(() => {
+    onOpenChange?.(phase !== 'hidden');
+  }, [phase, onOpenChange]);
 
   const close = async (): Promise<void> => {
     setPhase('hidden');

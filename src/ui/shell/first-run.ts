@@ -105,7 +105,8 @@ export const BANNERS: Record<Exclude<FirstRunState, 'ready'>, BannerSpec> = {
   },
   collect_off: {
     text: '未配置采集来源',
-    hint: '把 moshi MCP 配置到 Agent 宿主，或检查 collect.enabled',
+    // 用户 m01482：MCP 提示语不要了——接入引导已由首启弹窗 + 设置 › 接入 承担
+    hint: '在 设置 › 接入 里连接 Agent，或检查 collect.enabled',
     tone: 'warn',
   },
 };

@@ -290,6 +290,16 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
     };
   }, [loadStatus, loadStatic, loadTrace]);
 
+  // 首启弹窗装完会导航到 `?from=onboard&result=…`。同一路由内 pushState 不会重挂组件，
+  // 所以结果条与安装状态必须跟着 props 更新（否则停在「未安装」直到刷新页面）。
+  useEffect(() => {
+    if (onboardResult === null) return;
+    setResultText(
+      onboardResult === 'ok' ? '插件已安装，重启 Magpie 后生效。' : '安装未成功，可在下方点「查看手动安装」。',
+    );
+    void loadStatic();
+  }, [onboardResult, loadStatic]);
+
   const setSwitch = async (patch: Partial<HookSwitches>): Promise<void> => {
     setBusy('config');
     try {
@@ -362,9 +372,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
             ← 返回应用
           </a>
         </div>
-      ) : (
-        <h2 style={titleStyle}>接入</h2>
-      )}
+      ) : null}
       <div style={subtitleStyle}>
         Hook 插件在 Agent 每次请求时向 moshi 要一段记忆注入；MCP 是另一条路径，本轮只显示不安装。
       </div>
@@ -570,8 +578,10 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
         </table>
       </div>
 
-      {/* ── F8 遮罩：断开过 Magpie 的情况下先要求连接，避免用户以为插件坏了 ── */}
-      {needsConnect ? (
+      {/* ── F8 遮罩：断开过 Magpie 的情况下先要求连接，避免用户以为插件坏了 ──
+          刚从首启弹窗装完跳过来时不遮：此刻要让用户先看到安装结果（结果条就在上面），
+          连接按钮在「连接」卡片里，跑不掉。 */}
+      {needsConnect && onboardResult === null ? (
         <div
           data-testid="access-mask"
           style={{
