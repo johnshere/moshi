@@ -76,7 +76,7 @@ async function makeApp(over: Record<string, unknown> = {}): Promise<void> {
     token: TOKEN,
     uiDistDir: uiDist(home),
     home,
-    configFile: path.join(home, 'config.toml'),
+    configFile: path.join(home, 'config.yaml'),
     // 自建 `.moshi/project.yaml` 要落到临时工程目录里，得显式放行
     markerRoots: [tmpdir()],
     ...over,

@@ -3,16 +3,16 @@
  *
  * 固定落点（D-09）：
  * - `<repo>/temp/moshi-dev/`：一次性、可重建，不备份；
- * - `<repo>/temp/moshi-dev.toml`：生成物，不提交；
+ * - `<repo>/temp/moshi-dev.yaml`：生成物，不提交；
  * - `storage.data_dir` = `<repo>/temp/moshi-dev/data`（绝对路径）；
  * - `eval.golden_set` = `<repo>/temp/moshi-dev/golden/golden.jsonl`；
- * - `[[ingest.sources]]` 一个 `claude-code` 实例，root=`<home>/.claude/projects`。
+ * - `ingest.sources` 一个 `claude-code` 实例，root=`<home>/.claude/projects`。
  *
  * 流程（每次都从同一源重建，幂等）：
  * 1. 删除并重建 `temp/moshi-dev`；
  * 2. 用 better-sqlite3 的 `db.backup()`（WAL 安全）从 `<home>/.moshi/moshi.db`
  *    生成一致快照到 dev data 目录；复制 `golden.jsonl` / `golden.v1.jsonl`；
- * 3. 写 `temp/moshi-dev.toml`；
+ * 3. 写 `temp/moshi-dev.yaml`；
  * 4. 用配置跑 `import`（真实 claude-code 会话；游标写 dev data）→
  *    `db rebuild-edges`（存量补边）→ `db community` → `eval run --golden v1`；
  * 5. 输出计数、哈希与 eval 读数；eval 的退出码透传。
@@ -45,7 +45,7 @@ import { closeDb, openDb, type Db } from '../src/infra/sqlite/db.js';
 const ROOT = path.resolve(fileURLToPath(new URL('..', import.meta.url)));
 
 export const DEV_DIR_NAME = 'moshi-dev';
-export const DEV_CONFIG_NAME = 'moshi-dev.toml';
+export const DEV_CONFIG_NAME = 'moshi-dev.yaml';
 export const SOURCE_SESSION_ADAPTER = 'claude-code';
 export const SOURCE_SESSION_ID = 'claude-code';
 
@@ -53,7 +53,7 @@ export interface DevPaths {
   repoRoot: string;
   /** `<repo>/temp/moshi-dev` */
   root: string;
-  /** `<repo>/temp/moshi-dev.toml` */
+  /** `<repo>/temp/moshi-dev.yaml` */
   configFile: string;
   dataDir: string;
   goldenDir: string;
@@ -94,29 +94,30 @@ export function devPaths(options: { repoRoot?: string; home?: string } = {}): De
   };
 }
 
-/** TOML 里统一用正斜杠绝对路径（Windows 下 Node/TOML 都认，省掉转义） */
-function tomlPath(p: string): string {
+/** YAML 里统一用正斜杠绝对路径（Windows 下 Node/YAML 都认，省掉转义） */
+function yamlPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/"/g, '\\"');
 }
 
 /** 生成 dev 配置（纯函数，单测直接断言路径与结构） */
-export function buildDevToml(paths: DevPaths): string {
+export function buildDevYaml(paths: DevPaths): string {
   return [
     '# P1-20 dev 数据面（由 `pnpm dev:reset` 生成，不提交）',
     '# 固定落点 temp/moshi-dev；一次性、可重建、不备份。',
-    '[storage]',
-    `data_dir = "${tomlPath(paths.dataDir)}"`,
+    'storage:',
+    `  data_dir: "${yamlPath(paths.dataDir)}"`,
     // P1-19：导出主题文档也留在 dev 面（否则默认 archive_dir 会指到真实用户目录）
-    `archive_dir = "${tomlPath(path.join(paths.root, 'archive'))}"`,
+    `  archive_dir: "${yamlPath(path.join(paths.root, 'archive'))}"`,
     '',
-    '[eval]',
-    `golden_set = "${tomlPath(paths.goldenSet)}"`,
+    'eval:',
+    `  golden_set: "${yamlPath(paths.goldenSet)}"`,
     '',
-    '[[ingest.sources]]',
-    `id = "${SOURCE_SESSION_ID}"`,
-    `adapter = "${SOURCE_SESSION_ADAPTER}"`,
-    `root = "${tomlPath(paths.sessionsRoot)}"`,
-    'enabled = true',
+    'ingest:',
+    '  sources:',
+    `    - id: "${SOURCE_SESSION_ID}"`,
+    `      adapter: "${SOURCE_SESSION_ADAPTER}"`,
+    `      root: "${yamlPath(paths.sessionsRoot)}"`,
+    '      enabled: true',
     '',
   ].join('\n');
 }
@@ -455,7 +456,7 @@ export async function resetDevDb(options: DevResetOptions = {}): Promise<DevRese
   writeFileSync(paths.goldenV1, readFileSync(paths.sourceGoldenV1));
 
   // ── 3. 写配置 ──
-  writeFileSync(paths.configFile, buildDevToml(paths), 'utf8');
+  writeFileSync(paths.configFile, buildDevYaml(paths), 'utf8');
   out(`[dev:reset] 配置   ${paths.configFile}\n`);
   const cfg = loadConfig({ file: paths.configFile, home });
 
@@ -553,7 +554,7 @@ const USAGE = [
   '',
   '按 D-09 重建固定 dev 数据面：',
   '  <repo>/temp/moshi-dev/        （data/ 与 golden/，一次性、不备份）',
-  '  <repo>/temp/moshi-dev.toml    （生成物，不提交）',
+  '  <repo>/temp/moshi-dev.yaml    （生成物，不提交）',
   '',
   '源（只读）：<home>/.moshi/moshi.db、<home>/.moshi/golden/*.jsonl、',
   '            <home>/.claude/projects',

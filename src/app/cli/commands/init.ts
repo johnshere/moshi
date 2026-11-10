@@ -1,7 +1,7 @@
 /**
  * `moshi init`（P0-21 / 概设 §8.4「装完不用读文档就能跑通」）。
  *
- * 步骤：建 `~/.moshi/` → 写默认 `config.toml` → 建库 → 迁移 → 打印 MCP 配置片段 →
+ * 步骤：建 `~/.moshi/` → 写默认 `config.yaml` → 建库 → 迁移 → 打印 MCP 配置片段 →
  * 拉起 daemon（若已在运行则打印状态）→ 打印 UI 地址并尝试用默认浏览器打开。
  * `--no-daemon` 用于脚本/测试场景，不拉起常驻进程；`--no-open` 只禁止打开浏览器；
  * `--json` 输出单个机器可读对象（脚本用）。
@@ -18,26 +18,26 @@ import { ensureDataDirs } from '../../lifecycle.js';
 import { inspectLock, readLock } from '../../lock.js';
 import type { Command, CommandContext } from '../types.js';
 
-/** 默认 config.toml 模板：只写关键可调项，省略项全部走代码里的默认值 */
+/** 默认 config.yaml 模板：只写关键可调项，省略项全部走代码里的默认值 */
 const DEFAULT_CONFIG = `# 默识（moshi）配置。删掉整节 = 用默认值；未知键会报错。
 # 路径里的 ~ 会被展开成家目录。
 
-[server]
-host = "127.0.0.1"
-port = 9836
+server:
+  host: 127.0.0.1
+  port: 9836
 
-[storage]
-data_dir = "~/.moshi"
-archive_dir = "~/Documents/默识归档"
+storage:
+  data_dir: "~/.moshi"
+  archive_dir: "~/Documents/默识归档"
 
-[ingest]
-harvest_cron = "0 3 * * *"
+ingest:
+  harvest_cron: "0 3 * * *"
 
-[ui]
-theme = "system"
+ui:
+  theme: system
 
-[log]
-level = "info"
+log:
+  level: info
 `;
 
 const USAGE = [
@@ -196,7 +196,7 @@ export async function runInit(ctx: CommandContext, deps: InitDeps = {}): Promise
   };
 
   // 1) 默认配置：只写一次，用户改过的绝不覆盖
-  const configFile = path.join(paths.root, 'config.toml');
+  const configFile = path.join(paths.root, 'config.yaml');
   if (!existsSync(configFile)) {
     safeWriteFile(configFile, DEFAULT_CONFIG, [paths.root]);
     say(`已写入默认配置：${configFile}\n`);

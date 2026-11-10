@@ -12,7 +12,7 @@
  *    护栏 ⇒ 库里只要出现本工具目录之外的数据就报错退出，**绝不自动清空**。
  * 3. **零 Python**。全程纯符号模式：不碰向量路、不装依赖、不写 fact_vec。
  *
- * 用法：`pnpm seed:devdb -- --config <dev.toml>`（P3-A8：配置源=dev 配置，可用
+ * 用法：`pnpm seed:devdb -- --config <dev.yaml>`（P3-A8：配置源=dev 配置，可用
  * `--dry-run` 只生成 jsonl 演练；`--sessions <N>` 放大数据面，默认 75，用于
  * P3-12 攒够 GAT 双门槛样本）。
  */
@@ -457,7 +457,7 @@ export interface SeedResult {
 
 // ── 主流程 ───────────────────────────────────────────────────────────────
 export interface SeedOptions {
-  /** 配置文件路径（`--config`）；不传走 `$MOSHI_CONFIG` / `<home>/.moshi/config.toml` */
+  /** 配置文件路径（`--config`）；不传走 `$MOSHI_CONFIG` / `<home>/.moshi/config.yaml` */
   configFile?: string;
   /** 只生成 jsonl 不导入（演练用） */
   dryRun?: boolean;

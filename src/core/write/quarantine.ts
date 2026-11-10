@@ -33,7 +33,7 @@ export interface QuarantineOptions {
   stormWindowMs: number;
 }
 
-/** 与 `config.toml [ingest]` 的默认值一致；app 层从配置构造，core 只认这个形状 */
+/** 与 `config.yaml` 的 `ingest` 段默认值一致；app 层从配置构造，core 只认这个形状 */
 export const DEFAULT_QUARANTINE: QuarantineOptions = {
   minConfidence: 0.25,
   maxContentBytes: 2048,

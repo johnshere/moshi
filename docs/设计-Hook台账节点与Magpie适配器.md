@@ -597,16 +597,16 @@ http://127.0.0.1:9836/ui/hook?from=magpie
 
 `ConfigSchema` 新增一段（`.strict()`，与既有段同风格）：
 
-```toml
-[hook]
-enabled = true                 # 功能总开关
-inject_existing = true         # 用户对话注入
-capture_reply = false          # 输出记忆
-magpie_enabled = false         # 是否已连接 Magpie（由 magpie.cmd / 页面「连接」写）
-recall_timeout_ms = 600        # 单次召回预算（≤ 1000）
-top_k = 5
-max_inject_bytes = 4000
-capture_tool_output = false    # 输出记忆是否包含工具输出正文（默认关：工具输出体积大）
+```yaml
+hook:
+  enabled: true                 # 功能总开关
+  inject_existing: true         # 用户对话注入
+  capture_reply: false          # 输出记忆
+  magpie_enabled: false         # 是否已连接 Magpie（由 magpie.cmd / 页面「连接」写）
+  recall_timeout_ms: 600        # 单次召回预算（≤ 1000）
+  top_k: 5
+  max_inject_bytes: 4000
+  capture_tool_output: false    # 输出记忆是否包含工具输出正文（默认关：工具输出体积大）
 ```
 
 **不进** `EDITABLE_CONFIG_ENTRIES`（那张表是 `/api/config` 的白名单，只给设置页用）；`hook` 段由 `/hook/api/config` 专门读写，写入走 `safeWriteFile` 的既有配置文档写函数（`src/app/config.ts` 的 `writeConfigDocument`）。

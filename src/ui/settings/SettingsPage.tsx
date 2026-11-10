@@ -5,7 +5,7 @@
  * 「重新规整分类、拆成子菜单」，所以现在**一个二级一屏**：
  *
  *   接入   → AccessPage（与 `/ui/hook` 同一组件，内嵌形态，§16.5.5）
- *   配置   → ConfigForm（白名单键，原子写回 TOML）
+ *   配置   → ConfigForm（白名单键，原子写回 YAML）
  *   维护   → MaintenancePanel（索引重建）+ UpdatePanel（自动更新）
  *   隐私   → PrivacyPanel（采集/脱敏/导出/清理）
  *   诊断   → DiagPanel（只读自检 I1–I10 / 图质量 / 模型归档）
@@ -36,7 +36,7 @@ const tabStyle = (active: boolean): CSSProperties => ({
 /** 二级标题与说明：每屏一句，别让人猜这一屏管什么。 */
 const HINTS: Record<SettingsSection, string> = {
   access: '把 Hook 插件装进 Agent 宿主；连接状态、注入开关与注入台账都在这里。',
-  config: '白名单键，原子写回 TOML；改完即时生效的会当场生效，需要重启的会标出来。',
+  config: '白名单键，原子写回 YAML；改完即时生效的会当场生效，需要重启的会标出来。',
   maintain: '索引重建、备份恢复与自动更新；这些操作会改磁盘，执行前请看清提示。',
   privacy: '采集、脱敏、导出与清理；导出是全库快照，清理是不可逆操作。',
   diagnose: '只读自检（I1–I10 / 图质量 / 模型归档），不改任何数据。',

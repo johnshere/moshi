@@ -49,8 +49,8 @@ describe('moshi init（P0-21）', () => {
     for (const sub of ['logs', 'tmp', 'backups']) {
       expect(existsSync(path.join(root, sub)), `${sub} 应存在`).toBe(true);
     }
-    const cfgText = readFileSync(path.join(root, 'config.toml'), 'utf8');
-    expect(cfgText).toContain('data_dir = "~/.moshi"');
+    const cfgText = readFileSync(path.join(root, 'config.yaml'), 'utf8');
+    expect(cfgText).toContain('data_dir: "~/.moshi"');
 
     // 库已迁移
     const { db } = openDb({ file: path.join(root, 'moshi.db') });
@@ -70,14 +70,14 @@ describe('moshi init（P0-21）', () => {
     expect(first).toBe(0);
     // 用户改了配置
     const root = path.join(home, '.moshi');
-    const cfgFile = path.join(root, 'config.toml');
-    const userCfg = readFileSync(cfgFile, 'utf8').replace('theme = "system"', 'theme = "dark"');
+    const cfgFile = path.join(root, 'config.yaml');
+    const userCfg = readFileSync(cfgFile, 'utf8').replace('theme: system', 'theme: dark');
     writeFileSync(cfgFile, userCfg);
 
     const second = await runCli(['init', '--no-daemon'], { home });
     expect(second).toBe(0);
     // 用户修改未被覆盖（消息也不该说"已写入默认配置"）
-    expect(readFileSync(cfgFile, 'utf8')).toContain('theme = "dark"');
+    expect(readFileSync(cfgFile, 'utf8')).toContain('theme: dark');
   });
 
   it('全新 home 上 init 后 import，列表有数据（Phase 0 验收的前半段）', async () => {

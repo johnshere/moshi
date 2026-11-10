@@ -12,7 +12,7 @@ import type { FastifyInstance } from 'fastify';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import TOML from '@iarna/toml';
+import { parse as parseYaml } from 'yaml';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../../src/app/config.js';
 import { configRoutes } from '../../src/app/http/routes/config.js';
@@ -47,7 +47,7 @@ function makeEnv(): Env {
   const dir = mkdtempSync(path.join(tmpdir(), 'moshi-config-api-'));
   const home = path.join(dir, 'home');
   mkdirSync(home, { recursive: true });
-  const configPath = path.join(home, '.moshi', 'config.toml');
+  const configPath = path.join(home, '.moshi', 'config.yaml');
   const cfg = loadConfig({ home, file: configPath });
   const { db } = openDb({ file: path.join(dir, 'moshi.db') });
   migrate(db, { backupsDir: path.join(dir, 'backups') });
@@ -65,7 +65,7 @@ function makeEnv(): Env {
 }
 
 function readDoc(file: string): Record<string, unknown> {
-  return TOML.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+  return (parseYaml(readFileSync(file, 'utf8')) ?? {}) as Record<string, unknown>;
 }
 
 describe('GET /api/config', () => {
@@ -89,7 +89,7 @@ describe('GET /api/config', () => {
 });
 
 describe('PUT /api/config', () => {
-  it('合法 patch 写回 TOML，GET 立刻可见，applied 精确', async () => {
+  it('合法 patch 写回 YAML，GET 立刻可见，applied 精确', async () => {
     const env = makeEnv();
     const res = await env.app.inject({
       method: 'PUT',
@@ -178,7 +178,7 @@ describe('PUT /api/config', () => {
     mkdirSync(path.dirname(env.configPath), { recursive: true });
     writeFileSync(
       env.configPath,
-      '[model]\ngat_mode = "on"\n\n[ingest]\nharvest_cron = "0 4 * * *"\n',
+      'model:\n  gat_mode: "on"\n\ningest:\n  harvest_cron: "0 4 * * *"\n',
       'utf8',
     );
     const res = await env.app.inject({

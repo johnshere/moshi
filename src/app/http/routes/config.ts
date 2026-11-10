@@ -3,7 +3,7 @@
  *
  * - `GET  /api/config`：当前生效配置的**安全子集**（绝不返回 token / MCP 闸门等）
  * - `PUT  /api/config`：body `{patch:{...}}`，白名单键 + 深层合并 + 类型/范围校验，
- *   原子写回 TOML 配置文件；启动期键（port/data_dir/archive_dir）返回 restart_required
+ *   原子写回 YAML 配置文件；启动期键（port/data_dir/archive_dir）返回 restart_required
  * - `POST /api/maintenance/rebuild`：`{target:'fts'|'vec'|'degree'|'all', dry_run?}`
  *   复用既有 rebuild/sync 函数，返回 before/after mismatch 计数
  *
@@ -45,7 +45,7 @@ export interface VecEncoderLike {
 export interface ConfigRoutesOpts {
   db: Db;
   cfg: Config;
-  /** 配置文件路径；不传则用 `$MOSHI_CONFIG` / `<home>/.moshi/config.toml` */
+  /** 配置文件路径；不传则用 `$MOSHI_CONFIG` / `<home>/.moshi/config.yaml` */
   configPath?: string;
   /** 覆盖 home（测试用） */
   home?: string;

@@ -38,7 +38,7 @@ node dist/app/main.js init   # 建 ~/.moshi、初始化库、打印 MCP 配置�
 | `moshi version` | 打印版本 |
 | `pnpm setup:env` | 构建/重建 sidecar 环境（venv + 依赖 + 模型权重）；`--check` 只判定、`--force` 强制重建（`pnpm install` 的 postinstall 已自动做初次判定） |
 
-数据目录默认 `~/.moshi`（可用 `MOSHI_CONFIG` 指到别的配置文件）。配置模板见 `config.example.toml`。
+数据目录默认 `~/.moshi`（可用 `MOSHI_CONFIG` 指到别的配置文件）。配置模板见 `config.example.yaml`。
 
 ## 目录
 

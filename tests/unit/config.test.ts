@@ -8,9 +8,9 @@ import { isMoshiError } from '../../src/domain/errors.js';
 
 const HOME = path.join(tmpdir(), 'moshi-home-test');
 
-function withToml(content: string): string {
+function withYaml(content: string): string {
   const dir = mkdtempSync(path.join(tmpdir(), 'moshi-cfg-'));
-  const file = path.join(dir, 'config.toml');
+  const file = path.join(dir, 'config.yaml');
   writeFileSync(file, content, 'utf8');
   return file;
 }
@@ -29,7 +29,7 @@ function expectConfigError(fn: () => unknown): string {
 
 describe('配置加载（详设 §3.6）', () => {
   it('文件不存在时全部走默认值', () => {
-    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'config.toml'), home: HOME });
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'config.yaml'), home: HOME });
     expect(cfg.server.port).toBe(9836);
     expect(cfg.model.gat_mode).toBe('off');
     expect(cfg.retrieval.rrf_k).toBe(60);
@@ -37,19 +37,19 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('拼错的键启动失败，且错误信息指出键名', () => {
-    const file = withToml('[server]\nprot = 53001\n');
+    const file = withYaml('server:\n  prot: 53001\n');
     const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
     expect(msg).toContain('server.prot');
     expect(msg).toContain('未知配置键');
   });
 
   it('未知 section 同样拒绝', () => {
-    const file = withToml('[retreival]\nvector_topk = 5\n');
+    const file = withYaml('retreival:\n  vector_topk: 5\n');
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('retreival');
   });
 
   it('只写要改的键，其余用默认值', () => {
-    const file = withToml('[retrieval]\nvector_topk = 5\n');
+    const file = withYaml('retrieval:\n  vector_topk: 5\n');
     const cfg = loadConfig({ file, home: HOME });
     expect(cfg.retrieval.vector_topk).toBe(5);
     expect(cfg.retrieval.bm25_topk).toBe(20);
@@ -57,7 +57,7 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('~ 展开为绝对路径，且不碰非路径键', () => {
-    const file = withToml('[storage]\ndata_dir = "~/data-moshi"\n');
+    const file = withYaml('storage:\n  data_dir: "~/data-moshi"\n');
     const cfg = loadConfig({ file, home: HOME });
     expect(cfg.storage.data_dir).toBe(path.resolve(HOME, 'data-moshi'));
     expect(cfg.model.embed_model).toBe(EMBED_MODEL);
@@ -71,32 +71,32 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('非回环 host 拒绝启动', () => {
-    const file = withToml('[server]\nhost = "0.0.0.0"\n');
+    const file = withYaml('server:\n  host: "0.0.0.0"\n');
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('回环');
   });
 
   it('废弃的 port_scan_max 仍可解析（旧配置兼容）', () => {
-    const file = withToml('[server]\nport = 12000\nport_scan_max = 53020\n');
+    const file = withYaml('server:\n  port: 12000\n  port_scan_max: 53020\n');
     expect(loadConfig({ file, home: HOME }).server.port).toBe(12000);
   });
 
   it('概率越界被 zod 拦下', () => {
-    const file = withToml('[packing]\nutility_ratio = 1.5\n');
+    const file = withYaml('packing:\n  utility_ratio: 1.5\n');
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('packing.utility_ratio');
   });
 
   it('gat_mode 只接受三档', () => {
-    const file = withToml('[model]\ngat_mode = "maybe"\n');
+    const file = withYaml('model:\n  gat_mode: "maybe"\n');
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('model.gat_mode');
   });
 
-  it('非法 TOML 报 E_CONFIG 而不是抛原生异常', () => {
-    const file = withToml('[server\nport = 1\n');
-    expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('TOML');
+  it('非法 YAML 报 E_CONFIG 而不是抛原生异常', () => {
+    const file = withYaml('server:\n  port: 1\n  bad: [unclosed\n');
+    expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('YAML');
   });
 
-  it('示例配置能被完整解析（防止 config.example.toml 与 schema 漂移）', () => {
-    const example = path.resolve(import.meta.dirname, '../../config.example.toml');
+  it('示例配置能被完整解析（防止 config.example.yaml 与 schema 漂移）', () => {
+    const example = path.resolve(import.meta.dirname, '../../config.example.yaml');
     const cfg = loadConfig({ file: example, home: HOME });
     expect(cfg.server.host).toBe('127.0.0.1');
     expect(cfg.storage.backup_keep).toBe(7);
@@ -122,7 +122,7 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('dataPaths 落在 data_dir 之下', () => {
-    const cfg = loadConfig({ file: path.join(tmpdir(), 'x', 'y.toml'), home: HOME });
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'x', 'y.yaml'), home: HOME });
     const p = dataPaths(cfg);
     expect(p.db.startsWith(cfg.storage.data_dir)).toBe(true);
     expect(p.db.endsWith('moshi.db')).toBe(true);
@@ -130,7 +130,7 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('dataPaths.goldenDir 跟着 eval.golden_set 走（默认跟随 data_dir）', () => {
-    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'golden.toml'), home: HOME });
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'golden.yaml'), home: HOME });
     const p = dataPaths(cfg);
     // 没显式配 eval.golden_set → 跟着 data_dir，换库不会把 golden 留在真实 home
     expect(cfg.eval.golden_set).toBe(path.join(cfg.storage.data_dir, 'golden', 'golden.jsonl'));
@@ -138,8 +138,8 @@ describe('配置加载（详设 §3.6）', () => {
   });
 
   it('显式 eval.golden_set 不被 data_dir 覆盖', () => {
-    const file = withToml(
-      '[storage]\ndata_dir = "/data-x"\n[eval]\ngolden_set = "/elsewhere/golden.jsonl"\n',
+    const file = withYaml(
+      'storage:\n  data_dir: "/data-x"\neval:\n  golden_set: "/elsewhere/golden.jsonl"\n',
     );
     const cfg = loadConfig({ file, home: HOME });
     expect(cfg.eval.golden_set).toBe(path.resolve('/elsewhere/golden.jsonl'));
@@ -149,7 +149,7 @@ describe('配置加载（详设 §3.6）', () => {
 
 describe('resolveSources（P3-A8 source 实例）', () => {
   it('旧字符串写法：id=adapter，claude-code 根 = <home>/.claude/projects', () => {
-    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'a.toml'), home: HOME });
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'a.yaml'), home: HOME });
     expect(resolveSources(cfg, HOME)).toEqual([
       {
         id: 'claude-code',
@@ -161,7 +161,7 @@ describe('resolveSources（P3-A8 source 实例）', () => {
   });
 
   it('旧字符串里的 generic-jsonl 根 = <data_dir>/inbox', () => {
-    const file = withToml('[storage]\ndata_dir = "/data-legacy"\n[ingest]\nsources = ["claude-code", "generic-jsonl"]\n');
+    const file = withYaml('storage:\n  data_dir: "/data-legacy"\ningest:\n  sources: ["claude-code", "generic-jsonl"]\n');
     const cfg = loadConfig({ file, home: HOME });
     const list = resolveSources(cfg, HOME);
     expect(list.map((s) => s.id)).toEqual(['claude-code', 'generic-jsonl']);
@@ -169,28 +169,25 @@ describe('resolveSources（P3-A8 source 实例）', () => {
     expect(list[1]!.root).toBe(path.join(path.resolve('/data-legacy'), 'inbox'));
   });
 
-  it('[[ingest.sources]] 实例：自定义 id/root，enabled=false 被过滤', () => {
-    const file = withToml(
+  it('ingest.sources 实例：自定义 id/root，enabled=false 被过滤', () => {
+    const file = withYaml(
       [
-        '[storage]',
-        'data_dir = "/data-x"',
+        'storage:',
+        '  data_dir: "/data-x"',
         '',
-        '[[ingest.sources]]',
-        'id = "work"',
-        'adapter = "claude-code"',
-        'root = "~/work-projects"',
-        '',
-        '[[ingest.sources]]',
-        'id = "old"',
-        'adapter = "claude-code"',
-        'root = "/tmp/old"',
-        'enabled = false',
-        '',
-        '[[ingest.sources]]',
-        'id = "inbox"',
-        'adapter = "generic-jsonl"',
-        'root = "/tmp/inbox"',
-        'field_map = { text = "message" }',
+        'ingest:',
+        '  sources:',
+        '    - id: "work"',
+        '      adapter: "claude-code"',
+        '      root: "~/work-projects"',
+        '    - id: "old"',
+        '      adapter: "claude-code"',
+        '      root: "/tmp/old"',
+        '      enabled: false',
+        '    - id: "inbox"',
+        '      adapter: "generic-jsonl"',
+        '      root: "/tmp/inbox"',
+        '      field_map: { text: "message" }',
         '',
       ].join('\n'),
     );
@@ -202,16 +199,16 @@ describe('resolveSources（P3-A8 source 实例）', () => {
   });
 
   it('重复 id 在加载期报 E_CONFIG', () => {
-    const file = withToml(
+    const file = withYaml(
       [
-        '[[ingest.sources]]',
-        'id = "same"',
-        'adapter = "claude-code"',
-        'root = "/tmp/a"',
-        '[[ingest.sources]]',
-        'id = "same"',
-        'adapter = "claude-code"',
-        'root = "/tmp/b"',
+        'ingest:',
+        '  sources:',
+        '    - id: "same"',
+        '      adapter: "claude-code"',
+        '      root: "/tmp/a"',
+        '    - id: "same"',
+        '      adapter: "claude-code"',
+        '      root: "/tmp/b"',
         '',
       ].join('\n'),
     );
@@ -221,7 +218,7 @@ describe('resolveSources（P3-A8 source 实例）', () => {
   });
 
   it('未知 adapter 在加载期报 E_CONFIG（不静默跳过）', () => {
-    const file = withToml('[ingest]\nsources = ["cursor"]\n');
+    const file = withYaml('ingest:\n  sources: ["cursor"]\n');
     const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
     expect(msg).toContain('ingest.sources');
     expect(msg).toContain('cursor');

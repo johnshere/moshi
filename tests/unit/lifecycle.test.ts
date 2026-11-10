@@ -15,7 +15,7 @@ afterEach(async () => {
 
 async function makeCfg(): Promise<{ cfg: Config; dir: string }> {
   const dir = mkdtempSync(path.join(tmpdir(), 'moshi-life-'));
-  const file = path.join(dir, 'config.toml');
+  const file = path.join(dir, 'config.yaml');
   // 端口不能落在 Windows 动态端口段（49152–65535）：本机代理内核会拿它做
   // 出站连接的本地端口，撞上时 bind 报 EACCES（m1 实测 53100 曾被 verge-mihomo 占用）。
   // 这里在固定段内现取一个空闲端口，保证同一份测试在任何机器上都稳定。
@@ -23,7 +23,7 @@ async function makeCfg(): Promise<{ cfg: Config; dir: string }> {
   const scanMax = Math.min(port + 20, 49151);
   writeFileSync(
     file,
-    `[storage]\ndata_dir = "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\n[server]\nport = ${String(port)}\nport_scan_max = ${String(scanMax)}\n`,
+    `storage:\n  data_dir: "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\nserver:\n  port: ${String(port)}\n  port_scan_max: ${String(scanMax)}\n`,
     'utf8',
   );
   return { cfg: loadConfig({ file, home: dir }), dir };
@@ -89,13 +89,13 @@ describe('端口探测（概设 §1.4）', () => {
 
   it('固定端口被占用时启动失败，不顺延', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'moshi-life-'));
-    const file = path.join(dir, 'config.toml');
+    const file = path.join(dir, 'config.yaml');
     const blocker = net.createServer();
     const busy = await findFreePort('127.0.0.1', 41300, 41320);
     await new Promise<void>((r) => blocker.listen(busy, '127.0.0.1', () => r()));
     writeFileSync(
       file,
-      `[storage]\ndata_dir = "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\n[server]\nport = ${String(busy)}\n`,
+      `storage:\n  data_dir: "${path.join(dir, 'data').replace(/\\/g, '\\\\')}"\nserver:\n  port: ${String(busy)}\n`,
       'utf8',
     );
     try {

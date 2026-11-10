@@ -8,7 +8,7 @@
  *   POST /hook/api/recall   → 注入指令（唯一会改请求的端点）
  *   POST /hook/api/signal   → 信号落库回执
  *   GET  /hook/api/status   → 连接态 + 三个开关 + 本机 caps
- *   POST /hook/api/config   → 三个开关 + 连接态（界面写，走 TOML 白名单）
+ *   POST /hook/api/config   → 三个开关 + 连接态（界面写，走 YAML 白名单）
  *   GET  /hook/api/trace    → 注入台账 ring buffer
  *   POST /hook/api/trace    → 清台账
  *   GET  /hook/api/caps     → 各入口能力（`moshi hook doctor` 用它对照实测）
@@ -228,7 +228,7 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     return reply.send({ schema: HOOK_SCHEMA, hosts: HOOK_HOST_CAPS, trace_capacity: traceSize(trace) });
   });
 
-  // ── config：三个开关 + 连接态（走 TOML 白名单，不当场改内存配置） ──
+  // ── config：三个开关 + 连接态（走 YAML 白名单，不当场改内存配置） ──
   app.post('/config', async (req, reply) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patch: Record<string, unknown> = {};

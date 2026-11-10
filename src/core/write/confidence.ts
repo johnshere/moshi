@@ -20,7 +20,7 @@ export interface Priors {
   validateMax: number;
 }
 
-/** 与 `config.toml [confidence]` 的默认值一致；app 层从配置注入，core 只认这个形状 */
+/** 与 `config.yaml` 的 `confidence` 段默认值一致；app 层从配置注入，core 只认这个形状 */
 export const DEFAULT_PRIORS: Priors = {
   toolObs: 0.95,
   toolInferred: 0.85,

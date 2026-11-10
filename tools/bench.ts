@@ -100,7 +100,7 @@ async function main(): Promise<number> {
   // B-4：--vector 才拉起 sidecar 建向量索引；默认纯符号路（CI 不依赖 python）。
   const useVector = argv.includes('--vector');
   // 数据目录跟着临时 home 走，但 sidecar 的解释器/模型名要用真实配置（临时 home 下没有
-  // config.toml，默认 `~/.moshi/python/bin/python` 在本机并不存在 → encode 全返回 null）。
+  // config.yaml，默认 `~/.moshi/python/bin/python` 在本机并不存在 → encode 全返回 null）。
   const cfg = loadConfig({ file: defaultConfigPath(), home: dir });
   let sidecar: SidecarClient | undefined;
   let encode: EncodeFn | undefined;

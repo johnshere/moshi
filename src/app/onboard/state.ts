@@ -17,7 +17,7 @@ import type { HookHost } from '../../core/hook/index.js';
 
 /** 状态文件 schema（单独一个版本号：协议是 `moshi-hook/1`，这份是 UI 侧状态） */
 export const ONBOARD_SCHEMA = 'moshi-onboarding/1';
-/** 文件名（落在数据目录根，与 `config.toml` 并列） */
+/** 文件名（落在数据目录根，与 `config.yaml` 并列） */
 export const ONBOARD_FILE = 'onboarding.json';
 
 /** 命中的探测手段 */

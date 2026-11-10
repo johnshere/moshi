@@ -30,8 +30,8 @@ function fakeHome(): { home: string; dataDir: string; dbFile: string } {
   const dataDir = path.join(home, '.moshi');
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(
-    path.join(dataDir, 'config.toml'),
-    `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n`,
+    path.join(dataDir, 'config.yaml'),
+    `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\n`,
     'utf8',
   );
   return { home, dataDir, dbFile: path.join(dataDir, 'moshi.db') };

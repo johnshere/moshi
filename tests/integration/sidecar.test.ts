@@ -99,6 +99,7 @@ describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管�
     }
   });
 
+  // 真机重启要重新 import torch 栈（m1 实测 19.8s，默认 20s 上限在并行 verify 下会被挤爆）
   it('kill 掉进程后自动重启（重启计数 +1）', async () => {
     const home = tempHome();
     const c = makeClient(home);
@@ -121,5 +122,5 @@ describe.skipIf(!pythonOk || !modelOk)('sidecar 集成（真进程 + 命名管�
     } finally {
       await c.terminate();
     }
-  });
+  }, 90000);
 });

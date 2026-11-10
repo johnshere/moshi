@@ -24,7 +24,7 @@ function tempDir(): string {
   return d;
 }
 
-/** 造一个假 home：`.claude/projects/<proj>/<session>.jsonl` + 指向它的 config.toml */
+/** 造一个假 home：`.claude/projects/<proj>/<session>.jsonl` + 指向它的 config.yaml */
 function fakeHome(opts: { sessions: number; turnsPerSession: number; pkgBase?: number }): {
   home: string;
   dataDir: string;
@@ -33,8 +33,8 @@ function fakeHome(opts: { sessions: number; turnsPerSession: number; pkgBase?: n
   const dataDir = path.join(home, '.moshi');
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(
-    path.join(dataDir, 'config.toml'),
-    `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n`,
+    path.join(dataDir, 'config.yaml'),
+    `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\n`,
     'utf8',
   );
 
@@ -225,8 +225,8 @@ describe('moshi import（§5.11 验收）', () => {
     mkdirSync(dataDir, { recursive: true });
     // 合法的 adapter 但缺省根目录不存在：源可用性按"扫不扫得到"判断，而不是按名字
     writeFileSync(
-      path.join(dataDir, 'config.toml'),
-      `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n[ingest]\nsources = ["generic-jsonl"]\n`,
+      path.join(dataDir, 'config.yaml'),
+      `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\ningest:\n  sources: ["generic-jsonl"]\n`,
       'utf8',
     );
     const r = await runImport(home, ['--rate', '0']);
@@ -244,20 +244,19 @@ describe('moshi import（§5.11 验收）', () => {
     writeGenericSession(rootA, 'alpha.jsonl', 'alpha-pkg');
     writeGenericSession(rootB, 'beta.jsonl', 'beta-pkg');
     writeFileSync(
-      path.join(dataDir, 'config.toml'),
+      path.join(dataDir, 'config.yaml'),
       [
-        '[storage]',
-        `data_dir = "${dataDir.replace(/\\/g, '/')}"`,
+        'storage:',
+        `  data_dir: "${dataDir.replace(/\\/g, '/')}"`,
         '',
-        '[[ingest.sources]]',
-        'id = "alpha"',
-        'adapter = "generic-jsonl"',
-        `root = "${rootA.replace(/\\/g, '/')}"`,
-        '',
-        '[[ingest.sources]]',
-        'id = "beta"',
-        'adapter = "generic-jsonl"',
-        `root = "${rootB.replace(/\\/g, '/')}"`,
+        'ingest:',
+        '  sources:',
+        '    - id: "alpha"',
+        '      adapter: "generic-jsonl"',
+        `      root: "${rootA.replace(/\\/g, '/')}"`,
+        '    - id: "beta"',
+        '      adapter: "generic-jsonl"',
+        `      root: "${rootB.replace(/\\/g, '/')}"`,
         '',
       ].join('\n'),
       'utf8',

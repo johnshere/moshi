@@ -38,15 +38,15 @@ afterEach(() => {
   for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
-/** 假 home：`<home>/.moshi/config.toml` 指向 `<home>/.moshi` 作为 data_dir */
+/** 假 home：`<home>/.moshi/config.yaml` 指向 `<home>/.moshi` 作为 data_dir */
 function fakeHome(): { home: string; dataDir: string; dbFile: string } {
   const home = mkdtempSync(path.join(tmpdir(), 'moshi-db-'));
   dirs.push(home);
   const dataDir = path.join(home, '.moshi');
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(
-    path.join(dataDir, 'config.toml'),
-    `[storage]\ndata_dir = "${dataDir.replace(/\\/g, '/')}"\n`,
+    path.join(dataDir, 'config.yaml'),
+    `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\n`,
     'utf8',
   );
   return { home, dataDir, dbFile: path.join(dataDir, 'moshi.db') };

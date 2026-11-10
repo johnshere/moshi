@@ -2,8 +2,8 @@
  * P1-20 `pnpm dev:reset`（tools/dev-db.ts）单测。
  *
  * 覆盖验收点（AC-2 配置面 / AC-3 快照 / AC-7 源只读）：
- * - 固定落点 `<repo>/temp/moshi-dev` 与 `<repo>/temp/moshi-dev.toml`；
- * - TOML 里 `storage.data_dir` / `eval.golden_set` 都是绝对路径，且不含 `~`；
+ * - 固定落点 `<repo>/temp/moshi-dev` 与 `<repo>/temp/moshi-dev.yaml`；
+ * - YAML 里 `storage.data_dir` / `eval.golden_set` 都是绝对路径，且不含 `~`；
  * - `[[ingest.sources]]` 是 claude-code 实例（id + adapter + 只读 root）；
  * - WAL 安全快照：dev 库 fact 与源库一致、golden 两文件逐字节一致；
  * - 源（库 / golden / 会话目录）内容与 mtime 不变。
@@ -16,7 +16,7 @@ import { closeDb, openDb } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { insertFact, makeEntity } from '../fixtures/factories.js';
 import {
-  buildDevToml,
+  buildDevYaml,
   devPaths,
   fileSha256,
   hashTree,
@@ -81,32 +81,32 @@ function makeFixture(): Fixture {
   return { repoRoot, home, sourceDb, sourceGoldenJsonl, sourceGoldenV1, sessionsRoot };
 }
 
-describe('devPaths / buildDevToml', () => {
+describe('devPaths / buildDevYaml', () => {
   it('固定落点在 <repo>/temp 下，配置为绝对路径且不指向 ~/.moshi', () => {
     const { repoRoot, home } = makeFixture();
     const paths = devPaths({ repoRoot, home });
     const tempRoot = path.join(path.resolve(repoRoot), 'temp');
 
     expect(paths.root).toBe(path.join(tempRoot, 'moshi-dev'));
-    expect(paths.configFile).toBe(path.join(tempRoot, 'moshi-dev.toml'));
+    expect(paths.configFile).toBe(path.join(tempRoot, 'moshi-dev.yaml'));
     expect(paths.dataDir).toBe(path.join(paths.root, 'data'));
     expect(paths.dbFile).toBe(path.join(paths.dataDir, 'moshi.db'));
     expect(paths.goldenSet).toBe(path.join(paths.root, 'golden', 'golden.jsonl'));
     expect(paths.sessionsRoot).toBe(path.join(home, '.claude', 'projects'));
 
-    const toml = buildDevToml(paths);
-    expect(toml).toContain('[storage]');
-    expect(toml).toContain(`data_dir = "${paths.dataDir.replace(/\\/g, '/')}"`);
-    expect(toml).toContain('[eval]');
-    expect(toml).toContain(`golden_set = "${paths.goldenSet.replace(/\\/g, '/')}"`);
-    expect(toml).toContain('[[ingest.sources]]');
-    expect(toml).toContain(`id = "${SOURCE_SESSION_ID}"`);
-    expect(toml).toContain(`adapter = "${SOURCE_SESSION_ADAPTER}"`);
-    expect(toml).toContain(`root = "${paths.sessionsRoot.replace(/\\/g, '/')}"`);
+    const yaml = buildDevYaml(paths);
+    expect(yaml).toContain('storage:');
+    expect(yaml).toContain(`  data_dir: "${paths.dataDir.replace(/\\/g, '/')}"`);
+    expect(yaml).toContain('eval:');
+    expect(yaml).toContain(`  golden_set: "${paths.goldenSet.replace(/\\/g, '/')}"`);
+    expect(yaml).toContain('  sources:');
+    expect(yaml).toContain(`    - id: "${SOURCE_SESSION_ID}"`);
+    expect(yaml).toContain(`      adapter: "${SOURCE_SESSION_ADAPTER}"`);
+    expect(yaml).toContain(`      root: "${paths.sessionsRoot.replace(/\\/g, '/')}"`);
     // 只禁 `~/` 形式的家目录简写。Windows 8.3 短名（如 C:/Users/ADMINI~1/…）
     // 路径里天然带 `~1`，那不是简写；按裸 `~` 断言会让同一份测试在短名机器上误红。
-    expect(toml).not.toContain('~/');
-    expect(toml).not.toContain(path.join(home, '.moshi').replace(/\\/g, '/'));
+    expect(yaml).not.toContain('~/');
+    expect(yaml).not.toContain(path.join(home, '.moshi').replace(/\\/g, '/'));
   });
 });
 
@@ -147,8 +147,8 @@ describe('resetDevDb（runSteps=false：只建数据面）', () => {
     expect(readFileSync(paths.goldenV1)).toEqual(readFileSync(fx.sourceGoldenV1));
 
     // 配置真的能被 loadConfig 解析
-    const toml = readFileSync(paths.configFile, 'utf8');
-    expect(toml).toBe(buildDevToml(paths));
+    const yaml = readFileSync(paths.configFile, 'utf8');
+    expect(yaml).toBe(buildDevYaml(paths));
 
     // 源只读：内容与 mtime 不变
     expect(hashTree(fx.sessionsRoot)).toEqual(sessionsHash);
@@ -187,8 +187,8 @@ describe('resetDevDb（runSteps=false：只建数据面）', () => {
       stdout: () => {},
       stderr: () => {},
     });
-    const toml = readFileSync(result.paths.configFile, 'utf8');
-    expect(toml).toContain(path.resolve(altRoot).replace(/\\/g, '/'));
+    const yaml = readFileSync(result.paths.configFile, 'utf8');
+    expect(yaml).toContain(path.resolve(altRoot).replace(/\\/g, '/'));
     expect(result.sources.sessionsBefore.files).toBe(1);
   });
 });

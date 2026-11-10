@@ -6,10 +6,10 @@ param(
 # ASCII only (PowerShell 5.1 codepage).
 $ErrorActionPreference = 'SilentlyContinue'
 
-# Honor a custom [storage] data_dir in ~/.moshi/config.toml (~ expands to the profile).
-$configFile = Join-Path $env:USERPROFILE '.moshi\config.toml'
+# Honor a custom storage.data_dir in ~/.moshi/config.yaml (~ expands to the profile).
+$configFile = Join-Path $env:USERPROFILE '.moshi\config.yaml'
 if (Test-Path $configFile) {
-  $m = Select-String -Path $configFile -Pattern '^\s*data_dir\s*=\s*"([^"]+)"' | Select-Object -First 1
+  $m = Select-String -Path $configFile -Pattern '^\s*data_dir:\s*"?([^"\r\n]+)"?' | Select-Object -First 1
   if ($m) {
     $dir = $m.Matches[0].Groups[1].Value.Replace('~', $env:USERPROFILE).Replace('/', '\')
     $LockFile = Join-Path $dir 'daemon.lock'

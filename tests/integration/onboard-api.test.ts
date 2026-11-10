@@ -45,7 +45,7 @@ async function makeApp(): Promise<string> {
     token: TOKEN,
     home,
     env: { ...process.env, [PLUGIN_DIR_ENV]: pluginRoot },
-    configFile: path.join(home, 'config.toml'),
+    configFile: path.join(home, 'config.yaml'),
   });
   appRef.app = app;
   return pluginRoot;

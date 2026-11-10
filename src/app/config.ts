@@ -6,7 +6,7 @@
  * 2. 缺省键用默认值，不报错——配置文件允许只写要改的项；
  * 3. `~` 由我们自己展开（Node 不展开），路径一律在加载后变成绝对路径。
  *
- * 键名保持 TOML 里的 snake_case，不做 camelCase 映射：文档、配置、代码三处同名，
+ * 键名保持配置里的 snake_case，不做 camelCase 映射：文档、配置、代码三处同名，
  * 少一层翻译就少一类"改了一处忘了另一处"的 bug。
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -14,7 +14,7 @@ import os from 'node:os';
 import { EMBED_DIM, EMBED_MODEL } from '../domain/embedding.js';
 import { SIDECAR_PIPE_NAME } from '../infra/sidecar/spawn.js';
 import path from 'node:path';
-import TOML from '@iarna/toml';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { MoshiError } from '../domain/errors.js';
 import {
@@ -471,7 +471,7 @@ function formatIssues(err: z.ZodError): string[] {
 }
 
 export interface LoadOptions {
-  /** 配置文件路径；不传则用 `$MOSHI_CONFIG` 或 `~/.moshi/config.toml` */
+  /** 配置文件路径；不传则用 `$MOSHI_CONFIG` 或 `~/.moshi/config.yaml` */
   file?: string;
   /** 覆盖 home 目录（测试用） */
   home?: string;
@@ -480,7 +480,7 @@ export interface LoadOptions {
 export function defaultConfigPath(home: string = os.homedir()): string {
   const fromEnv = process.env['MOSHI_CONFIG'];
   if (fromEnv !== undefined && fromEnv !== '') return expandHome(fromEnv, home);
-  return path.join(home, '.moshi', 'config.toml');
+  return path.join(home, '.moshi', 'config.yaml');
 }
 
 /** 配置文件不存在不算错误：首次运行全部走默认值 */
@@ -500,9 +500,9 @@ export function loadConfig(opts: LoadOptions = {}): Config {
       });
     }
     try {
-      raw = TOML.parse(text);
+      raw = parseYaml(text) ?? {};
     } catch (err) {
-      throw new MoshiError('E_CONFIG', `配置文件不是合法 TOML：${file}`, {
+      throw new MoshiError('E_CONFIG', `配置文件不是合法 YAML：${file}`, {
         file,
         cause: (err as Error).message,
       });
@@ -637,7 +637,7 @@ export function findEditableConfigEntry(dotted: string): EditableConfigEntry | u
 }
 
 /**
- * 读原始 TOML 文档（不做默认值填充、不展开 `~`）。
+ * 读原始 YAML 文档（不做默认值填充、不展开 `~`）。
  *
  * 编辑必须保留用户文件里已有的、不在白名单里的键（例如 `model.gat_mode`），
  * 所以这里返回原始对象，而不是 `loadConfig()` 的结果。
@@ -654,18 +654,18 @@ export function readConfigDocument(file: string): Record<string, unknown> {
     });
   }
   try {
-    return TOML.parse(text) as Record<string, unknown>;
+    return (parseYaml(text) ?? {}) as Record<string, unknown>;
   } catch (err) {
-    throw new MoshiError('E_CONFIG', `配置文件不是合法 TOML：${file}`, {
+    throw new MoshiError('E_CONFIG', `配置文件不是合法 YAML：${file}`, {
       file,
       cause: (err as Error).message,
     });
   }
 }
 
-/** 原始对象 → TOML 文本；只做序列化，不做校验 */
+/** 原始对象 → YAML 文本；只做序列化，不做校验 */
 export function stringifyConfigDocument(raw: Record<string, unknown>): string {
-  const text = TOML.stringify(raw as Parameters<typeof TOML.stringify>[0]);
+  const text = stringifyYaml(raw);
   return text.endsWith('\n') ? text : `${text}\n`;
 }
 
@@ -686,7 +686,7 @@ export type ConfigDocumentCheck =
 /**
  * 用 `ConfigSchema` 校验一份**原始文档**（允许只写部分键，缺省走默认值）。
  * 不复用 `loadConfig()` 是因为它还会展开路径、检查 host/port 关系，写盘前只想
- * 先确认「这份 TOML 能被加载」。
+ * 先确认「这份 YAML 能被加载」。
  */
 export function checkConfigDocument(raw: unknown): ConfigDocumentCheck {
   const parsed = ConfigSchema.safeParse(raw);

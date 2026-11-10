@@ -206,17 +206,18 @@ describe('seedDevDb --config（P3-A8 统一配置）', () => {
     const home = path.join(tmp, 'home'); // 故意不创建
     const dataDir = path.join(tmp, 'data');
     const projectsRoot = path.join(tmp, 'projects');
-    const configFile = path.join(tmp, 'config.toml');
+    const configFile = path.join(tmp, 'config.yaml');
     writeFileSync(
       configFile,
       [
-        '[storage]',
-        `data_dir = "${dataDir.replace(/\\/g, '/')}"`,
+        'storage:',
+        `  data_dir: "${dataDir.replace(/\\/g, '/')}"`,
         '',
-        '[[ingest.sources]]',
-        'id = "dev"',
-        'adapter = "claude-code"',
-        `root = "${projectsRoot.replace(/\\/g, '/')}"`,
+        'ingest:',
+        '  sources:',
+        '    - id: "dev"',
+        '      adapter: "claude-code"',
+        `      root: "${projectsRoot.replace(/\\/g, '/')}"`,
         '',
       ].join('\n'),
       'utf8',

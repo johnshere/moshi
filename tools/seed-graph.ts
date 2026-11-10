@@ -10,8 +10,8 @@
  *   pnpm exec tsx tools/seed-graph.ts --data .dsh/temp/p2-02/data --facts 5000 --edges 15000 [--missing 50] [--reset]
  *   pnpm exec tsx tools/seed-graph.ts --data .dsh/temp/p2-02/data --reset
  *
- * 与 daemon 配合：让 daemon 读同一份 config（`MOSHI_CONFIG=<toml>`），toml 里
- * `[storage] data_dir` 指向同一个 `--data`。
+ * 与 daemon 配合：让 daemon 读同一份 config（`MOSHI_CONFIG=<yaml>`），yaml 里
+ * `storage.data_dir` 指向同一个 `--data`。
  */
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -372,7 +372,7 @@ export function seedGraph(opts: SeedGraphOptions): SeedGraphResult {
       console.log(
         `[seed-graph] fact=${counts.facts} edge=${counts.edges}（本次 ${edges}）layout=${counts.laid} 可上屏=${counts.drawable}`,
       );
-      console.log('[seed-graph] 下一步：MOSHI_CONFIG=<toml> 里把 storage.data_dir 指到同一目录，起 daemon');
+      console.log('[seed-graph] 下一步：MOSHI_CONFIG=<yaml> 里把 storage.data_dir 指到同一目录，起 daemon');
     }
     return { ...counts, inserted_edges: edges, ms: Date.now() - started };
   } finally {
