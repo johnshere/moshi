@@ -20,6 +20,7 @@
  */
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -64,19 +65,145 @@ function optionOf(ctx, name) {
   return typeof o === 'string' && o !== '' ? o : null;
 }
 
-/** 从 ctx 里尽力拿信息；拿不到就是 null（**绝不拿 process.cwd() 充数**） */
+/**
+ * 从 ctx 里尽力拿信息；拿不到就是 null（**绝不拿 process.cwd() 充数**）。
+ *
+ * ctx 是**扁平**的（Magpie 的 `GatewayContext`）：`session / cwd / agent / model /
+ * protocol / origin`。宿主不会把它们再包一层 `context`。
+ */
 function contextOf(ctx) {
-  const c = (ctx && ctx.context) || {};
-  const headers = (c.headers && typeof c.headers === 'object') ? c.headers : {};
-  const pickHeader = (name) => {
-    const v = headers[name] || headers[name.toLowerCase()];
-    return typeof v === 'string' && v !== '' ? v : null;
-  };
+  const c = ctx && typeof ctx === 'object' ? ctx : {};
   return {
-    sessionId: str(c.sessionID) || str(c.session_id) || pickHeader('x-magpie-session'),
-    cwd: str(c.cwd) || str(c.workDir) || pickHeader('x-magpie-work-dir'),
-    agent: str(c.agent) || str(c.agentName) || HOST,
-    model: str(c.model) || null,
+    sessionId: str(c.session),
+    cwd: cleanCwd(str(c.cwd)),
+    agent: str(c.agent) || HOST,
+    model: str(c.model),
+  };
+}
+
+/**
+ * 宿主给的 cwd 可能带引号、转义和句末点——DSH 的目录上下文是
+ * `Current working directory: "E:\\Workspace\\x".`，而 Magpie 的 `workDirIn`
+ * 只做 TrimSpace 不剥这些。清不干净就当没有（宁可退化，也不给 daemon 一个假路径）。
+ */
+function cleanCwd(raw) {
+  if (typeof raw !== 'string') return null;
+  let v = raw.trim();
+  if (v === '') return null;
+  v = v.replace(/\s+\(was\s+.*\)$/i, '').trim();
+  if (v.endsWith('".') || v.endsWith("'.")) v = v.slice(0, -1);
+  if (v.length >= 2 && v.startsWith('"') && v.endsWith('"')) {
+    try {
+      const parsed = JSON.parse(v);
+      if (typeof parsed === 'string') v = parsed;
+    } catch {
+      v = v.slice(1, -1);
+    }
+  } else if (v.endsWith('.')) {
+    v = v.slice(0, -1);
+  }
+  v = v.trim();
+  return v === '' ? null : v;
+}
+
+/** 一条消息的纯文本（content 可以是字符串，也可以是 parts 数组） */
+function messageText(m) {
+  if (!m || typeof m !== 'object') return null;
+  if (typeof m.content === 'string') return m.content;
+  if (!Array.isArray(m.content)) return null;
+  const parts = [];
+  for (const part of m.content) {
+    if (part && typeof part.text === 'string' && part.text !== '') parts.push(part.text);
+  }
+  return parts.length === 0 ? null : parts.join('\n');
+}
+
+/** cwd 的候选句式（与 Magpie `workdir.go` 的 callerForms 一致，多认一档 Working directory） */
+const CWD_PATTERNS = [
+  /^[ \t]*(?:-[ \t]+)?(?:Current working directory|Primary working directory|CWD|Working directory)[ \t]*:[ \t]*(.+)$/gm,
+  /<cwd>[ \t]*([^<\n]+?)[ \t]*<\/cwd>/g,
+];
+
+/**
+ * 从请求 body 里解析 cwd。`ctx.cwd` 对 DSH 恒为空——Magpie 只在 system 层认
+ * `Current working directory:`，而 DSH 把它放在一条 user 消息里，故自解析兜底。
+ */
+function cwdFromBody(body) {
+  const messages = body && Array.isArray(body.messages) ? body.messages : [];
+  let found = null;
+  for (const m of messages) {
+    const text = messageText(m);
+    if (text === null) continue;
+    for (const re of CWD_PATTERNS) {
+      re.lastIndex = 0;
+      let hit;
+      while ((hit = re.exec(text)) !== null) {
+        const v = cleanCwd(hit[1]);
+        if (v !== null) found = v; // 取最后一次出现（与 Magpie 的 workDirIn 口径一致）
+      }
+    }
+  }
+  return found;
+}
+
+/**
+ * 会话开头：跳过 DSH 每轮都会替换的 runtime-context 快照，取第一条真实用户消息。
+ * 快照的文本以 `Current runtime context` 开头（清空时是 `Current runtime context: none.`）。
+ */
+function openingUserText(body) {
+  const messages = body && Array.isArray(body.messages) ? body.messages : [];
+  for (const m of messages) {
+    if (!m || m.role !== 'user') continue;
+    const text = messageText(m);
+    if (text === null) continue;
+    const t = text.trim();
+    if (t.startsWith('Current runtime context')) continue;
+    return t.replace(/\s+/g, ' ').slice(0, 400);
+  }
+  return null;
+}
+
+/**
+ * 会话标志：宿主给了 session 就用；没给（DSH 走 pi-ai，不发任何 session 头，
+ * 而 Magpie 只转发 header、不自己生成）就用「cwd + 会话开头」哈希。
+ * 这是 Magpie 社区记忆插件（nowledge-mem / respire-memory / powercontext）的通行做法：
+ * 会话开头整段会话不变，而 query 每轮都变。
+ */
+function sessionOf(body, info, ctxCwd) {
+  if (info.sessionId !== null) return { id: info.sessionId, source: HOST };
+  const opening = openingUserText(body);
+  if (opening === null) return { id: null, source: 'none' };
+  // 只用宿主**明确给出**的 ctx.cwd 参与指纹：body 里解析出的目录来自 DSH 可被替换的
+  // runtime-context 快照，拿它当熵会让同一会话在快照清空时中途漂移。
+  const cwd = ctxCwd === null ? '' : ctxCwd;
+  const id = crypto
+    .createHash('sha256')
+    .update(`moshi-magpie-conv/1\n${cwd}\n${opening}`, 'utf8')
+    .digest('hex')
+    .slice(0, 32);
+  return { id, source: 'conversation-opening' };
+}
+
+/** `ctx.state` 是宿主给的**请求级**共享容器：把 onRequest 算出的身份留给 onResponse */
+function rememberIdentity(ctx, info) {
+  try {
+    if (ctx && ctx.state && typeof ctx.state === 'object') {
+      ctx.state.moshiSessionId = info.sessionId;
+      ctx.state.moshiSessionSource = info.sessionSource;
+      ctx.state.moshiCwd = info.cwd;
+    }
+  } catch {
+    // 宿主的 state 不可写就不留，onResponse 退回"没有身份"
+  }
+}
+
+function recalledIdentity(ctx) {
+  const s = ctx && ctx.state && typeof ctx.state === 'object' ? ctx.state : {};
+  const id = str(s.moshiSessionId);
+  return {
+    sessionId: id,
+    sessionSource: id === null ? null : str(s.moshiSessionSource),
+    cwd: cleanCwd(str(s.moshiCwd)),
   };
 }
 
@@ -117,16 +244,14 @@ async function post(ctx, path, payload, budgetMs) {
   }
 }
 
-/** 信封：Magpie 拿不到 project，`identity.project_id` 留空，由 daemon 侧统一解析 */
+/** 信封：project_id 由 daemon 侧按 cwd 解析；moshi_id 也由 daemon 从会话标志重算 */
 function envelopeOf(turn, info, payload, budgetMs, phaseMs) {
-  // moshi_id 在这里算不了（会话 id 是宿主的，哈希口径在 daemon 侧），先原样透传，
-  // daemon 会用同一个纯函数在本地重算并回填——两边不一致时以 daemon 为准
   return {
     schema: SCHEMA,
     host: HOST,
     turn,
     ts: new Date().toISOString(),
-    identity: { moshi_id: info.sessionId, project_id: null, identity_source: 'unknown' },
+    identity: { moshi_id: null, project_id: null, identity_source: 'unknown' },
     caps: {
       turns: ['user_prompt', 'response'],
       inject: true,
@@ -136,7 +261,7 @@ function envelopeOf(turn, info, payload, budgetMs, phaseMs) {
       budget: { phaseMs: phaseMs, deadlineMs: budgetMs },
     },
     budget: { deadlineMs: budgetMs, phaseTimeoutMs: phaseMs },
-    session: { id: info.sessionId, source: HOST },
+    session: { id: info.sessionId, source: info.sessionSource || HOST },
     project: { cwd: info.cwd, identitySource: 'unknown' },
     payload: payload,
   };
@@ -196,6 +321,12 @@ function report(ctx, code, count) {
  */
 async function onRequest(body, ctx) {
   const info = contextOf(ctx);
+  const ctxCwd = info.cwd;
+  if (info.cwd === null) info.cwd = cwdFromBody(body);
+  const session = sessionOf(body, info, ctxCwd);
+  info.sessionId = session.id;
+  info.sessionSource = session.source;
+  rememberIdentity(ctx, info);
   const query = lastUserText(body);
   if (!query) {
     report(ctx, 'skipped', 0);
@@ -215,7 +346,8 @@ async function onRequest(body, ctx) {
     report(ctx, Array.isArray(result.degraded) && result.degraded.length > 0 ? 'empty' : 'skipped', 0);
     return undefined;
   }
-  report(ctx, 'ready', result.evidence ? result.evidence.length : 0);
+  // 宿主把第二个参数当**注入字节数**记账（面板上的「已注入 N 字节」），不是证据条数
+  report(ctx, 'ready', Math.min(new TextEncoder().encode(result.text).length, 32768));
   return injectMail(body, result.text);
 }
 
@@ -244,6 +376,12 @@ function replyText(reply) {
  */
 function onResponse(reply, ctx) {
   const info = contextOf(ctx);
+  const memo = recalledIdentity(ctx);
+  if (memo.sessionId !== null) {
+    info.sessionId = memo.sessionId;
+    info.sessionSource = memo.sessionSource;
+  }
+  if (info.cwd === null && memo.cwd !== null) info.cwd = memo.cwd;
   const text = replyText(reply);
   if (!text) {
     report(ctx, 'skipped', 0);

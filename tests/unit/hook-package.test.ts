@@ -20,6 +20,7 @@ const pkg = require('../../packages/magpie-moshi/identity.cjs') as {
 };
 const hook = require('../../packages/magpie-moshi/hook.cjs') as {
   onRequest: (body: unknown, ctx: unknown) => Promise<unknown>;
+  onResponse: (reply: unknown, ctx: unknown) => unknown;
 };
 
 describe('packages/magpie-moshi/identity.cjs 与 domain/identity.ts 逐字节一致', () => {
@@ -102,7 +103,7 @@ describe('hook.cjs 从 daemon.lock 取端口与 token（token 每次 daemon 启�
 
     const out = await hook.onRequest(
       { messages: [{ role: 'user', content: '范围模型是什么' }] },
-      { context: { sessionID: 'sess-1' } },
+      { session: 'sess-1' },
     );
     expect(out).toBeUndefined(); // inject:false → 原请求原样放行
     expect(calls).toHaveLength(1);
@@ -122,9 +123,103 @@ describe('hook.cjs 从 daemon.lock 取端口与 token（token 每次 daemon 启�
 
     const out = await hook.onRequest(
       { messages: [{ role: 'user', content: 'hi' }] },
-      { context: { sessionID: 'sess-1' } },
+      { session: 'sess-1' },
     );
     expect(out).toBeUndefined();
     expect(called).toBe(0);
+  });
+});
+
+describe('hook.cjs 身份：扁平 ctx + 无 session 头时的会话开头指纹（DSH 走 pi-ai，不发 session 头）', () => {
+  const savedFetch = globalThis.fetch;
+
+  interface Envelope {
+    turn: string;
+    session: { id: string | null; source: string };
+    project: { cwd: string | null };
+    identity: { moshi_id: string | null };
+  }
+
+  afterEach(() => {
+    globalThis.fetch = savedFetch;
+  });
+
+  function setup(reply: { text: string } | null): { envelopes: Envelope[]; reports: [string, number][] } {
+    const envelopes: Envelope[] = [];
+    const reports: [string, number][] = [];
+    globalThis.fetch = (async (_url: string, init: { body: string }) => {
+      envelopes.push(JSON.parse(init.body) as Envelope);
+      const json = async () =>
+        reply === null
+          ? { schema: 'moshi-hook/1', inject: false, degraded: [], text: '' }
+          : { schema: 'moshi-hook/1', inject: true, degraded: [], text: reply.text, evidence: [1, 2, 3, 4, 5] };
+      return { ok: true, json };
+    }) as unknown as typeof fetch;
+    return { envelopes, reports };
+  }
+
+  function ctxOf(reports: [string, number][], state: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      options: { token: 'test-token' },
+      state,
+      report: (code: string, count: number) => reports.push([code, count]),
+    };
+  }
+
+  it('扁平 ctx 的 session/cwd 原样进入信封（宿主给了就不做指纹）', async () => {
+    const { envelopes, reports } = setup({ text: '## 记忆台账（moshi）\n[M1] hello' });
+    await hook.onRequest(
+      { messages: [{ role: 'user', content: 'q' }] },
+      { session: 'host-sess', cwd: 'E:\\proj', ...ctxOf(reports) },
+    );
+    expect(envelopes[0]?.session.id).toBe('host-sess');
+    expect(envelopes[0]?.project.cwd).toBe('E:\\proj');
+  });
+
+  it('没有 session 时用「cwd + 会话开头」派生：同开头稳定、换开头就换号，快照不参与', async () => {
+    const snapA = {
+      role: 'user',
+      content:
+        'Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent working directory: "E:\\\\Workspace\\\\moshi".',
+    };
+    const snapB = { role: 'user', content: 'Current runtime context: none. Earlier runtime-context snapshots no longer apply.' };
+    const opening = { role: 'user', content: '把 golden 默认路径补上' };
+    const { envelopes, reports } = setup(null);
+    const ctx = ctxOf(reports);
+
+    await hook.onRequest({ messages: [snapA, opening] }, ctx);
+    await hook.onRequest({ messages: [snapB, { role: 'assistant', content: '好' }, opening] }, ctx);
+    await hook.onRequest({ messages: [snapA, { role: 'user', content: '换个开头' }] }, ctx);
+
+    const first = envelopes[0]?.session.id;
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    expect(envelopes[1]?.session.id).toBe(first); // 快照变了、开头没变 → 同一个会话
+    expect(envelopes[2]?.session.id).not.toBe(first); // 开头变了 → 新会话
+    expect(envelopes[0]?.session.source).toBe('conversation-opening');
+    // DSH 的目录文本带引号/双反斜杠/句末点，插件自己清洗
+    expect(envelopes[0]?.project.cwd).toBe('E:\\Workspace\\moshi');
+    expect(envelopes[0]?.identity.moshi_id).toBeNull();
+  });
+
+  it('report 传注入文本的字节数（宿主面板按字节记账，不是证据条数）', async () => {
+    const text = '## 记忆台账（moshi）\n[M1] hello';
+    const { reports } = setup({ text });
+    await hook.onRequest({ messages: [{ role: 'user', content: 'q' }] }, ctxOf(reports));
+    const last = reports[reports.length - 1];
+    expect(last?.[0]).toBe('ready');
+    expect(last?.[1]).toBe(new TextEncoder().encode(text).length);
+    expect(last?.[1]).toBeGreaterThan(5);
+  });
+
+  it('onResponse 复用 onRequest 留在 ctx.state 里的会话标志', async () => {
+    const { envelopes, reports } = setup(null);
+    const state: Record<string, unknown> = {};
+    const ctx = ctxOf(reports, state);
+    const body = { messages: [{ role: 'user', content: '起始消息' }] };
+    await hook.onRequest(body, ctx);
+    hook.onResponse({ choices: [{ message: { content: '回答' } }] }, ctx);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const signal = envelopes.find((e) => e.turn === 'response');
+    expect(signal?.session.id).toBe(envelopes[0]?.session.id);
   });
 });

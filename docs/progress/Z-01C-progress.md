@@ -49,3 +49,10 @@
 - 浏览器全流程：首启弹窗 → 二次确认（列 5 条写入路径）→ 真实写入 `~/.config/magpie/plugins` → 跳 `/ui/hook?from=onboard&result=ok` 显示结果 → 页面「卸载」删净回滚。
 - 机测发现并修 4 个 bug：`/ui/hook` 被误当受保护路径（401）、弹窗与五态提示条重叠、MCP 旧文案残留、装完同路由跳转不刷新。
 - 提交：`3657a67`（功能）、`0426c7c`（机测修复），均已 push。
+
+### 2026-11-10 19:25 m1 身份适配修复（Z-01C-a/b 补 · 真 Magpie 往返）
+
+- 插件真实装入本机 Magpie 0.1.3362（本地路径 spec，`plugin-host` 热加载）；发现三处适配错误并修复：ctx 读成嵌套（真实是扁平 `GatewayContext`）、cwd 未清洗、`report` 第二参误传证据条数（面板显示「已注入 5 字节」）。
+- 身份策略：`ctx.session` 非空直接用；DSH 无 session 头 → 会话开头指纹（跳过 `runtime-context` 快照），cwd 自解析 body 只用于 project，不进指纹。
+- 证据：真实流量 `identity_source=vcs`、`inject_bytes` 649–842、latency 70–98ms；直连 recall `moshi_id=4628a84d…`、`project_id=7dcf8c88…`、注入头带工程哈希。
+- 回归：`pnpm verify` 145 files / 1705 tests、`pnpm build` 通过；设计文档补 §7.1.1（字段来源源码级更正）。

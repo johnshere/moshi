@@ -383,11 +383,27 @@ moshi-hook://magpie/<moshi_id>/<turn>
 | --- | --- | --- |
 | 包在 `package.json` 声明 `magpie.hooks`，导出 `{onRequest(body,ctx), onResponse(reply,ctx)}` | `:1487-1489` | 缺 `onRequest` 报 `magpie.hooks exports no onRequest` |
 | 只有两个时机 | `:1593-1607`、`:1648` | 见 §2.2 矩阵 |
-| `ctx = {...p.context, options, state, signal, report}` | `:1592` | **无 session/cwd/project**；`report` 只能给枚举 |
+| `ctx = {...p.context, options, state, signal, report}` | `:1592` | ctx 是**扁平**的 `GatewayContext`：`session/cwd/agent/model/protocol/origin/query`；DSH 场景下 session/cwd 均为空，插件需自解析 body（2026-11-10 更正，见 §7.1.1） |
 | 改写后 `tools/tool_choice/function_call/functions/toolConfig/model/stream` 必须与原来一致 | `:1596-1600` | 只动 `messages` |
 | 单钩子超时 `gatewayTimeoutMs` 默认 1000ms（100–10000），总预算 `min(10000,max(2000,Σ))` | `:1556-1557` | 预算协商进协议（§3.2） |
 | 抛错/超时只 warn，原请求保留 | `:1607` | 失败姿态安全 |
 | `report(code,count)` 只接受 7 个枚举 + 字节数（≤32768） | `:1585-1590` | §3.4 只回枚举 |
+
+### 7.1.1 身份字段的真实来源（2026-11-10 更正，源码级）
+
+Magpie 的 `internal/plugin/gateway.go` 定义 `GatewayContext{Origin, Protocol, Model, Stream, Path, Agent, Session, Cwd, Query}`，由 `internal/gateway/middleware.go` 在网关转发前填：
+
+- `Session = sessionOf(r.Header)`：**只读请求头**，顺序为 `X-Magpie-Session` → `x-opencode-session` → `x-session-affinity` → `x-session-id` → `session_id` → `session-id` → `x-claude-code-session-id` → `x-conversation-id` → `x-deepseek-harness-session-id`。Magpie **不生成** session，空就是空。
+- `Cwd = workDir(req)`：**只解析请求体文本**（`Current working directory:` / `Primary working directory:` / `CWD:` / `<cwd>` / `<env>` 内的 `Working directory:`），且只在 system 层与非 assistant 消息里找；`callerForms` 认 piDir，`turnForms` 只认 `<cwd>`/`<env>`/`<system-reminder>`。
+
+对本机 DSH 的结论：DSH 走 `dsh-llm-pi-ai`，**不发任何 session 头**（`sendSessionAffinityHeaders` 仅 OpenRouter 默认开、且被 `withhold` 不可配），目录文本写在一条 `source.kind=runtime-context` 的 **user 消息**里（每轮可能被替换/清空）→ `ctx.session` 与 `ctx.cwd` 对 DSH **都恒为空**。
+
+因此适配器采取（Magpie 社区记忆插件 `nowledge-mem` / `respire-memory` / `powercontext` 同款做法）：
+
+1. `ctx.session` 非空 → 直接作会话标志（`session.source = magpie`）；
+2. 为空 → `sha256('moshi-magpie-conv/1', ctx.cwd ?? '', 跳过 runtime-context 快照后的首条 user 消息)`，`session.source = conversation-opening`；
+3. `cwd` 由插件自解析 body（`cleanCwd` 剥引号/双反斜杠/句末点），只用于 `project`；**不参与指纹**——它来自可被替换的快照，进指纹会让同一会话中途漂移；
+4. `identity.moshi_id` 仍由 daemon 从 `session.id` 重算（口径不变）。
 
 ### 7.2 关键判断：Magpie 侧**不能** safe-write 共享 bundle
 
