@@ -908,9 +908,9 @@ export async function seedDevDb(options: SeedOptions = {}): Promise<SeedResult> 
     const facts = readFacts(db);
     const golden = buildGolden(facts);
     // golden 路径由配置决定（P3-A8）：dev 配置下 = `<data_dir>/golden/golden.v1.jsonl`
-    mkdirSync(path.dirname(goldenFile), { recursive: true });
-    writeFileSync(goldenFile, golden.map((g) => JSON.stringify(g)).join('\n') + '\n', 'utf8');
-    log(`[seed:devdb] golden：${golden.length} 题 → ${goldenFile}`);
+    const goldenBody = `${golden.map((g) => JSON.stringify(g)).join('\n')}\n`;
+    writeGoldenFiles(path.dirname(goldenFile), goldenBody);
+    log(`[seed:devdb] golden：${golden.length} 题 → ${goldenFile}（同时写 golden.jsonl）`);
 
     // 6) eval run（默认走临时副本，不污染 query_log）
     const evalStep = await runStep('moshi eval run --golden v1', ['eval', 'run', '--golden', 'v1']);
@@ -964,6 +964,21 @@ function collectCounts(db: Db): Record<string, number> {
     db.prepare("SELECT COUNT(*) AS n FROM edge WHERE etype='supersedes'").get() as { n: number }
   ).n;
   return counts;
+}
+
+/**
+ * 把同一份 golden 题集写两个文件名：
+ * - `golden.v1.jsonl`：题集版本名的固定落点（seed 的既定产物）；
+ * - `golden.jsonl`：`eval.golden_set` 的默认值（`<data_dir>/golden/golden.jsonl`）指向的名字。
+ * 只写前者会让无参 `moshi eval run` 在默认配置下 ENOENT（M1 2026-11-10 实测）。
+ */
+export function writeGoldenFiles(goldenDir: string, body: string): { v1: string; defaultFile: string } {
+  mkdirSync(goldenDir, { recursive: true });
+  const v1 = path.join(goldenDir, 'golden.v1.jsonl');
+  const defaultFile = path.join(goldenDir, 'golden.jsonl');
+  writeFileSync(v1, body, 'utf8');
+  writeFileSync(defaultFile, body, 'utf8');
+  return { v1, defaultFile };
 }
 
 /**

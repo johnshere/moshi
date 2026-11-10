@@ -9,7 +9,7 @@
  *
  * 全部落在 `mkdtempSync(tmpdir())` 下的临时库，**不碰真实 home**（C:\Users\Administrator）。
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -29,6 +29,7 @@ import {
   SEED,
   SESSIONS_PER_DAY,
   startMsFor,
+  writeGoldenFiles,
 } from '../../tools/seed-devdb.js';
 
 const opened: Db[] = [];
@@ -180,6 +181,22 @@ describe('parseImportSummary', () => {
 
   it('缺字段时全 0（不抛）', () => {
     expect(parseImportSummary('nothing here').sessions).toBe(0);
+  });
+});
+
+describe('writeGoldenFiles（S1：默认路径兜底）', () => {
+  it('v1 与默认名 golden.jsonl 都写，内容逐字节一致', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'moshi-golden-'));
+    try {
+      const body = '{"id":"g-1"}\n{"id":"g-2"}\n';
+      const res = writeGoldenFiles(path.join(dir, 'golden'), body);
+      expect(res.v1).toBe(path.join(dir, 'golden', 'golden.v1.jsonl'));
+      expect(res.defaultFile).toBe(path.join(dir, 'golden', 'golden.jsonl'));
+      expect(readFileSync(res.v1, 'utf8')).toBe(body);
+      expect(readFileSync(res.defaultFile, 'utf8')).toBe(body);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
