@@ -47,3 +47,22 @@ if (existsSync(join(root, UI_DIST_SRC))) {
 } else {
   console.warn(`[copy-assets] 未找到 ${UI_DIST_SRC}/，/ui/graph 会返回 503；先跑 pnpm build:ui`);
 }
+
+/**
+ * Magpie 插件包（`packages/magpie-moshi`）：安装器按 `dist/magpie-moshi` 找源目录，
+ * 回退才是仓库里的 `packages/magpie-moshi`（见 `src/app/onboard/install.ts`）。
+ * 只搬四个运行时文件，不带 node_modules（这个包零依赖）。
+ */
+const PLUGIN_SRC = 'packages/magpie-moshi';
+const PLUGIN_DEST = 'dist/magpie-moshi';
+const PLUGIN_FILES = ['hook.cjs', 'identity.cjs', 'index.cjs', 'package.json'];
+if (existsSync(join(root, PLUGIN_SRC, 'hook.cjs'))) {
+  rmSync(join(root, PLUGIN_DEST), { recursive: true, force: true });
+  mkdirSync(join(root, PLUGIN_DEST), { recursive: true });
+  for (const file of PLUGIN_FILES) {
+    copyFileSync(join(root, PLUGIN_SRC, file), join(root, PLUGIN_DEST, file));
+  }
+  console.log(`copied ${PLUGIN_SRC}/{${PLUGIN_FILES.join(',')}} -> ${PLUGIN_DEST}/`);
+} else {
+  console.warn(`[copy-assets] 未找到 ${PLUGIN_SRC}/hook.cjs，安装 Magpie 插件时会回退到仓库源码目录`);
+}

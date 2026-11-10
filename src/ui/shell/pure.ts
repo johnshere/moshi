@@ -24,16 +24,60 @@ export const PAGES: readonly PageDef[] = [
   { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
   { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
   { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
-  { key: 'settings', label: '设置与诊断', path: '/ui/settings', title: '自检红绿灯与配置视图' },
+  // 设置是**树节点**：五个二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
+  { key: 'settings', label: '设置', path: '/ui/settings', title: '接入 / 配置 / 维护 / 隐私 / 诊断' },
 ];
 
 export const DEFAULT_PAGE: PageKey = 'graph';
 
 const PAGE_KEYS: readonly string[] = PAGES.map((p) => p.key);
 
+/**
+ * 设置的五个二级（设计 §16.5.3，用户 m01506 裁决分类名）。
+ *
+ * **顺序即菜单顺序，第一项也是 `/ui/settings` 的默认落地页**：先接进来（接入），
+ * 再调参数（配置），然后维护/隐私/诊断——这是用户实际会走的顺序。
+ */
+export type SettingsSection = 'access' | 'config' | 'maintain' | 'privacy' | 'diagnose';
+
+export interface SettingsSectionDef {
+  key: SettingsSection;
+  label: string;
+  /** `/ui/settings/<key>` */
+  path: string;
+  title: string;
+}
+
+export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
+  {
+    key: 'access',
+    label: '接入',
+    path: '/ui/settings/access',
+    title: 'Agent 接入：Hook 插件与 MCP',
+  },
+  { key: 'config', label: '配置', path: '/ui/settings/config', title: '配置白名单键' },
+  { key: 'maintain', label: '维护', path: '/ui/settings/maintain', title: '索引重建、备份恢复、自动更新' },
+  { key: 'privacy', label: '隐私', path: '/ui/settings/privacy', title: '采集与导出、脱敏、清理' },
+  { key: 'diagnose', label: '诊断', path: '/ui/settings/diagnose', title: '自检、图质量、模型归档' },
+];
+
+export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access';
+
+const SECTION_KEYS: readonly string[] = SETTINGS_SECTIONS.map((s) => s.key);
+
+/**
+ * 接入页的**独立整页**路径（设计 §16.5.5）。与设置的 `/ui/settings/access` 是
+ * 同一个组件、两个外壳；这个地址是外部契约（`magpie.cmd` 用它拉起界面）。
+ */
+export const HOOK_UI_PATH = '/ui/hook';
+
 /** 解析后的路由态：页面 + 深链参数（全部已 trim，空串归一为 null）。 */
 export interface RouteInfo {
   page: PageKey;
+  /** 设置二级；非设置页恒为 null（`/ui/settings` 无二级 → 默认 access） */
+  section: SettingsSection | null;
+  /** `/ui/hook`：接入页独立整页（不属于五个一级页，单独一个屏幕位） */
+  standalone: 'hook' | null;
   /** `/ui/memories?fact=<id>`：选中并滚到可见 */
   factId: string | null;
   /** `/ui/memories?canonical_key=<k>`：按规范化键过滤（后端只有 q，见页内说明） */
@@ -50,23 +94,58 @@ function nonEmpty(raw: string | null | undefined): string | null {
   return v === '' ? null : v;
 }
 
+function normalizePath(pathname: string): string {
+  return pathname.replace(/\/+/g, '/').replace(/\/+$/, '');
+}
+
 /**
  * pathname → 页面。`/ui`、`/ui/`、未知子路径都回落默认页（深链拼错不该白屏）；
  * 末尾斜杠忽略，`/ui/memories/` 与 `/ui/memories` 等价。
+ *
+ * 两处**不是**五页但归到 settings 的路径（设计 §16.5.1 / §16.5.5）：
+ * - `/ui/settings/<section>`：二级深链，归 settings 且由 `sectionFromPath` 决定哪个二级；
+ * - `/ui/hook`：接入页独立整页，导航高亮跟着「设置 → 接入」走。
  */
 export function pageFromPath(pathname: string): PageKey {
-  const normalized = pathname.replace(/\/+/g, '/').replace(/\/+$/, '');
+  const normalized = normalizePath(pathname);
   if (normalized === '' || normalized === '/ui') return DEFAULT_PAGE;
+  if (normalized === HOOK_UI_PATH) return 'settings';
+  if (/^\/ui\/settings\/[A-Za-z0-9_-]+$/.test(normalized)) return 'settings';
   const match = /^\/ui\/([A-Za-z0-9_-]+)$/.exec(normalized);
   const key = match?.[1];
   if (key !== undefined && PAGE_KEYS.includes(key)) return key as PageKey;
   return DEFAULT_PAGE;
 }
 
+/**
+ * `/ui/settings/<section>` → 二级。三种情况：
+ * - 命中枚举 → 该二级；
+ * - **未知 section → access**（设计 §16.5.1：跳去图谱会让人以为自己点错了）；
+ * - 不是设置二级路径（含 `/ui/settings` 本身）→ null，由调用方按默认 access 处理。
+ */
+export function sectionFromPath(pathname: string): SettingsSection | null {
+  const normalized = normalizePath(pathname);
+  const match = /^\/ui\/settings\/([A-Za-z0-9_-]+)$/.exec(normalized);
+  const key = match?.[1];
+  if (key === undefined) return null;
+  return SECTION_KEYS.includes(key) ? (key as SettingsSection) : DEFAULT_SETTINGS_SECTION;
+}
+
+/** `/ui/hook` 与其查询串 → 独立整页。`?from=magpie` 的连接语义在服务端（server.ts）。 */
+export function isStandaloneHook(pathname: string): boolean {
+  return normalizePath(pathname) === HOOK_UI_PATH;
+}
+
 export function parseRoute(pathname: string, search: string): RouteInfo {
   const params = new URLSearchParams(search);
+  const page = pageFromPath(pathname);
+  const standalone = isStandaloneHook(pathname) ? 'hook' : null;
+  const section: SettingsSection | null =
+    page === 'settings' ? (sectionFromPath(pathname) ?? DEFAULT_SETTINGS_SECTION) : null;
   return {
-    page: pageFromPath(pathname),
+    page,
+    section,
+    standalone,
     factId: nonEmpty(params.get('fact')),
     canonicalKey: nonEmpty(params.get('canonical_key')),
     focusId: nonEmpty(params.get('focus')),
@@ -91,6 +170,50 @@ export function pageHref(page: PageKey, currentSearch = ''): string {
   const token = tokenOf(currentSearch);
   return hrefWith(`/ui/${page}`, token === null ? [] : [['token', token]]);
 }
+
+/** 设置二级导航目标（与 `pageHref` 同口径：只带 token）。 */
+export function settingsHref(section: SettingsSection, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  return hrefWith(`/ui/settings/${section}`, token === null ? [] : [['token', token]]);
+}
+
+/** 左侧菜单树的一个子节点（设置二级） */
+export interface NavChild {
+  key: SettingsSection;
+  label: string;
+  path: string;
+}
+
+/** 左侧菜单树的一个节点：有 children 的节点可展开（设置） */
+export interface NavNode {
+  key: PageKey;
+  label: string;
+  path: string;
+  title: string;
+  children?: readonly NavChild[];
+}
+
+/**
+ * 菜单树（设计 §16.5.2，用户 m01506 要求「左侧菜单树展开」）。
+ *
+ * 展开态由 URL 驱动，不落 localStorage：在设置下（`page==='settings'`）就展开，
+ * 离开就收起——「URL 是唯一真相源」（本文件头）。
+ */
+export const NAV: readonly NavNode[] = PAGES.map((page) =>
+  page.key === 'settings'
+    ? {
+        key: page.key,
+        label: page.label,
+        path: page.path,
+        title: page.title,
+        children: SETTINGS_SECTIONS.map((section) => ({
+          key: section.key,
+          label: section.label,
+          path: section.path,
+        })),
+      }
+    : { key: page.key, label: page.label, path: page.path, title: page.title },
+);
 
 /** 顶部搜索回车目标：`/ui/memories?q=<输入>`。 */
 export function memoriesHref(query: string, currentSearch = ''): string {

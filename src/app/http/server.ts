@@ -45,7 +45,7 @@ import { buildStatusExtras } from '../../core/ops/status.js';
 import { defaultUiDistDir, staticRoutes } from './static.js';
 import { HookTraceStore } from '../../core/hook/trace.js';
 import { hookRoutes, createHookConnection, type HookConnection } from './routes/hook.js';
-import { HOOK_PAGE_PATH, renderHookPage } from './hookPage.js';
+import { onboardRoutes } from '../onboard/routes.js';
 import type { HookDeps } from '../hook/service.js';
 import { dataPaths, defaultConfigPath } from '../config.js';
 
@@ -91,6 +91,9 @@ export interface HttpDeps {
   markerRoots?: string[];
   /** 钩子脚本路径（界面展示给用户） */
   hookEntry?: string;
+  /** 入驻探测的 home 与 env（测试注入临时目录；不传走 `os.homedir()` 与 `process.env`） */
+  home?: string;
+  env?: NodeJS.ProcessEnv;
   /** 钩子召回用的编码器（测试注入假实现；不传 = 只有 BM25/PPR 通道） */
   encode?: (text: string) => Promise<Float32Array | null>;
   /** 钩子召回的模型打分（同上） */
@@ -189,29 +192,23 @@ export async function buildHttpApp(deps: HttpDeps) {
     token: deps.token,
     connection,
   });
-  // `?from=magpie` 是"连接"的唯一自动入口；断开态下**不自动连回去**（F8）
-  app.get(HOOK_PAGE_PATH, async (req, reply) => {
-    const query = (req.query ?? {}) as Record<string, string>;
-    const fromMagpie = query['from'] === 'magpie';
-    // F8：从 magpie.cmd 拉起 = 视为连接。这是"连接"的唯一自动入口。
-    if (fromMagpie) {
-      connection.markConnected();
-      deps.cfg.hook.magpie_enabled = true;
-    }
-    const needsConnect =
-      !connection.connected && (connection.explicitlyDisconnected || !deps.cfg.hook.magpie_enabled);
-    return reply
-      .type('text/html; charset=utf-8')
-      .header('cache-control', 'no-cache')
-      .send(
-        renderHookPage({
-          token: deps.token,
-          fromMagpie,
-          needsConnect,
-          port: deps.cfg.server.port,
-          hookEntry: deps.hookEntry ?? '(未打包)',
-        }),
-      );
+  // `?from=magpie` 是"连接"的唯一自动入口；断开态下**不自动连回去**（F8）。
+  // 页面已迁成 React（§16.5.5），但连接语义留在服务端：前端没加载完就不算连上
+  // 会让 F8 遮罩闪一下，且 Magpie 侧 `moshi.cmd` 拉起时前端可能还在下载。
+  app.addHook('onRequest', async (req) => {
+    if (!req.url.startsWith('/ui/hook')) return;
+    const query = new URL(req.url, 'http://127.0.0.1').searchParams;
+    if (query.get('from') !== 'magpie') return;
+    connection.markConnected();
+    deps.cfg.hook.magpie_enabled = true;
+  });
+
+  // ── 客户端入驻（Z-01C-h / i，设计 §16.3~§16.6）：探测 / 状态 / 安装计划 / 安装 ──
+  await app.register(onboardRoutes, {
+    prefix: '/hook/api',
+    dataDir: dataPaths(deps.cfg).root,
+    ...(deps.home === undefined ? {} : { home: deps.home }),
+    ...(deps.env === undefined ? {} : { env: deps.env }),
   });
 
   // ── 状态条：daemon + sidecar + vector（概设 §10.1 三灯的最小版）──

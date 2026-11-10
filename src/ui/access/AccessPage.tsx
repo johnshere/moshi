@@ -1,0 +1,680 @@
+/**
+ * 接入页（Z-01C-g / 设计 §16.5.4、§16.5.5）：Hook 插件与 MCP 的接入状态、开关、台账。
+ *
+ * **一个组件，两个外壳**：
+ * - 独立整页 `/ui/hook`（`standalone`，外部契约：`magpie.cmd` 用它拉起界面）；
+ * - 设置二级 `/ui/settings/access`（内嵌，不带整页标题与返回）。
+ *
+ * 为什么不能做成 iframe 内嵌：旧版 `/ui/hook` 是服务端拼的内联 HTML，嵌进来会有
+ * 两层滚动、两套令牌处理。这里把功能搬进 React，两个路由共用一个组件（§16.5.5）。
+ *
+ * 取数分工（§16.3）：
+ * - `/hook/api/status` 5s 轮询（轻）；
+ * - `/hook/api/trace` 5s 轮询（轻）；
+ * - `/hook/api/install/plan` 打开时取一次（重，含磁盘检查），装/卸后再取；
+ * - `/hook/api/detect` 打开时取一次缓存（60s），只有用户点「重新探测」才强制。
+ */
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { resolveToken } from '../api.js';
+
+// ── 服务端契约（TS 侧镜像，服务端不导给 UI，避免 UI 依赖 app 层） ──
+
+export type HookHost = 'magpie' | 'claude-code' | 'dsh';
+
+export type InstallState = 'absent' | 'installed' | 'failed' | 'unsupported';
+
+export interface HookSwitches {
+  enabled: boolean;
+  inject_existing: boolean;
+  capture_reply: boolean;
+  magpie_enabled: boolean;
+}
+
+export interface HookStatusPayload {
+  connected: boolean;
+  needs_connect: boolean;
+  switches: HookSwitches;
+  trace_size: number;
+}
+
+export interface TraceItem {
+  ts: string;
+  host: string;
+  turn: string;
+  status: string;
+  inject_bytes: number;
+  evidence: number;
+  degraded: readonly string[];
+  latency_ms: number;
+}
+
+export interface TracePayload {
+  items: readonly TraceItem[];
+  capacity: number;
+}
+
+export interface InstallStep {
+  action: '新增' | '修改' | '删除';
+  path: string;
+  note?: string;
+}
+
+export interface InstallPlan {
+  host: HookHost;
+  kind: 'hook' | 'mcp';
+  supported: boolean;
+  reason: string | null;
+  root: string | null;
+  version: string | null;
+  steps: readonly InstallStep[];
+  risk: string | null;
+}
+
+export interface InstallRecord {
+  state: InstallState;
+  at: string | null;
+  path: string | null;
+  version: string | null;
+  reason: string | null;
+  files: readonly string[];
+  backup: string | null;
+}
+
+export interface PlanPayload {
+  plans: readonly InstallPlan[];
+  manual: { hook: Record<HookHost, string>; mcp: Record<HookHost, string> };
+  labels: Record<HookHost, string>;
+  keys: readonly { host: HookHost; kind: 'hook' | 'mcp'; key: string }[];
+}
+
+export interface OnboardPayload {
+  should_prompt: boolean;
+  detected: { at: string; hosts: Record<HookHost, { hit: boolean; via: readonly string[] }> } | null;
+  installs: Record<string, InstallRecord>;
+  labels: Record<HookHost, string>;
+}
+
+// ── 文案表（一处定义，服务端只给宿主名） ──
+
+const TURN_LABELS: Record<string, string> = {
+  session_start: '会话开始',
+  user_prompt: '用户消息前',
+  post_tool: '工具调用后',
+  response: '回复生成前',
+  stop: '回合结束',
+  pre_compact: '压缩前',
+  session_end: '会话结束',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  ready: '已注入',
+  empty: '无内容',
+  unbound: '未绑定',
+  unauthorized: '未授权',
+  unavailable: '服务不可达',
+  invalid: '信封无效',
+  skipped: '已跳过',
+};
+
+const INSTALL_LABELS: Record<InstallState, string> = {
+  absent: '未安装',
+  installed: '已安装',
+  failed: '安装失败',
+  unsupported: '暂不支持',
+};
+
+// ── 样式 ──
+
+const pageStyle = (standalone: boolean): CSSProperties =>
+  standalone
+    ? { position: 'absolute', inset: 0, overflow: 'auto', padding: '18px 22px 32px', boxSizing: 'border-box' }
+    : // 内嵌在设置页里：**不能**绝对定位，否则会盖住二级页签与说明
+      { padding: '0 0 8px', boxSizing: 'border-box' };
+
+const titleStyle: CSSProperties = {
+  color: 'var(--color-text-primary)',
+  fontSize: 18,
+  fontWeight: 600,
+  margin: 0,
+};
+
+const subtitleStyle: CSSProperties = {
+  color: 'var(--color-text-faint)',
+  fontSize: 12,
+  marginTop: 4,
+  lineHeight: 1.6,
+};
+
+const cardStyle: CSSProperties = {
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-subtle)',
+  borderRadius: 8,
+  padding: '14px 16px',
+  marginTop: 14,
+};
+
+const cardTitleStyle: CSSProperties = {
+  color: 'var(--color-text-primary)',
+  fontSize: 13,
+  fontWeight: 600,
+  marginBottom: 10,
+};
+
+const rowStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  padding: '8px 0',
+  borderTop: '1px solid var(--color-border-subtle)',
+};
+
+const mutedStyle: CSSProperties = {
+  color: 'var(--color-text-faint)',
+  fontSize: 12,
+};
+
+function buttonStyle(disabled = false): CSSProperties {
+  return {
+    padding: '5px 12px',
+    borderRadius: 5,
+    border: '1px solid var(--color-border-subtle)',
+    background: disabled ? 'transparent' : 'var(--color-bg-overlay)',
+    color: disabled ? 'var(--color-text-faint)' : 'var(--color-text-primary)',
+    fontSize: 12,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  };
+}
+
+const linkButtonStyle: CSSProperties = {
+  padding: 0,
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--color-status-info, #4a9eff)',
+  fontSize: 12,
+  cursor: 'pointer',
+  textDecoration: 'underline',
+};
+
+// ── HTTP ──
+
+async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const res = await fetch(path, {
+    method: init?.method ?? 'GET',
+    headers: {
+      'X-Moshi-Token': resolveToken(),
+      ...(init?.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+    throw new Error(body.message ?? body.error ?? `HTTP ${String(res.status)}`);
+  }
+  return (await res.json()) as T;
+}
+
+const POLL_MS = 5000;
+
+export interface AccessPageProps {
+  /** 独立整页（`/ui/hook`）时为 true：渲染整页标题与「返回应用」 */
+  standalone: boolean;
+  /** 首启弹窗装完跳过来的结果（`?from=onboard&result=ok|fail`） */
+  onboardResult: 'ok' | 'fail' | null;
+}
+
+export function AccessPage({ standalone, onboardResult }: AccessPageProps): ReactElement {
+  const [status, setStatus] = useState<HookStatusPayload | null>(null);
+  const [plans, setPlans] = useState<PlanPayload | null>(null);
+  const [onboard, setOnboard] = useState<OnboardPayload | null>(null);
+  const [trace, setTrace] = useState<TracePayload | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  /** 手动安装弹窗 / 二次确认弹窗：二选一，互相顶掉 */
+  const [manual, setManual] = useState<{ host: HookHost; kind: 'hook' | 'mcp' } | null>(null);
+  const [confirming, setConfirming] = useState<InstallPlan | null>(null);
+  const [resultText, setResultText] = useState<string | null>(
+    onboardResult === null ? null : onboardResult === 'ok' ? '插件已安装，重启 Magpie 后生效。' : '安装未成功，可在下方点「查看手动安装」。',
+  );
+  const disposedRef = useRef(false);
+
+  const fail = useCallback((err: unknown): void => {
+    setError(err instanceof Error ? err.message : String(err));
+  }, []);
+
+  const loadStatus = useCallback(async (): Promise<void> => {
+    try {
+      const next = await api<HookStatusPayload>('/hook/api/status');
+      if (!disposedRef.current) setStatus(next);
+    } catch (err) {
+      if (!disposedRef.current) fail(err);
+    }
+  }, [fail]);
+
+  const loadTrace = useCallback(async (): Promise<void> => {
+    try {
+      const next = await api<TracePayload>('/hook/api/trace?limit=20');
+      if (!disposedRef.current) setTrace(next);
+    } catch {
+      // 台账取不到不算错：不影响开关与安装
+    }
+  }, []);
+
+  const loadStatic = useCallback(async (): Promise<void> => {
+    try {
+      const [plan, ob] = await Promise.all([
+        api<PlanPayload>('/hook/api/install/plan'),
+        api<OnboardPayload>('/hook/api/onboard'),
+      ]);
+      if (disposedRef.current) return;
+      setPlans(plan);
+      setOnboard(ob);
+    } catch (err) {
+      if (!disposedRef.current) fail(err);
+    }
+  }, [fail]);
+
+  useEffect(() => {
+    disposedRef.current = false;
+    void loadStatus();
+    void loadStatic();
+    void loadTrace();
+    // 「打开过界面」只在第一次落（服务端保证），用来区分首装与日常打开
+    void api<OnboardPayload>('/hook/api/onboard', { method: 'POST', body: { open: true } }).catch(() => undefined);
+    const timer = window.setInterval(() => {
+      void loadStatus();
+      void loadTrace();
+    }, POLL_MS);
+    return () => {
+      disposedRef.current = true;
+      window.clearInterval(timer);
+    };
+  }, [loadStatus, loadStatic, loadTrace]);
+
+  const setSwitch = async (patch: Partial<HookSwitches>): Promise<void> => {
+    setBusy('config');
+    try {
+      await api('/hook/api/config', { method: 'POST', body: patch });
+      setResultText(null);
+      await loadStatus();
+      await loadStatic();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const connect = async (action: 'connect' | 'disconnect'): Promise<void> => {
+    setBusy('connect');
+    try {
+      await api('/hook/api/config', { method: 'POST', body: { action } });
+      await loadStatus();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runInstall = async (plan: InstallPlan): Promise<void> => {
+    setBusy(`install:${plan.host}:${plan.kind}`);
+    try {
+      const body = { host: plan.host, kind: plan.kind, confirm: true };
+      const res = await api<{ ok: boolean; record: InstallRecord }>('/hook/api/install', { method: 'POST', body });
+      setResultText(res.ok ? `已安装到 ${res.record.path ?? '目标目录'}，重启 Magpie 后生效。` : `安装失败：${res.record.reason ?? '未知原因'}`);
+      setConfirming(null);
+      await loadStatic();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runUninstall = async (plan: InstallPlan): Promise<void> => {
+    setBusy(`uninstall:${plan.host}:${plan.kind}`);
+    try {
+      await api('/hook/api/uninstall', { method: 'POST', body: { host: plan.host, kind: plan.kind } });
+      setResultText('已卸载，重启 Magpie 后生效。');
+      await loadStatic();
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const connected = status?.connected === true;
+  const needsConnect = status?.needs_connect === true && !connected;
+
+  const recordOf = (plan: InstallPlan): InstallRecord | null => {
+    const key = plans?.keys.find((k) => k.host === plan.host && k.kind === plan.kind)?.key;
+    if (key === undefined || onboard === null) return null;
+    return onboard.installs[key] ?? null;
+  };
+
+  return (
+    <div style={pageStyle(standalone)} data-testid="access-page">
+      {standalone ? (
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
+          <h2 style={titleStyle}>Agent 接入</h2>
+          <a href={`/ui/graph${window.location.search}`} style={{ ...linkButtonStyle, fontSize: 12 }} data-testid="access-back">
+            ← 返回应用
+          </a>
+        </div>
+      ) : (
+        <h2 style={titleStyle}>接入</h2>
+      )}
+      <div style={subtitleStyle}>
+        Hook 插件在 Agent 每次请求时向 moshi 要一段记忆注入；MCP 是另一条路径，本轮只显示不安装。
+      </div>
+
+      {resultText !== null ? (
+        <div style={{ ...cardStyle, borderColor: 'var(--color-border-strong, #3a4a5a)' }} data-testid="access-result" data-tone={resultText.includes('失败') ? 'fail' : 'ok'}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+            <span style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{resultText}</span>
+            <button type="button" style={linkButtonStyle} onClick={() => setResultText(null)}>
+              关闭
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {error !== null ? (
+        <div style={{ ...cardStyle, borderColor: 'var(--color-status-error, #e05252)' }} data-testid="access-error">
+          <span style={{ fontSize: 12, color: 'var(--color-status-error, #e05252)' }}>{error}</span>
+        </div>
+      ) : null}
+
+      {/* ── 连接态 + 工程身份 ── */}
+      <div style={cardStyle} data-testid="access-connection">
+        <div style={cardTitleStyle}>连接</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span
+            data-testid="access-connected"
+            data-connected={connected ? 'true' : 'false'}
+            style={{
+              fontSize: 12,
+              padding: '2px 8px',
+              borderRadius: 999,
+              border: '1px solid var(--color-border-subtle)',
+              color: connected ? 'var(--color-status-ok, #4caf50)' : 'var(--color-text-faint)',
+            }}
+          >
+            {connected ? '已连接 Magpie' : '未连接 Magpie'}
+          </span>
+          <button
+            type="button"
+            data-testid="access-connect-toggle"
+            style={buttonStyle(busy !== null)}
+            disabled={busy !== null}
+            onClick={() => void connect(connected ? 'disconnect' : 'connect')}
+          >
+            {connected ? '断开' : '连接 Magpie'}
+          </button>
+          <span style={mutedStyle}>Magpie 的插件通过本机 9836 端口回连 moshi；端口在设置 → 配置里可改。</span>
+        </div>
+      </div>
+
+      {/* ── 三个真开关（magpie_enabled 由连接按钮驱动，不单独给开关，避免两处语义打架） ── */}
+      <div style={cardStyle} data-testid="access-switches">
+        <div style={cardTitleStyle}>注入开关</div>
+        {(
+          [
+            ['enabled', '启用 Hook 注入', '关掉后所有 Agent 请求都直接放行，不做任何注入'],
+            ['inject_existing', '注入已有事实', '只注入库里已有的事实，不做现场抽取'],
+            ['capture_reply', '记录回复正文', '把 Agent 的回复文本也落进台账（默认关：回复可能含敏感内容）'],
+          ] as const
+        ).map(([key, label, hint]) => (
+          <label key={key} style={{ ...rowStyle, cursor: 'pointer' }} data-testid={`access-switch-${key}`}>
+            <input
+              type="checkbox"
+              checked={status?.switches[key] === true}
+              disabled={status === null || busy !== null}
+              onChange={(event) => void setSwitch({ [key]: event.target.checked })}
+            />
+            <span style={{ fontSize: 12, color: 'var(--color-text-primary)', minWidth: 110 }}>{label}</span>
+            <span style={mutedStyle}>{hint}</span>
+          </label>
+        ))}
+      </div>
+
+      {/* ── 接入矩阵：两大类 × 三个客户端 ── */}
+      {(['hook', 'mcp'] as const).map((kind) => (
+        <div style={cardStyle} key={kind} data-testid={`access-group-${kind}`}>
+          <div style={cardTitleStyle}>{kind === 'hook' ? 'Hook 插件' : 'MCP 服务端'}</div>
+          {kind === 'mcp' ? (
+            <div style={{ ...mutedStyle, marginBottom: 6 }}>本轮只做统一显示：能看到装了没装，安装下一轮实现。</div>
+          ) : null}
+          {(plans?.plans ?? [])
+            .filter((plan) => plan.kind === kind)
+            .map((plan) => {
+              const record = recordOf(plan);
+              const installed = record?.state === 'installed';
+              const detected = onboard?.detected?.hosts[plan.host]?.hit === true;
+              const label = plans?.labels[plan.host] ?? plan.host;
+              const isMagpieHook = plan.host === 'magpie' && plan.kind === 'hook';
+              return (
+                <div key={`${plan.host}:${plan.kind}`} style={rowStyle} data-testid={`access-plan-${plan.host}-${plan.kind}`}>
+                  <span style={{ fontSize: 13, color: 'var(--color-text-primary)', minWidth: 110 }}>
+                    {label}
+                    {detected ? <span style={{ ...mutedStyle, marginLeft: 6 }}>已探测到</span> : null}
+                  </span>
+                  <span
+                    data-testid={`access-state-${plan.host}-${plan.kind}`}
+                    data-state={installed ? 'installed' : plan.supported ? 'absent' : 'unsupported'}
+                    style={{ ...mutedStyle, minWidth: 150 }}
+                  >
+                    {installed
+                      ? `${INSTALL_LABELS.installed}${record.version === null ? '' : ` v${record.version}`}`
+                      : kind === 'mcp'
+                        ? '即将支持'
+                        : plan.supported
+                          ? INSTALL_LABELS.absent
+                          : `${INSTALL_LABELS.unsupported}：${plan.reason ?? ''}`}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {isMagpieHook ? (
+                    installed ? (
+                      <button
+                        type="button"
+                        style={buttonStyle(busy !== null)}
+                        disabled={busy !== null}
+                        data-testid="access-uninstall"
+                        onClick={() => void runUninstall(plan)}
+                      >
+                        卸载
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={buttonStyle(busy !== null)}
+                        disabled={busy !== null}
+                        data-testid="access-install"
+                        onClick={() => setConfirming(plan)}
+                      >
+                        安装
+                      </button>
+                    )
+                  ) : (
+                    <button type="button" style={buttonStyle(true)} disabled data-testid={`access-soon-${plan.host}-${plan.kind}`}>
+                      即将支持
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    style={linkButtonStyle}
+                    data-testid={`access-manual-${plan.host}-${plan.kind}`}
+                    onClick={() => setManual({ host: plan.host, kind: plan.kind })}
+                  >
+                    查看手动安装
+                  </button>
+                </div>
+              );
+            })}
+        </div>
+      ))}
+
+      {/* ── 注入台账 ── */}
+      <div style={cardStyle} data-testid="access-trace">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={cardTitleStyle}>注入台账</div>
+          <span style={mutedStyle}>最近 {trace?.items.length ?? 0} 条（容量 {trace?.capacity ?? 0}），只记时机/结果，不记原话</span>
+          <span style={{ flex: 1 }} />
+          <button
+            type="button"
+            style={buttonStyle(false)}
+            data-testid="access-trace-clear"
+            onClick={() => {
+              void api('/hook/api/trace', { method: 'POST', body: {} })
+                .then(() => loadTrace())
+                .catch(fail);
+            }}
+          >
+            清空
+          </button>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
+          <thead>
+            <tr style={{ color: 'var(--color-text-faint)', textAlign: 'left' }}>
+              <th style={{ padding: '4px 6px' }}>时间</th>
+              <th style={{ padding: '4px 6px' }}>时机</th>
+              <th style={{ padding: '4px 6px' }}>结果</th>
+              <th style={{ padding: '4px 6px' }}>证据</th>
+              <th style={{ padding: '4px 6px' }}>字节</th>
+              <th style={{ padding: '4px 6px' }}>耗时</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(trace?.items ?? []).map((item, index) => (
+              <tr key={`${item.ts}:${String(index)}`} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
+                <td style={{ padding: '4px 6px' }}>{item.ts.slice(11, 19)}</td>
+                <td style={{ padding: '4px 6px' }}>{TURN_LABELS[item.turn] ?? item.turn}</td>
+                <td style={{ padding: '4px 6px' }}>
+                  {STATUS_LABELS[item.status] ?? item.status}
+                  {item.degraded.length > 0 ? <span style={mutedStyle}>（{item.degraded.join('/')}）</span> : null}
+                </td>
+                <td style={{ padding: '4px 6px' }}>{item.evidence}</td>
+                <td style={{ padding: '4px 6px' }}>{item.inject_bytes}</td>
+                <td style={{ padding: '4px 6px' }}>{item.latency_ms}ms</td>
+              </tr>
+            ))}
+            {trace !== null && trace.items.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ padding: '8px 6px', ...mutedStyle }}>
+                  还没有注入记录。接上 Magpie 后，随便发一条消息就有了。
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      {/* ── F8 遮罩：断开过 Magpie 的情况下先要求连接，避免用户以为插件坏了 ── */}
+      {needsConnect ? (
+        <div
+          data-testid="access-mask"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 80,
+            background: 'rgba(8, 12, 18, 0.82)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <div style={{ ...cardStyle, marginTop: 0, maxWidth: 420, textAlign: 'center' }}>
+            <div style={{ ...cardTitleStyle, fontSize: 15 }}>连接 Magpie 才能使用</div>
+            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 14 }}>
+              插件要把记忆注入到 Agent 请求里，必须先连上本机 moshi。
+            </div>
+            <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void connect('connect')} data-testid="access-mask-connect">
+              连接
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── 手动安装弹窗 ── */}
+      {manual !== null ? (
+        <div style={overlayStyle} onClick={() => setManual(null)}>
+          <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-manual-dialog">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ ...cardTitleStyle, fontSize: 14 }}>
+                {plans?.labels[manual.host] ?? manual.host} · {manual.kind === 'hook' ? '插件版' : 'MCP 版'}手动安装
+              </div>
+              <button type="button" style={linkButtonStyle} onClick={() => setManual(null)}>
+                关闭
+              </button>
+            </div>
+            <pre style={preStyle} data-testid="access-manual-text">
+              {(manual.kind === 'hook' ? plans?.manual.hook[manual.host] : plans?.manual.mcp[manual.host]) ?? '（暂无文案）'}
+            </pre>
+          </div>
+        </div>
+      ) : null}
+
+      {/* ── 二次确认弹窗：列出将写入哪些文件 ── */}
+      {confirming !== null ? (
+        <div style={overlayStyle} onClick={() => setConfirming(null)}>
+          <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-confirm-dialog">
+            <div style={{ ...cardTitleStyle, fontSize: 14 }}>确认安装到 {plans?.labels[confirming.host] ?? confirming.host}？</div>
+            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 8 }}>将写入以下文件（可随时在接入页卸载）：</div>
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
+              {confirming.steps.map((step) => (
+                <li key={`${step.action}:${step.path}`}>
+                  <span style={mutedStyle}>{step.action} </span>
+                  <code style={{ fontSize: 11 }}>{step.path}</code>
+                  {step.note === undefined ? null : <span style={mutedStyle}>（{step.note}）</span>}
+                </li>
+              ))}
+            </ul>
+            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>注意：{confirming.risk}</div> : null}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
+              <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => setConfirming(null)}>
+                取消
+              </button>
+              <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void runInstall(confirming)} data-testid="access-confirm-install">
+                确认安装
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const overlayStyle: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  zIndex: 90,
+  background: 'rgba(8, 12, 18, 0.72)',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
+const modalStyle: CSSProperties = {
+  background: 'var(--color-bg-raised)',
+  border: '1px solid var(--color-border-strong, #3a4a5a)',
+  borderRadius: 8,
+  padding: '16px 18px',
+  minWidth: 420,
+  maxWidth: 620,
+  maxHeight: '70vh',
+  overflow: 'auto',
+};
+
+const preStyle: CSSProperties = {
+  margin: '10px 0 0',
+  padding: '10px 12px',
+  borderRadius: 6,
+  background: 'var(--color-bg-base)',
+  color: 'var(--color-text-secondary)',
+  fontSize: 11,
+  lineHeight: 1.7,
+  whiteSpace: 'pre-wrap',
+  wordBreak: 'break-all',
+};

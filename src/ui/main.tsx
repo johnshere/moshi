@@ -1,19 +1,23 @@
 /**
- * 五个一级页面的 React 入口（P2-19-A，概设 §8.1 / 详设 §10.1）。
+ * React 入口（P2-19-A 起；Z-01C-g 加接入页与设置二级）。
  *
- * 分派按 pathname：`pageFromPath` 把 `/ui/graph|memories|inbox|archive|settings` 映射到
- * 页面，`/ui` 与未知路径回落到图谱（服务端已把 `/ui` 302 到 `/ui/graph`）。仍不引路由库
- * （概设 §8.9），URL 是唯一真相源；`Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
+ * 分派按 pathname（不引路由库，概设 §8.9，URL 是唯一真相源）：
+ * - `/ui/graph|memories|inbox|archive` → 四个一级页；
+ * - `/ui/settings` 与 `/ui/settings/<二级>` → `SettingsPage`（二级由 URL 决定，默认接入）；
+ * - `/ui/hook` → `AccessPage` 独立整页（与设置里的接入页同一个组件，设计 §16.5.5）。
+ *
+ * `Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
  */
 import './styles/app.css';
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { fetchGraph, resolveToken, type GraphPayload } from './api.js';
+import { AccessPage } from './access/AccessPage.js';
 import { ArchivePage } from './archive/ArchivePage.js';
 import { MemoriesPage } from './memories/MemoriesPage.js';
 import { SettingsPage } from './settings/SettingsPage.js';
 import { Shell } from './shell/Shell.js';
-import { focusHref, parseRoute, type RouteInfo } from './shell/pure.js';
+import { DEFAULT_SETTINGS_SECTION, focusHref, parseRoute, type RouteInfo } from './shell/pure.js';
 import { Graph2D, type Graph2DStats } from './graph/Graph2D.js';
 import { Graph3D, type GraphStats } from './graph/Graph3D.js';
 import { buildActivity, pickAccessRise } from './graph/pure/activity.js';
@@ -600,15 +604,30 @@ function Root(): JSX.Element {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
+  // 首启弹窗装完会跳 `/ui/hook?from=onboard&result=ok|fail`（§16.4 第 4 步）
+  const onboardResult = onboardResultOf(window.location.search);
+  const standalone = route.standalone === 'hook';
+
   return (
-    <Shell route={route.page}>
-      {route.page === 'graph' ? <App route={route} /> : null}
-      {route.page === 'memories' ? <MemoriesPage route={route} /> : null}
-      {route.page === 'inbox' ? <InboxPage /> : null}
-      {route.page === 'archive' ? <ArchivePage /> : null}
-      {route.page === 'settings' ? <SettingsPage /> : null}
+    <Shell route={route.page} section={route.section}>
+      {standalone ? <AccessPage standalone onboardResult={onboardResult} /> : null}
+      {!standalone && route.page === 'graph' ? <App route={route} /> : null}
+      {!standalone && route.page === 'memories' ? <MemoriesPage route={route} /> : null}
+      {!standalone && route.page === 'inbox' ? <InboxPage /> : null}
+      {!standalone && route.page === 'archive' ? <ArchivePage /> : null}
+      {!standalone && route.page === 'settings' ? (
+        <SettingsPage section={route.section ?? DEFAULT_SETTINGS_SECTION} />
+      ) : null}
     </Shell>
   );
+}
+
+/** `?from=onboard&result=ok|fail` → 结果条；其它来源一律 null（不显示任何结果条）。 */
+function onboardResultOf(search: string): 'ok' | 'fail' | null {
+  const params = new URLSearchParams(search);
+  if (params.get('from') !== 'onboard') return null;
+  const result = params.get('result');
+  return result === 'ok' || result === 'fail' ? result : null;
 }
 
 const host = document.getElementById('root');

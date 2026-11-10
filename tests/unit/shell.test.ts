@@ -10,10 +10,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PAGE,
+  DEFAULT_SETTINGS_SECTION,
+  HOOK_UI_PATH,
+  NAV,
   PAGES,
+  SETTINGS_SECTIONS,
   factHref,
   focusHref,
   isSearchShortcut,
+  isStandaloneHook,
   isTypingTarget,
   lightColor,
   memoriesHref,
@@ -21,6 +26,8 @@ import {
   pageHref,
   parseRoute,
   queueBadge,
+  sectionFromPath,
+  settingsHref,
   statusLights,
 } from '../../src/ui/shell/pure.js';
 
@@ -172,5 +179,60 @@ describe('三灯', () => {
     expect(lights[1]?.state).toBe('off');
     expect(lights[2]?.state).toBe('warn');
     expect(lightColor('error')).not.toBe(lightColor('ok'));
+  });
+});
+
+describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
+  it('五个二级页签，第一项是默认（接入）', () => {
+    expect(SETTINGS_SECTIONS.map((s) => s.key)).toEqual(['access', 'config', 'maintain', 'privacy', 'diagnose']);
+    expect(SETTINGS_SECTIONS[0]?.key).toBe(DEFAULT_SETTINGS_SECTION);
+    expect(DEFAULT_SETTINGS_SECTION).toBe('access');
+  });
+
+  it('/ui/settings/<x> 仍是设置页，未知二级归默认', () => {
+    expect(pageFromPath('/ui/settings/access')).toBe('settings');
+    expect(pageFromPath('/ui/settings/privacy')).toBe('settings');
+    expect(sectionFromPath('/ui/settings/privacy')).toBe('privacy');
+    expect(sectionFromPath('/ui/settings/whatever')).toBe(DEFAULT_SETTINGS_SECTION);
+    // 裸 `/ui/settings` 不是二级路径，返回 null，由 parseRoute 补默认
+    expect(sectionFromPath('/ui/settings')).toBeNull();
+    expect(parseRoute('/ui/settings', '').section).toBe(DEFAULT_SETTINGS_SECTION);
+    expect(sectionFromPath('/ui/graph')).toBeNull();
+  });
+
+  it('settingsHref 只带 token，不带别的筛选串', () => {
+    expect(settingsHref('privacy', '?token=t&q=x')).toBe('/ui/settings/privacy?token=t');
+    expect(settingsHref('access', '')).toBe('/ui/settings/access');
+  });
+
+  it('/ui/hook 是独立整页，且是设置页的别名（外部契约不能断）', () => {
+    expect(HOOK_UI_PATH).toBe('/ui/hook');
+    expect(pageFromPath('/ui/hook')).toBe('settings');
+    expect(isStandaloneHook('/ui/hook')).toBe(true);
+    expect(isStandaloneHook('/ui/hook/')).toBe(true);
+    expect(isStandaloneHook('/ui/settings/access')).toBe(false);
+    // parseRoute：独立打开时 standalone 有值，section 归默认
+    const standalone = parseRoute('/ui/hook', '?from=magpie&token=t');
+    expect(standalone.standalone).toBe('hook');
+    expect(standalone.section).toBe(DEFAULT_SETTINGS_SECTION);
+    // 内嵌打开时 standalone 为空，section 来自路径
+    const embedded = parseRoute('/ui/settings/diagnose', '');
+    expect(embedded.standalone).toBeNull();
+    expect(embedded.section).toBe('diagnose');
+  });
+
+  it('菜单树：设置挂五个子项，其余节点没有子项', () => {
+    expect(NAV.map((node) => node.key)).toEqual(PAGES.map((page) => page.key));
+    const settings = NAV.find((node) => node.key === 'settings');
+    expect(settings?.children?.map((child) => child.key)).toEqual([
+      'access',
+      'config',
+      'maintain',
+      'privacy',
+      'diagnose',
+    ]);
+    for (const node of NAV) {
+      if (node.key !== 'settings') expect(node.children).toBeUndefined();
+    }
   });
 });

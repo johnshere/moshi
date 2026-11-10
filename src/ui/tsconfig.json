@@ -18,6 +18,7 @@
   },
   "include": [
     "main.tsx",
+    "access/**/*.tsx",
     "graph/**/*.ts",
     "graph/**/*.tsx",
     "state/**/*.ts",
@@ -31,6 +32,8 @@
     "inbox/**/*.tsx",
     "settings/**/*.ts",
     "settings/**/*.tsx",
+    "shell/**/*.ts",
+    "shell/**/*.tsx",
     "vite.config.ts"
   ]
 }

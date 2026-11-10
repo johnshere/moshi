@@ -7,8 +7,8 @@
  *
  * 路由分工（P2-19-A 起五个一级页面共用同一份产物）：
  *   /ui、/ui/  → 302 到 `/ui/graph`（保留 query，比如 dev 的 `?token=`）
- *   /ui/{graph,memories,inbox,archive,settings} → index.html，SPA fallback：
- *     非静态资源一律回 index.html，深链刷新不 404
+ *   /ui/{graph,memories,inbox,archive,settings,hook} → index.html，SPA fallback：
+ *     非静态资源一律回 index.html，深链刷新不 404（`/ui/hook` 是独立整页，见 HOOK_PAGE_PATH）
  *
  * `/ui` 的 302 不能靠在这里再注册一条 GET /ui 实现——server.ts 已有一条老路由，
  * Fastify 会直接抛 `FST_ERR_DUPLICATED_ROUTE`。本文件因此用 `skip-override` 把
@@ -23,6 +23,15 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 /** 与 `src/ui/index.html` 里的占位行**整句**一致——不能只锚 `window.__MOSHI_TOKEN__ || ''`，
  *  那样会先命中 HTML 注释里的同名字样，真正要换的那行反而留空。 */
 const TOKEN_PLACEHOLDER = "window.__MOSHI_TOKEN__ = window.__MOSHI_TOKEN__ || ''";
+
+/**
+ * 接入页（原 Hook 页）的**独立整页**路径（设计 §16.5.5，用户 m01506 裁决保留整页）。
+ *
+ * 它是外部契约：`magpie.cmd` 拉起界面用的就是 `/ui/hook?from=magpie`
+ * （`src/app/cli/launch.ts`），这串可能已在用户机器上的 Magpie 配置里。地址与其
+ * query 语义都不能变——所以这里只把它加进 SPA fallback，页面本身由 React 渲染。
+ */
+export const HOOK_PAGE_PATH = '/ui/hook';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -105,10 +114,21 @@ export async function staticRoutes(app: FastifyInstance, opts: StaticRoutesOpts)
     return reply;
   });
 
-  // 五个一级页面共用同一份产物：vite `base = '/ui/graph/'`，所以其它页面的资源
+  // 五个一级页面 + 独立的 `/ui/hook` 共用同一份产物：vite `base = '/ui/graph/'`，所以其它页面的资源
   // 仍从 `/ui/graph/assets/*` 取（由 graph 通配符兜住），这里只需把每个入口
   // `/ui/<page>`、`/ui/<page>/`、`/ui/<page>/*` 都映射到同一份 index.html。
-  for (const prefix of ['/ui/graph', '/ui/memories', '/ui/inbox', '/ui/archive', '/ui/settings'] as const) {
+  //
+  // `/ui/hook` 是**独立整页**（设计 §16.5.5，用户 m01506 裁决保留），不是设置的下级路由：
+  // `magpie.cmd` 拉起界面的地址 `/ui/hook?from=magpie` 已经可能写进用户机器上的配置，
+  // 必须继续可用，且 query 原样带到前端（`from=magpie` 的连接语义在 server.ts 的钩子里）。
+  for (const prefix of [
+    '/ui/graph',
+    '/ui/memories',
+    '/ui/inbox',
+    '/ui/archive',
+    '/ui/settings',
+    HOOK_PAGE_PATH,
+  ] as const) {
     // 入口：`/ui/<page>` 与 `/ui/<page>/`（后者靠显式注册，不指望通配符兜空串）
     app.get(prefix, async (_req, reply) => sendIndex(reply));
     app.get(`${prefix}/`, async (_req, reply) => sendIndex(reply));
