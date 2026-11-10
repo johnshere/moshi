@@ -901,9 +901,41 @@ MCP 只读项挂在 ONBOARD（探测+显示），不产生写动作。
 
 | # | 风险 | 处置 |
 | --- | --- | --- |
-| K7 | Magpie 插件目录位置未证实 | 实现前 `doctor --detect` 实测；未证实前安装器只做 dry-run（列出将写路径），不真写 |
+| K7 | Magpie 插件目录位置未证实 | **已证伪（§16.11）**：目录 `%USERPROFILE%\.config\magpie\plugins\` 是对的，但宿主读的注册表是**根** `plugins.json`，只写 `plugins\plugins.json` 等于静默失效 → INSTALL 节点按 §16.11 改 |
 | K8 | 首启弹窗打扰 | 可关、只弹一次、延时 1200ms；设置页入口常驻 |
 | K9 | 探测误报（端口被占 / 进程名近似） | 记录 `by` 命中证据；条目可手动忽略（`installs[].ignored`） |
 | K10 | MCP 显示但不可用 | 勾选框禁用 + 「即将支持」，不给"确认"错觉 |
 | K11 | Hook 页迁 React 时静默丢功能 | AC-13 逐项对照；迁移前后用同一份 `/hook/api/*` 断言 |
 | K12 | 首启弹窗在 daemon 未起时弹出却装不了 | 前置条件 `/api/status` 成功；否则 banner 报错，不弹 |
+
+### 16.11 实测回填：目录对了，注册表不是它（2026-11-10 · m2 本机）
+
+> 本节是 m2 本机对 K7 的实测回填。事实来源是 `%USERPROFILE%\.config\magpie\*` 的文件与 `/hook/api/*` 的回包，不是推断。
+
+**环境**：Windows / Magpie `0.1.3616`（`J:\Downloads\magpie-windows-amd64.exe`，网关 3425）/ moshi `0.1.0`（`6325ab5`，daemon 9836）。
+
+| # | 实测结论 | 证据 |
+| --- | --- | --- |
+| E1 | 用户插件位确实是 `%USERPROFILE%\.config\magpie\plugins\`（bun 工程：`package.json` + `bun.lock` + `node_modules/`） | 目录实存；§16.6 说的「位置未证实」到此为止 |
+| E2 | **宿主读的注册表是 `%USERPROFILE%\.config\magpie\plugins.json`（根），不是 `plugins\plugins.json`** | 安装器写完 `plugins\plugins.json` 之后，`magpie plugin list` 仍只有 3 个社区 auth 插件，moshi 不出现；根清单里也没有它 |
+| E3 | 正确注册方式 = `magpie plugin add <本地路径>`；识别靠插件包 `package.json` 的 `magpie` 字段（`hooks` / `kind` / `id` / `label`） | `magpie plugin add J:\Workspace\Codes\moshi\dist\magpie-moshi` → `✓ added`；`plugin list` 出现该路径 + `on` + `async gateway hook onRequest`；根 `plugins.json` 新增一条 path spec |
+| E4 | 安装是**两步**：写文件（安装器）+ 连接（`POST /hook/api/config {"action":"connect"}` → YAML `hook.magpie_enabled: true`） | 只装文件时 `/hook/api/status` 回 `connected=false / needs_connect=true`；connect 后 `connected=true` |
+| E5 | 插件确实被宿主加载，并在请求前回调 daemon | 一条网关请求产生台账项：`host=magpie, turn=user_prompt, status=ready, inject_bytes=1262, evidence=5, latency=46ms` |
+
+**两个容易误读的字段**（首轮真实 agent 请求之前不要当故障）：
+
+- `identity_source=unknown`：该次请求直接打网关，没有 agent 的 cwd，身份只能落到 `unknown` 档；真实宿主请求才会带 VCS 身份。
+- `degraded=[no_vector]`：向量段没贡献候选（自检用的伪查询与库内内容不相关，落到相似度地板），不是向量段报错。
+
+**对 §16.6 的修订（INSTALL 节点必须吸收）**：
+
+1. 写盘目标改为「根 `plugins.json` 的注册 + `plugins/` 下的包」；注册走 `magpie plugin add`（或按同格式维护根清单）。只写 `plugins/plugins.json` 等于装了一堆不会被加载的文件。
+2. 卸载要对称：`magpie plugin rm <path>` + 恢复根 `plugins.json` 备份。本轮 `plugins.json.pre-moshi.bak` 只是手工兜底，安装器应自己存进 `installs[].backup`。
+3. AC-11 的「确认清单 === 实际写入」追加一条：**`magpie plugin list` 里必须能看到该插件**，否则按装失败记。
+
+**待办（留待后续，本轮不做）**：
+
+| # | 待办 | 落点 |
+| --- | --- | --- |
+| TODO-1 | 给 Magpie 一份 README 用于说明本插件：用途、两步安装（`plugin add` + connect）、配置项、`identity_source` / `degraded` 码的含义、故障排查（`plugin list` 看不到 = 没注册）。`package.json` 的 `files` 已列 `README.md`，但文件目前不存在 | `packages/magpie-moshi/README.md`（随 `copy-assets` 进 `dist/`） |
+| TODO-2 | 安装器把根 `plugins.json` 当真实注册表：写入、备份、回滚，并按 E3 的做法完成注册 | `src/app/onboard/install.ts` + 回填 §16.6 |
