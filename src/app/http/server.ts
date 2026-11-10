@@ -174,6 +174,18 @@ export async function buildHttpApp(deps: HttpDeps) {
   const traceStore = deps.traceStore ?? new TraceStore();
   await app.register(traceRoutes, { prefix: '/api/trace', store: traceStore });
 
+  // ── 模型/向量注入位（P1-20）：sidecar 懒启动，不应答即降级 ──
+  // 钩子面与 MCP 面共用这一份装配（I-62：钩子召回此前只有 BM25+PPR 通道）。
+  const sidecar = deps.sidecar;
+  const breaker = deps.breaker;
+  const rawScore = sidecar === undefined ? undefined : scoreViaSidecar(sidecar);
+  // P3-10：打分外面套熔断观测；sidecar 自己判失败（重启额度用尽）时补崩溃信号
+  const score =
+    rawScore === undefined || breaker === undefined
+      ? rawScore
+      : scoreWithBreaker(rawScore, breaker, () => sidecar?.status().state === 'failed');
+  const encode = sidecar === undefined ? undefined : encodeViaSidecar(sidecar);
+
   // ── 钩子服务面（Z-01C）：`/hook/api/*` 与 `/ui/hook` ──
   // 钩子台账是**另一个** ring buffer（只记计数与枚举，不记文本），与证据链那份分开。
   const hookTrace = deps.hookTrace ?? new HookTraceStore();
@@ -185,8 +197,8 @@ export async function buildHttpApp(deps: HttpDeps) {
     dataRoot: dataPaths(deps.cfg).root,
     // 自建标志要落在被测工程自己的目录里（那是数据目录之外的路径，必须显式放行）
     ...(deps.markerRoots === undefined ? {} : { markerRoots: deps.markerRoots }),
-    ...(deps.encode === undefined ? {} : { encode: deps.encode }),
-    ...(deps.score === undefined ? {} : { score: deps.score }),
+    ...(deps.encode === undefined ? (encode === undefined ? {} : { encode }) : { encode: deps.encode }),
+    ...(deps.score === undefined ? (score === undefined ? {} : { score }) : { score: deps.score }),
     ...(deps.breaker === undefined ? {} : { breaker: deps.breaker }),
   };
   await app.register(hookRoutes, {
@@ -258,18 +270,10 @@ export async function buildHttpApp(deps: HttpDeps) {
   // ── MCP 路由：把原生 req/res 交给 MCP handler ──
   // 读取通路的两个注入位（P1-20）：向量编码走 sidecar（懒启动，不应答即降级），
   // 证据缓存整个进程一份（写库 → schema_rev 变 → 全清）。
-  const sidecar = deps.sidecar;
-  const breaker = deps.breaker;
-  const rawScore = sidecar === undefined ? undefined : scoreViaSidecar(sidecar);
-  // P3-10：打分外面套熔断观测；sidecar 自己判失败（重启额度用尽）时补崩溃信号
-  const score =
-    rawScore === undefined || breaker === undefined
-      ? rawScore
-      : scoreWithBreaker(rawScore, breaker, () => sidecar?.status().state === 'failed');
   const mcpDeps: McpDeps = {
     db: deps.db,
     cfg: deps.cfg,
-    ...(sidecar === undefined ? {} : { encode: encodeViaSidecar(sidecar) }),
+    ...(encode === undefined ? {} : { encode }),
     ...(score === undefined ? {} : { score }),
     ...(breaker === undefined ? {} : { breaker }),
     ...(deps.onEnqueued === undefined ? {} : { onEnqueued: deps.onEnqueued }),

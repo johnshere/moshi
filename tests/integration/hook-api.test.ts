@@ -186,6 +186,33 @@ describe('/hook/api/recall', () => {
     expect(trace.length).toBe(1);
     expect(trace[0].identity_source).not.toBe('unknown');
   });
+
+  it('moshi_id 由 daemon 用宿主原始会话 id 回填（I-61：信封里送到的是原始 id）', async () => {
+    await makeApp();
+    const res = await call('POST', '/hook/api/recall', envelope());
+    const body = res.json();
+    // session.id='sess-1' → sessionMoshiId('sess-1')，与 packages/magpie-moshi/identity.cjs 同口径
+    expect(body.identity.moshi_id).toBe('b56ed156bab52740c805785237405f43');
+    // 原始会话 id 不出现在回包里
+    expect(JSON.stringify(body)).not.toContain('sess-1');
+  });
+
+  it('daemon 有 sidecar 时钩子召回带语义通道（I-62：不再固定 degraded=["no_sidecar"]）', async () => {
+    let encodes = 0;
+    const fakeSidecar = {
+      encode: async (texts: string[]) => {
+        encodes += texts.length;
+        return texts.map(() => new Array(512).fill(0));
+      },
+      score: async () => ({ scores: null, modelVersion: null, ms: 0, degraded: ['no_sidecar'] }),
+      status: () => ({ state: 'ready' }),
+    };
+    await makeApp({ sidecar: fakeSidecar as never });
+    const res = await call('POST', '/hook/api/recall', envelope());
+    expect(res.statusCode).toBe(200);
+    expect(encodes).toBeGreaterThan(0);
+    expect(res.json().degraded).not.toContain('no_sidecar');
+  });
 });
 
 describe('/hook/api/signal', () => {
@@ -209,6 +236,17 @@ describe('/hook/api/signal', () => {
     expect(res.json().ok).toBe(true);
     expect(res.json().captured).toBe(false);
     expect(res.json().reason).toBe('capture_reply_disabled');
+  });
+
+  it('落库的 session 是 daemon 回填的哈希，不是宿主原始 id（I-61）', async () => {
+    const db = freshDb();
+    await makeApp({ db });
+    const res = await call('POST', '/hook/api/signal', envelope());
+    expect(res.json().captured).toBe(true);
+    const row = db.prepare('SELECT session FROM episode ORDER BY rowid DESC LIMIT 1').get() as {
+      session: string;
+    };
+    expect(row.session).toBe('b56ed156bab52740c805785237405f43');
   });
 });
 

@@ -20,6 +20,10 @@
  */
 'use strict';
 
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
 const SCHEMA = 'moshi-hook/1';
 const HOST = 'magpie';
 const MAIL_START = '<!-- moshi-hook:begin -->';
@@ -28,6 +32,28 @@ const MAIL_START = '<!-- moshi-hook:begin -->';
 const DEFAULT_DAEMON = 'http://127.0.0.1:9836';
 const RECALL_BUDGET_MS = 800;
 const SIGNAL_BUDGET_MS = 500;
+
+/** daemon 把端口与 token 写在数据目录的锁文件里（token 每次启动都换，写死进插件必过期） */
+function dataDir() {
+  return process.env.MOSHI_DATA_DIR || path.join(os.homedir(), '.moshi');
+}
+
+function lockPath() {
+  return path.join(dataDir(), 'daemon.lock');
+}
+
+/**
+ * 读 daemon 锁文件（只读）。每次调用现读，不缓存——缓存会让 daemon 重启后的
+ * 新 token 永远读不到。读不到/坏掉返回 null，退回"没有 token 就不注入"。
+ */
+function daemonLock() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(lockPath(), 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function str(v) {
   return typeof v === 'string' ? v : null;
@@ -54,12 +80,17 @@ function contextOf(ctx) {
   };
 }
 
-function baseUrl(ctx) {
-  return optionOf(ctx, 'daemonUrl') || process.env.MOSHI_DAEMON || DEFAULT_DAEMON;
+function baseUrl(ctx, lock) {
+  const explicit = optionOf(ctx, 'daemonUrl') || process.env.MOSHI_DAEMON;
+  if (explicit) return explicit;
+  const port = lock && typeof lock.port === 'number' ? lock.port : null;
+  return port === null ? DEFAULT_DAEMON : `http://127.0.0.1:${port}`;
 }
 
-function tokenOf(ctx) {
-  return optionOf(ctx, 'token') || process.env.MOSHI_TOKEN || null;
+function tokenOf(ctx, lock) {
+  const explicit = optionOf(ctx, 'token') || process.env.MOSHI_TOKEN;
+  if (explicit) return explicit;
+  return lock && typeof lock.token === 'string' && lock.token !== '' ? lock.token : null;
 }
 
 /**
@@ -67,9 +98,10 @@ function tokenOf(ctx) {
  * 调用方据此"原样放行"。
  */
 async function post(ctx, path, payload, budgetMs) {
-  const token = tokenOf(ctx);
+  const lock = daemonLock();
+  const token = tokenOf(ctx, lock);
   if (!token) return null;
-  const base = baseUrl(ctx).replace(/\/+$/, '');
+  const base = baseUrl(ctx, lock).replace(/\/+$/, '');
   try {
     const res = await fetch(base + path, {
       method: 'POST',

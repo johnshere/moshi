@@ -17,6 +17,7 @@ import type { EvidenceCache } from '../../core/read/cache.js';
 import { searchWithPipeline, type SearchOutcome } from '../../core/read/search.js';
 import { captureSignal, renderHookMail, type HookTraceItem } from '../../core/hook/index.js';
 import { HOOK_SCHEMA, type HookEnvelope, type HookInjection, type HookSignalResult } from '../../core/hook/protocol.js';
+import { sessionMoshiId } from '../../domain/identity.js';
 import { projectScopeOf } from '../../domain/scope.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import type { Config } from '../config.js';
@@ -53,13 +54,19 @@ export interface RecallOutcome {
 }
 
 /**
- * 身份解析：**以 daemon 自己算出来的 project_id 为准**（`/hook/recall` 重算一遍
- * 而不是信任钩子传来的值：两边算不一致时，落库的 `episode.cwd` 与查询用的 scope
- * 就会错位，而这种情况没有任何地方会报错）。`moshi_id` 是纯哈希，两端口径相同，
- * 直接沿用信封里的值。
+ * 身份解析：**两个 id 都以 daemon 自己算出来的为准**。
+ *
+ * - `project_id`：用 cwd 重算（钩子只给 cwd）。信任钩子传来的值会让落库的
+ *   `episode.cwd` 与查询 scope 错位，而这种情况没有任何地方会报错。
+ * - `moshi_id`：钩子只能拿到宿主的原始会话 id（`session.id`），哈希口径在 daemon 侧，
+ *   所以这里用同一个纯函数回填（`hook.cjs` 的注释也是这么约定的）。信封里本来就有
+ *   哈希值时（其它宿主适配器）沿用，不二次哈希。
  */
 function identityOf(envelope: HookEnvelope): HookEnvelope['identity'] {
-  return envelope.identity;
+  const raw = envelope.session.id;
+  if (raw === null) return envelope.identity;
+  const id = sessionMoshiId({ id: raw });
+  return id === null ? envelope.identity : { ...envelope.identity, moshi_id: id };
 }
 
 /** cwd 的取法：信封里没有就降级 unknown（**绝不拿 daemon 自己的 cwd 充数**） */
@@ -262,7 +269,9 @@ export function signalForHook(deps: HookDeps, envelope: HookEnvelope): HookSigna
   }
 
   const project = resolveProject(envelope, deps);
-  const outcome = captureSignal(deps.db, envelope, {
+  // 落库同样用 daemon 回填后的身份：原始会话 id 不进 episode（设计 §5 纪律）
+  const captured = { ...envelope, identity: identityOf(envelope) };
+  const outcome = captureSignal(deps.db, captured, {
     redact: { enabled: deps.cfg.redact.enabled, privateIp: deps.cfg.redact.private_ip },
     projectRoot: project.root,
   });
