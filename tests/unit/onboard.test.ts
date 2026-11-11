@@ -234,7 +234,7 @@ describe('Magpie 插件安装器', () => {
     expect(plan.steps[plan.steps.length - 1]?.path).toBe(path.join(configDir, 'plugins.json'));
     expect(plan.steps[plan.steps.length - 1]?.note).toContain('以路径 spec 注册');
     expect(plan.steps.map((step) => step.action)).toEqual(['新增', '新增', '新增', '新增', '修改']);
-    expect(plan.risk).toContain('尚未端到端验证');
+    expect(plan.risk).toContain('重载 plugin-host');
   });
 
   it('没点确认就一个字节都不写（确认弹窗不是装饰）', () => {

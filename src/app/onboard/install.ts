@@ -108,7 +108,7 @@ export interface InstallOutcome {
 }
 
 const RISK_NOTE =
-  'Magpie 以 npm spec 管理插件；本地包是否被宿主直接加载尚未端到端验证（需重启 Magpie 看 host 日志）。';
+  '插件以"绝对路径 spec"注册（与 `magpie plugin add <本地路径>` 同形）；装完需重载 plugin-host（重启 Magpie 或结束 magpie-bun）才会被宿主导入。';
 
 /** 从当前文件位置向上找工程根（含 packages/magpie-moshi 的那一层） */
 function findSourceDir(start: string): string | null {
