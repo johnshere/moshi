@@ -150,6 +150,22 @@ describe('memory_query', () => {
     expect(resolved.map((x) => x.factId).sort()).toEqual([f1, f2].sort());
   });
 
+  it('埋点接入点记为 MCP（P2）', async () => {
+    const db = freshDb();
+    insertFact(db, { content: 'beta caller' });
+    syncFts(db);
+    const pack = await runMemoryQuery(makeDeps(db), { ...baseQuery, query: 'beta' });
+    const row = db
+      .prepare('SELECT caller_id, caller_kind, status, in_bytes, out_bytes FROM query_log WHERE id = ?')
+      .get(pack.query_id) as Record<string, unknown>;
+    expect(row['caller_id']).toBe('mcp:moshi:server');
+    expect(row['caller_kind']).toBe('mcp');
+    // 没有注入 encode 时向量路降级 → status=degraded，这是正常口径
+    expect(['ok', 'degraded']).toContain(row['status']);
+    expect(Number(row['in_bytes'])).toBeGreaterThan(0);
+    expect(Number(row['out_bytes'])).toBeGreaterThan(0);
+  });
+
   it('text 格式只给编号列表', async () => {
     const db = freshDb();
     insertFact(db, { content: 'aaa' });

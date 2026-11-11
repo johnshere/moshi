@@ -5,7 +5,7 @@
  * 填满 <main>。三灯与角标 30s 轮询一次，取数失败显式降级，不静默装正常。
  */
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
-import { NAV, lightColor, pageHref, queueBadge, settingsHref, statusLights, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
+import { NAV, hrefForPath, lightColor, pageHref, queueBadge, statusLights, type AccessSection, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { SearchBox } from './SearchBox.js';
@@ -106,10 +106,12 @@ export interface ShellProps {
   route: PageKey;
   /** 设置二级；非设置页传 null（设计 §16.5.2：菜单树展开态由 URL 决定） */
   section: SettingsSection | null;
+  /** 接入二级；非接入页传 null（P4） */
+  accessSection: AccessSection | null;
   children: ReactNode;
 }
 
-export function Shell({ route, section, children }: ShellProps): ReactElement {
+export function Shell({ route, section, accessSection, children }: ShellProps): ReactElement {
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
   /** 首启弹窗开着时压掉首屏提示条：弹窗讲的正是同一件事，两条并排太吵 */
@@ -227,20 +229,21 @@ export function Shell({ route, section, children }: ShellProps): ReactElement {
               </a>
               {node.children !== undefined && active
                 ? node.children.map((child) => {
-                    const childActive = child.key === section;
+                    const childActive =
+                      node.key === 'settings' ? child.key === section : child.key === accessSection;
                     return (
                       <a
                         key={child.key}
-                        href={settingsHref(child.key, window.location.search)}
+                        href={hrefForPath(child.path, window.location.search)}
                         aria-current={childActive ? 'page' : undefined}
-                        data-testid={`nav-settings-${child.key}`}
+                        data-testid={`nav-${node.key}-${child.key}`}
                         data-active={childActive ? 'true' : 'false'}
                         className="moshi-nav-item moshi-nav-child"
                         style={navChildStyle(childActive)}
                         onClick={(event) => {
                           if (!isPlainLeftClick(event)) return;
                           event.preventDefault();
-                          navigate(settingsHref(child.key, window.location.search));
+                          navigate(hrefForPath(child.path, window.location.search));
                         }}
                       >
                         <span style={navTreeLineStyle} aria-hidden="true" />

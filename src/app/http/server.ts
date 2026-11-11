@@ -38,6 +38,7 @@ import { entitiesRoutes } from './routes/entities.js';
 import { privacyRoutes, exportRoutes } from './routes/privacy.js';
 import { evalRoutes } from './routes/eval.js';
 import { configRoutes } from './routes/config.js';
+import { logsRoutes } from './routes/logs.js';
 import { updateRoutes } from './routes/update.js';
 import { TraceStore } from '../../core/read/trace.js';
 import { traceRoutes } from './routes/trace.js';
@@ -157,12 +158,30 @@ export async function buildHttpApp(deps: HttpDeps) {
   await app.register(exportRoutes, { prefix: '/api/export', db: deps.db });
   // golden set 评测触发（P2-19-A）：跑完写 meta.last_eval
   await app.register(evalRoutes, { prefix: '/api/eval', db: deps.db, cfg: deps.cfg });
+  // 钩子台账（内存 ring）与落盘：提前创建，因为设置页改档位要能实时生效（P3）
+  const hookTrace = deps.hookTrace ?? new HookTraceStore();
+  const hookTraceSink =
+    deps.hookTraceSink ??
+    new TraceSink({
+      dir: dataPaths(deps.cfg).hook,
+      level: deps.cfg.hook_plugin_trace.level,
+      maxBytes: deps.cfg.hook_plugin_trace.max_bytes,
+      keepDays: deps.cfg.hook_plugin_trace.keep_days,
+    });
+  // 启动时清一次超期文件；跨日的清理在每次追加时顺带做（traceSink.cleanupOnce）
+  hookTraceSink.cleanup();
   // 设置页：配置白名单读写 + 维护重建（P2-19-A）
   await app.register(configRoutes, {
     prefix: '/api',
     db: deps.db,
     cfg: deps.cfg,
     ...(deps.sidecar === undefined ? {} : { sidecar: deps.sidecar }),
+    apply: (next) => {
+      // 热应用：同一进程里的消费者读的是 deps.cfg 的引用；日志档位直接推给 sink
+      deps.cfg.hook_plugin_trace = next.hook_plugin_trace;
+      deps.cfg.storage = next.storage;
+      hookTraceSink.setLevel(next.hook_plugin_trace.level);
+    },
   });
   // 归档台账与 .proposed 三选一（P2-15）
   await app.register(archiveRoutes, { prefix: '/api/archive', db: deps.db, cfg: deps.cfg });
@@ -191,18 +210,7 @@ export async function buildHttpApp(deps: HttpDeps) {
 
   // ── 钩子服务面（Z-01C）：`/hook/api/*` 与 `/ui/hook` ──
   // 钩子台账是**另一个** ring buffer（默认只记计数与枚举），与证据链那份分开；
-  // 落盘档位由 `debug.trace_level` 决定（off 不写盘，summary/full 见 traceSink）。
-  const hookTrace = deps.hookTrace ?? new HookTraceStore();
-  const hookTraceSink =
-    deps.hookTraceSink ??
-    new TraceSink({
-      dir: dataPaths(deps.cfg).hook,
-      level: deps.cfg.debug.trace_level,
-      maxBytes: deps.cfg.debug.trace_max_bytes,
-      keepDays: deps.cfg.debug.trace_keep_days,
-    });
-  // 启动时清一次超期文件；跨日的清理在每次追加时顺带做（traceSink.cleanupOnce）
-  hookTraceSink.cleanup();
+  // 落盘档位由 `hook_plugin_trace.level` 决定（off 不写盘，summary/full 见 traceSink）。
   const connection = deps.hookConnection ?? createHookConnection(deps.cfg.hook.magpie_enabled);
   const hookDeps: HookDeps = {
     db: deps.db,
@@ -233,6 +241,15 @@ export async function buildHttpApp(deps: HttpDeps) {
     if (query.get('from') !== 'magpie') return;
     connection.markConnected();
     deps.cfg.hook.magpie_enabled = true;
+  });
+
+  // ── 接入层日志（P3）：统一日志分页 / 按接入点统计 / 清空
+  await app.register(logsRoutes, {
+    prefix: '/api',
+    db: deps.db,
+    traceDir: dataPaths(deps.cfg).hook,
+    sink: hookTraceSink,
+    traceStore: hookTrace,
   });
 
   // ── 客户端入驻（Z-01C-h / i，设计 §16.3~§16.6）：探测 / 状态 / 安装计划 / 安装 ──

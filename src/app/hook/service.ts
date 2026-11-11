@@ -12,13 +12,14 @@
  * 失败姿态（设计 §4.2 / Z-01A 验收）：**任何失败都降级为"不注入、原请求不变"**，
  * 绝不抛错到入口层。入口层拿到 `inject:false` 就原样放行。
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { Breaker } from '../../core/read/breaker.js';
 import type { EvidenceCache } from '../../core/read/cache.js';
 import { searchWithPipeline, type SearchOutcome } from '../../core/read/search.js';
 import { captureSignal, renderHookMail, type HookTraceItem } from '../../core/hook/index.js';
 import { HOOK_SCHEMA, type HookEnvelope, type HookInjection, type HookSignalResult } from '../../core/hook/protocol.js';
 import { sessionMoshiId } from '../../domain/identity.js';
+import { MAGPIE_HOOK_CALLER } from '../../domain/access.js';
 import { projectScopeOf } from '../../domain/scope.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import type { Config } from '../config.js';
@@ -105,6 +106,7 @@ export function emptyInjection(
   identity: HookEnvelope['identity'],
   budgetMs: number,
   degraded: string[],
+  corrId?: string,
 ): HookInjection {
   return {
     schema: HOOK_SCHEMA,
@@ -115,6 +117,7 @@ export function emptyInjection(
     degraded,
     identity,
     deadline_ms: Math.max(0, Math.round(budgetMs)),
+    ...(corrId === undefined ? {} : { corr_id: corrId }),
   };
 }
 
@@ -126,6 +129,9 @@ export function emptyInjection(
  * 超时**不是错误**，是"这一轮不注入"：返回 `inject:false` + `degraded:['timeout']`。
  */
 export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Promise<RecallOutcome> {
+  // 回执号：daemon 侧生成，注入回包与埋点各带一份，日志页靠它把
+  // 「注入」与「这次查询」对上（Z-01C-e / P2）。
+  const corrId = randomBytes(8).toString('hex');
   const identity = identityOf(envelope);
   const project = resolveProject(envelope, deps);
   const projectId = project.projectId;
@@ -151,12 +157,13 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
     evidence: 0,
     degraded: [] as string[],
     identity_source: identitySource,
+    corr_id: corrId,
   };
 
   // 开关关掉：一个字节都不注（开关在服务端生效，钩子不判断）
   if (!deps.cfg.hook.enabled) {
     return {
-      injection: emptyInjection(mergedIdentity, deadline, ['disabled']),
+      injection: emptyInjection(mergedIdentity, deadline, ['disabled'], corrId),
       trace: { ...traceBase, status: 'skipped', degraded: ['disabled'] },
       project,
       identity: mergedIdentity,
@@ -164,7 +171,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
   }
   if (!deps.cfg.hook.inject_existing) {
     return {
-      injection: emptyInjection(mergedIdentity, deadline, ['inject_disabled']),
+      injection: emptyInjection(mergedIdentity, deadline, ['inject_disabled'], corrId),
       trace: { ...traceBase, status: 'skipped', degraded: ['inject_disabled'] },
       project,
       identity: mergedIdentity,
@@ -174,7 +181,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
   const query = (envelope.payload.text ?? '').trim();
   if (query === '') {
     return {
-      injection: emptyInjection(mergedIdentity, deadline, ['empty_query']),
+      injection: emptyInjection(mergedIdentity, deadline, ['empty_query'], corrId),
       trace: { ...traceBase, status: 'empty', degraded: ['empty_query'] },
       project,
       identity: mergedIdentity,
@@ -203,6 +210,9 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
           scope,
           topK: deps.cfg.hook.top_k,
           ...(envelope.identity.moshi_id === null ? {} : { session: envelope.identity.moshi_id }),
+          // 接入层（P2）：埋点记「Magpie 钩子」，回执号与注入回包共用同一个
+          caller: MAGPIE_HOOK_CALLER,
+          corrId,
         },
       ),
       deadline,
@@ -210,7 +220,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
   } catch (err) {
     const reason = err instanceof HookTimeout ? 'timeout' : 'recall_failed';
     return {
-      injection: emptyInjection(mergedIdentity, deadline - (now() - startedAt), [reason]),
+      injection: emptyInjection(mergedIdentity, deadline - (now() - startedAt), [reason], corrId),
       trace: { ...traceBase, status: 'unavailable', degraded: [reason] },
       project,
       identity: mergedIdentity,
@@ -226,7 +236,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
   const renderMs = now() - renderStarted;
   if (mail.evidence.length === 0) {
     return {
-      injection: emptyInjection(mergedIdentity, deadline - (now() - startedAt), ['no_evidence']),
+      injection: emptyInjection(mergedIdentity, deadline - (now() - startedAt), ['no_evidence'], corrId),
       trace: { ...traceBase, status: 'empty', degraded: ['no_evidence'] },
       project,
       identity: mergedIdentity,
@@ -243,6 +253,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
       degraded: [...outcome.pack.degraded],
       identity: mergedIdentity,
       deadline_ms: Math.max(0, deadline - (now() - startedAt)),
+      corr_id: corrId,
     },
     trace: {
       ...traceBase,
@@ -257,7 +268,7 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
       inject_sha256: sha16(mail.text),
       query_sha256: sha16(query),
       // 正文只有 full 档才带出来；落盘前的脱敏在 routes 层做（core 不碰写盘）
-      ...(deps.cfg.debug.trace_level === 'full'
+      ...(deps.cfg.hook_plugin_trace.level === 'full'
         ? {
             query_text: query,
             inject_text: mail.text,

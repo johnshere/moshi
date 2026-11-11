@@ -138,7 +138,7 @@ describe('/ui/graph 托管', () => {
   it('五个一级页面入口都回 index.html 并注入 token（P2-19-A）', async () => {
     const { dist } = makeDist();
     const app = await makeApp(dist);
-    for (const page of ['graph', 'memories', 'inbox', 'archive', 'settings']) {
+    for (const page of ['graph', 'memories', 'inbox', 'archive', 'settings', 'access']) {
       for (const url of [`/ui/${page}`, `/ui/${page}/`, `/ui/${page}/deep/link`]) {
         const res = await app.inject({ method: 'GET', url });
         expect(res.statusCode).toBe(200);

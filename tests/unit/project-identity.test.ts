@@ -5,8 +5,8 @@
  * 这里逐条钉住每一步的**判定与可信度档位**，因为它是"记忆挂到哪个工程下"的唯一凭据：
  * 判错一次，之后所有事实都挂在错的工程里，且 id 生成后永不改变。
  */
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
@@ -19,8 +19,41 @@ import {
 
 const dirs: string[] = [];
 
+/** 从 dir 向上找版本控制标志（识别规则本身就这么走，测试目录必须落在链外） */
+function insideVcs(dir: string): boolean {
+  let cur = path.resolve(dir);
+  for (;;) {
+    for (const marker of ['.git', '.svn', '.hg']) {
+      if (existsSync(path.join(cur, marker))) return true;
+    }
+    const parent = path.dirname(cur);
+    if (parent === cur) return false;
+    cur = parent;
+  }
+}
+
+/**
+ * 选一个**不在任何版本库工作树里**的临时根。
+ *
+ * 为什么不是直接用 `os.tmpdir()`：本机（以及 `TEMP` 重定向到工程内时的 CI）
+ * 临时目录可能正好落在某个 git 仓库里，那样"没有版本控制标志"这一档就测不出来。
+ */
+function tempRoot(): string {
+  const localAppData = process.env['LOCALAPPDATA'];
+  const candidates = [
+    tmpdir(),
+    localAppData === undefined ? null : path.join(localAppData, 'Temp'),
+    path.join(homedir(), 'AppData', 'Local', 'Temp'),
+    homedir(),
+  ];
+  for (const candidate of candidates) {
+    if (candidate !== null && !insideVcs(candidate)) return candidate;
+  }
+  return tmpdir();
+}
+
 function tempDir(): string {
-  const d = mkdtempSync(path.join(tmpdir(), 'moshi-ident-'));
+  const d = mkdtempSync(path.join(tempRoot(), 'moshi-ident-'));
   dirs.push(d);
   return d;
 }

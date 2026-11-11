@@ -18,6 +18,7 @@ import { HOOK_SCHEMA, MAGPIE_CAPS, type HookEnvelope } from '../../src/core/hook
 const TOKEN = 'test_token_hook';
 
 const appRef: { app?: Awaited<ReturnType<typeof buildHttpApp>>['app'] } = {};
+const dbRef: { db?: Db } = {};
 const opened: Db[] = [];
 const dirs: string[] = [];
 
@@ -71,8 +72,10 @@ function uiDist(home: string): string {
 async function makeApp(over: Record<string, unknown> = {}): Promise<void> {
   const home = tempDir();
   const cfg = loadConfig({ home });
+  const db = freshDb();
+  dbRef.db = db;
   const { app } = await buildHttpApp({
-    db: freshDb(),
+    db,
     cfg,
     token: TOKEN,
     uiDistDir: uiDist(home),
@@ -102,6 +105,7 @@ function call(method: 'GET' | 'POST', url: string, payload?: unknown) {
 
 beforeEach(() => {
   appRef.app = undefined;
+  dbRef.db = undefined;
 });
 
 afterEach(async () => {
@@ -318,6 +322,27 @@ describe('/hook/api/trace', () => {
     expect(signalItem?.['corr_id']).toBe(corr);
     expect(String(signalItem?.['reply_sha256'])).toMatch(/^[0-9a-f]{16}$/);
     expect(JSON.stringify(signalItem)).not.toContain('我答完了');
+  });
+
+  it('埋点带接入点与回执号（P2：caller/kind/plugin/status/字节数）', async () => {
+    await makeApp();
+    const recalled = await call('POST', '/hook/api/recall', envelope());
+    const corr = recalled.json().corr_id as string;
+    expect(corr).toMatch(/^[0-9a-f]{16}$/);
+    const db = dbRef.db;
+    if (db === undefined) throw new Error('db not built');
+    const row = db
+      .prepare(
+        'SELECT caller_id, caller_kind, plugin_id, corr_id, status, in_bytes, out_bytes FROM query_log ORDER BY ts DESC LIMIT 1',
+      )
+      .get() as Record<string, unknown>;
+    expect(row['caller_id']).toBe('gateway:magpie:moshi');
+    expect(row['caller_kind']).toBe('gateway');
+    expect(row['plugin_id']).toBe('moshi');
+    expect(row['corr_id']).toBe(corr);
+    expect(['ok', 'degraded']).toContain(row['status']);
+    expect(Number(row['in_bytes'])).toBeGreaterThan(0);
+    expect(Number(row['out_bytes'])).toBeGreaterThan(0);
   });
 
   it('summary 档落盘但不含正文；清盘要显式带 disk', async () => {

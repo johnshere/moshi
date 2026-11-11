@@ -8,8 +8,8 @@
  * URL 是唯一真相源：页面、筛选、深链都从 pathname + search 解析，不回写 store。
  */
 
-/** 五个一级页面（概设 §8.1）。顺序即左侧导航顺序。 */
-export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'settings';
+/** 六个一级页面（概设 §8.1；P4 新增「接入」）。顺序即左侧导航顺序。 */
+export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'access' | 'settings';
 
 export interface PageDef {
   key: PageKey;
@@ -24,8 +24,10 @@ export const PAGES: readonly PageDef[] = [
   { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
   { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
   { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
-  // 设置是**树节点**：五个二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
-  { key: 'settings', label: '设置', path: '/ui/settings', title: '接入 / 配置 / 维护 / 隐私 / 诊断' },
+  // 接入是**树节点**：日志与接入点两个二级（P4；开发方案 §7）
+  { key: 'access', label: '接入', path: '/ui/access', title: '接入点状态与统一日志' },
+  // 设置是**树节点**：二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
+  { key: 'settings', label: '设置', path: '/ui/settings', title: '接入与日志 / 配置 / 维护 / 隐私 / 诊断' },
 ];
 
 export const DEFAULT_PAGE: PageKey = 'graph';
@@ -33,12 +35,12 @@ export const DEFAULT_PAGE: PageKey = 'graph';
 const PAGE_KEYS: readonly string[] = PAGES.map((p) => p.key);
 
 /**
- * 设置的五个二级（设计 §16.5.3，用户 m01506 裁决分类名）。
+ * 设置的五个二级（P4 起「接入与日志」在最前；设计 §16.5.3，用户 m01506/m02743 裁决）。
  *
- * **顺序即菜单顺序，第一项也是 `/ui/settings` 的默认落地页**：先接进来（接入），
- * 再调参数（配置），然后维护/隐私/诊断——这是用户实际会走的顺序。
+ * **顺序即菜单顺序，第一项也是 `/ui/settings` 的默认落地页**：先调接入日志，
+ * 再调参数，然后维护/隐私/诊断。Hook 接入页已迁到「接入 → 接入点」。
  */
-export type SettingsSection = 'access' | 'config' | 'maintain' | 'privacy' | 'diagnose';
+export type SettingsSection = 'access-logs' | 'config' | 'maintain' | 'privacy' | 'diagnose';
 
 export interface SettingsSectionDef {
   key: SettingsSection;
@@ -50,10 +52,10 @@ export interface SettingsSectionDef {
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   {
-    key: 'access',
-    label: '接入',
-    path: '/ui/settings/access',
-    title: 'Agent 接入：Hook 插件与 MCP',
+    key: 'access-logs',
+    label: '接入与日志',
+    path: '/ui/settings/access-logs',
+    title: '查询日志保留与清空、插件运行日志档位（唯一写入口）',
   },
   { key: 'config', label: '配置', path: '/ui/settings/config', title: '配置白名单键' },
   { key: 'maintain', label: '维护', path: '/ui/settings/maintain', title: '索引重建、备份恢复、自动更新' },
@@ -61,9 +63,28 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
   { key: 'diagnose', label: '诊断', path: '/ui/settings/diagnose', title: '自检、图质量、模型归档' },
 ];
 
-export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access';
+export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access-logs';
+
+/** 接入页的两个二级（P4；开发方案 §7） */
+export type AccessSection = 'logs' | 'endpoints';
+
+export interface AccessSectionDef {
+  key: AccessSection;
+  label: string;
+  /** `/ui/access/<key>` */
+  path: string;
+  title: string;
+}
+
+export const ACCESS_SECTIONS: readonly AccessSectionDef[] = [
+  { key: 'logs', label: '日志', path: '/ui/access/logs', title: '统一日志流 + 按接入点统计（只读）' },
+  { key: 'endpoints', label: '接入点', path: '/ui/access/endpoints', title: 'Magpie 插件 / MCP / CLI / 界面 的状态与安装' },
+];
+
+export const DEFAULT_ACCESS_SECTION: AccessSection = 'logs';
 
 const SECTION_KEYS: readonly string[] = SETTINGS_SECTIONS.map((s) => s.key);
+const ACCESS_KEYS: readonly string[] = ACCESS_SECTIONS.map((s) => s.key);
 
 /**
  * 接入页的**独立整页**路径（设计 §16.5.5）。与设置的 `/ui/settings/access` 是
@@ -74,9 +95,11 @@ export const HOOK_UI_PATH = '/ui/hook';
 /** 解析后的路由态：页面 + 深链参数（全部已 trim，空串归一为 null）。 */
 export interface RouteInfo {
   page: PageKey;
-  /** 设置二级；非设置页恒为 null（`/ui/settings` 无二级 → 默认 access） */
+  /** 设置二级；非设置页恒为 null（`/ui/settings` 无二级 → 默认 access-logs） */
   section: SettingsSection | null;
-  /** `/ui/hook`：接入页独立整页（不属于五个一级页，单独一个屏幕位） */
+  /** 接入二级；非接入页恒为 null（`/ui/access` → 默认 logs，`/ui/hook` → endpoints） */
+  accessSection: AccessSection | null;
+  /** `/ui/hook`：接入页独立整页（不属于一级页的子路由，单独一个屏幕位） */
   standalone: 'hook' | null;
   /** `/ui/memories?fact=<id>`：选中并滚到可见 */
   factId: string | null;
@@ -109,12 +132,22 @@ function normalizePath(pathname: string): string {
 export function pageFromPath(pathname: string): PageKey {
   const normalized = normalizePath(pathname);
   if (normalized === '' || normalized === '/ui') return DEFAULT_PAGE;
-  if (normalized === HOOK_UI_PATH) return 'settings';
+  if (normalized === HOOK_UI_PATH) return 'access';
+  if (/^\/ui\/access(\/[A-Za-z0-9_-]+)?$/.test(normalized)) return 'access';
   if (/^\/ui\/settings\/[A-Za-z0-9_-]+$/.test(normalized)) return 'settings';
   const match = /^\/ui\/([A-Za-z0-9_-]+)$/.exec(normalized);
   const key = match?.[1];
   if (key !== undefined && PAGE_KEYS.includes(key)) return key as PageKey;
   return DEFAULT_PAGE;
+}
+
+/** `/ui/access/<section>` → 二级；`/ui/access` 与未知二级回落默认 logs。 */
+export function accessSectionFromPath(pathname: string): AccessSection | null {
+  const normalized = normalizePath(pathname);
+  const match = /^\/ui\/access\/([A-Za-z0-9_-]+)$/.exec(normalized);
+  if (match === null) return null;
+  const key = match[1];
+  return ACCESS_KEYS.includes(key ?? '') ? (key as AccessSection) : DEFAULT_ACCESS_SECTION;
 }
 
 /**
@@ -142,9 +175,16 @@ export function parseRoute(pathname: string, search: string): RouteInfo {
   const standalone = isStandaloneHook(pathname) ? 'hook' : null;
   const section: SettingsSection | null =
     page === 'settings' ? (sectionFromPath(pathname) ?? DEFAULT_SETTINGS_SECTION) : null;
+  const accessSection: AccessSection | null =
+    page === 'access'
+      ? standalone === 'hook'
+        ? 'endpoints'
+        : (accessSectionFromPath(pathname) ?? DEFAULT_ACCESS_SECTION)
+      : null;
   return {
     page,
     section,
+    accessSection,
     standalone,
     factId: nonEmpty(params.get('fact')),
     canonicalKey: nonEmpty(params.get('canonical_key')),
@@ -177,9 +217,21 @@ export function settingsHref(section: SettingsSection, currentSearch = ''): stri
   return hrefWith(`/ui/settings/${section}`, token === null ? [] : [['token', token]]);
 }
 
-/** 左侧菜单树的一个子节点（设置二级） */
+/** 接入二级导航目标（与 `pageHref` 同口径：只带 token）。 */
+export function accessHref(section: AccessSection, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  return hrefWith(`/ui/access/${section}`, token === null ? [] : [['token', token]]);
+}
+
+/** 任意站内路径 + 只保留 token（树节点子项共用）。 */
+export function hrefForPath(path: string, currentSearch = ''): string {
+  const token = tokenOf(currentSearch);
+  return hrefWith(path, token === null ? [] : [['token', token]]);
+}
+
+/** 左侧菜单树的一个子节点（设置二级 / 接入二级） */
 export interface NavChild {
-  key: SettingsSection;
+  key: string;
   label: string;
   path: string;
 }
@@ -199,21 +251,35 @@ export interface NavNode {
  * 展开态由 URL 驱动，不落 localStorage：在设置下（`page==='settings'`）就展开，
  * 离开就收起——「URL 是唯一真相源」（本文件头）。
  */
-export const NAV: readonly NavNode[] = PAGES.map((page) =>
-  page.key === 'settings'
-    ? {
-        key: page.key,
-        label: page.label,
-        path: page.path,
-        title: page.title,
-        children: SETTINGS_SECTIONS.map((section) => ({
-          key: section.key,
-          label: section.label,
-          path: section.path,
-        })),
-      }
-    : { key: page.key, label: page.label, path: page.path, title: page.title },
-);
+export const NAV: readonly NavNode[] = PAGES.map((page) => {
+  if (page.key === 'settings') {
+    return {
+      key: page.key,
+      label: page.label,
+      path: page.path,
+      title: page.title,
+      children: SETTINGS_SECTIONS.map((section) => ({
+        key: section.key,
+        label: section.label,
+        path: section.path,
+      })),
+    };
+  }
+  if (page.key === 'access') {
+    return {
+      key: page.key,
+      label: page.label,
+      path: page.path,
+      title: page.title,
+      children: ACCESS_SECTIONS.map((section) => ({
+        key: section.key,
+        label: section.label,
+        path: section.path,
+      })),
+    };
+  }
+  return { key: page.key, label: page.label, path: page.path, title: page.title };
+});
 
 /** 顶部搜索回车目标：`/ui/memories?q=<输入>`。 */
 export function memoriesHref(query: string, currentSearch = ''): string {

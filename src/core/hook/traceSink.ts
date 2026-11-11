@@ -1,17 +1,17 @@
 /**
- * 注入台账落盘（Z-01C-e / 设计 §8.4）。
+ * 插件运行日志落盘（Z-01C-e / 设计 §8.4）。
  *
  * 内存里的 ring buffer（`trace.ts`）重启即丢，这里负责把最近几天写进
  * `<data_dir>/hook/trace-YYYY-MM-DD.jsonl`：
  *
- * - **按日轮转**：文件名带日期；同一天超过 `debug.trace_max_bytes` 再按序号
+ * - **按日轮转**：文件名带日期；同一天超过 `hook_plugin_trace.max_bytes` 再按序号
  *   切 `trace-YYYY-MM-DD.2.jsonl`、`.3`……（只切自己的命名模式，别的一概不碰）；
- * - **保留期清理**：文件名里的日期早于 `debug.trace_keep_days` 就删掉；
+ * - **保留期清理**：文件名里的日期早于 `hook_plugin_trace.keep_days` 就删掉；
  * - **三档裁剪**：`off` 不落盘；`summary` 去掉全部正文；`full` 原样（调用方负责
  *   落盘前脱敏，见 `src/app/http/routes/hook.ts`）。
  *
- * 写盘是**异步补写**：钩子只有 800ms 预算，台账不能成为召回链路的一部分。
- * 任何写失败都吞掉——台账写不进去不能反过来影响注入。
+ * 写盘是**异步补写**：钩子只有 800ms 预算，日志不能成为召回链路的一部分。
+ * 任何写失败都吞掉——日志写不进去不能反过来影响注入。
  */
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
@@ -37,7 +37,7 @@ export interface TraceSinkOptions {
 }
 
 /**
- * 按档位裁剪一条台账：`off` 返回 null（不落盘）；`summary` 去掉正文；
+ * 按档位裁剪一条日志：`off` 返回 null（不落盘）；`summary` 去掉正文；
  * `full` 原样。**哈希与 id 在 summary 档保留**，那是"没有正文也能定位"的锚点。
  */
 export function trimTrace(item: HookTraceItem, level: TraceLevel): HookTraceItem | null {
@@ -70,6 +70,16 @@ export class TraceSink {
     return this.opts.level;
   }
 
+  /** 运行期改档位（设置页 `PUT /api/config` 改 `hook_plugin_trace.level` 后立即生效） */
+  setLevel(level: TraceLevel): void {
+    this.opts.level = level;
+  }
+
+  /** 等写链落盘（测试/收尾用；召回链路不调它） */
+  async flush(): Promise<void> {
+    await this.chain;
+  }
+
   /** 追加一条（off 档直接返回；写盘失败静默） */
   append(item: HookTraceItem): void {
     if (this.opts.level === 'off') return;
@@ -87,7 +97,7 @@ export class TraceSink {
         this.cleanupOnce(now);
         this.writeLine(dateOf(now), line);
       } catch {
-        // 见文件头：台账写不进去不影响注入
+        // 见文件头：日志写不进去不影响注入
       }
     });
   }
@@ -107,7 +117,7 @@ export class TraceSink {
     this.cleanedOn = dateOf(now);
   }
 
-  /** 清掉磁盘上全部台账（界面/CLI 显式清盘时才用） */
+  /** 清掉磁盘上全部插件运行日志（界面/CLI 显式清盘时才用） */
   clearDisk(): number {
     let removed = 0;
     for (const entry of this.list()) {
@@ -162,7 +172,7 @@ export class TraceSink {
     return { file: path.join(this.opts.dir, `trace-${date}.${highest + 1}.jsonl`), bytes: 0 };
   }
 
-  /** 列出本目录里自己写的台账文件，按（日期, 序号）升序 */
+  /** 列出本目录里自己写的日志文件，按（日期, 序号）升序 */
   private list(): { file: string; date: string; index: number; bytes: number }[] {
     let names: string[];
     try {
@@ -190,7 +200,7 @@ export class TraceSink {
   }
 }
 
-/** 台账文件名里的日期（UTC，取 ISO 的前 10 位；与文件名同口径） */
+/** 日志文件名里的日期（UTC，取 ISO 的前 10 位；与文件名同口径） */
 export function dateOf(now: Date): string {
   return now.toISOString().slice(0, 10);
 }

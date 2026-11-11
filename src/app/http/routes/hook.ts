@@ -18,7 +18,7 @@
  * 的台账都留不下来。
  */
 import type { FastifyInstance } from 'fastify';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
   HOOK_HOSTS,
@@ -167,14 +167,13 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     const started = Date.now();
     const outcome = await recallForHook(deps, body as HookEnvelope);
     const latency = Date.now() - started;
-    // 回执号：入口存进请求级 state，response 时回带，把注入与落库对上（Z-01C-e）
-    const corrId = randomBytes(8).toString('hex');
+    // 回执号由 daemon 生成（`hook/service.ts` 的 recallForHook），注入回包与埋点
+    // 共用同一个；这里只负责把它写进台账（Z-01C-e / P2）。
     const item: HookTraceItem = redactTrace(
       {
         ...outcome.trace,
         ts: new Date(started).toISOString(),
         latency_ms: latency,
-        corr_id: corrId,
       },
       cfg(),
     );
@@ -182,7 +181,7 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     trace.push(item);
     opts.sink.append(item);
     // 诊断回包多带一个服务端算定的身份：moshi hook recall 与页面要看这个
-    return reply.send({ ...outcome.injection, identity: outcome.identity, corr_id: corrId });
+    return reply.send({ ...outcome.injection, identity: outcome.identity });
   });
 
   // ── signal：落 episode（幂等） ──
@@ -213,7 +212,7 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
         ...(typeof replyText === 'string'
           ? {
               reply_sha256: sha16(replyText),
-              ...(cfg().debug.trace_level === 'full' ? { reply_text: replyText } : {}),
+              ...(cfg().hook_plugin_trace.level === 'full' ? { reply_text: replyText } : {}),
             }
           : {}),
       },

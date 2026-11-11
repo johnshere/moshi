@@ -20,6 +20,8 @@
  *
  * 本层不碰裸 SQL（K2），也不 import `app`（core-no-app）：参数由调用方注入。
  */
+import type { Caller, CallerKind } from '../../domain/access.js';
+import { UNKNOWN_CALLER } from '../../domain/access.js';
 import { canonicalJson, sha256Hex } from '../../domain/hash.js';
 import { newId } from '../../domain/ids.js';
 import { nowIso, parseTs } from '../../domain/time.js';
@@ -98,6 +100,10 @@ export interface SearchInput {
   timeTo?: string;
   /** 会话标识，只进埋点 */
   session?: string;
+  /** 接入点（P2）：谁在查；不传按 `unknown` 记，历史行由迁移留 NULL */
+  caller?: Caller;
+  /** 回执号（钩子入口带；其它入口可留空），只进埋点 */
+  corrId?: string;
 }
 
 /** 单节点打分（与 `/score` 返回一致） */
@@ -315,8 +321,39 @@ type Stage =
   | 'pack'
   | 'assemble';
 
-export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput): Promise<SearchOutcome> {
-  const db = rt.db;
+function utf8Bytes(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/**
+ * 埋点归属（P2 接入层）：入口类型、接入点 id、插件名、回执号、证据包状态与出入字节。
+ * 历史行（迁移 007 之前）是 NULL，这里只负责新行。
+ */
+function attributionOf(
+  input: SearchInput,
+  pack: EvidencePackage,
+): {
+  callerId: string;
+  callerKind: CallerKind;
+  pluginId: string | null;
+  corrId: string | null;
+  status: string;
+  inBytes: number;
+  outBytes: number;
+} {
+  const caller = input.caller ?? UNKNOWN_CALLER;
+  return {
+    callerId: caller.id,
+    callerKind: caller.kind,
+    pluginId: caller.plugin ?? null,
+    corrId: input.corrId ?? null,
+    status: pack.status,
+    inBytes: utf8Bytes(input.query),
+    outBytes: utf8Bytes(JSON.stringify(pack)),
+  };
+}
+
+export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput): Promise<SearchOutcome> {  const db = rt.db;
   const params: SearchParams = { ...DEFAULT_PARAMS, ...(rt.params ?? {}) };
   const scope = normalizeScope(input.scope ?? GLOBAL_SCOPE);
   const scopes = scopeCandidates(scope);
@@ -370,6 +407,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
         packed: [],
         cached: false,
         session: input.session ?? null,
+        ...attributionOf(input, pack),
       },
       [],
     );
@@ -458,6 +496,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
           stageMs,
           cached: true,
           session: input.session ?? null,
+          ...attributionOf(input, cachedPack),
         },
         cachedPack.evidence.map((e) => ({
           queryId: hit.queryId,
@@ -735,6 +774,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
       stageMs,
       cached: false,
       session: input.session ?? null,
+      ...attributionOf(input, pack),
     },
     items.map((p, i) => ({
       queryId,

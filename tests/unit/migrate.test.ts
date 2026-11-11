@@ -44,7 +44,7 @@ const CORE_TABLES = [
 ];
 
 describe('迁移（详设 §2.7）', () => {
-  it('空库一次建成，user_version=6', () => {
+  it('空库一次建成，user_version=TARGET_VERSION', () => {
     const { db, dir } = tempDb();
     const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
     expect(res.from).toBe(0);
@@ -56,8 +56,9 @@ describe('迁移（详设 §2.7）', () => {
       '004_edges.sql',
       '005_direct_write.sql',
       '006_fact_semantics.sql',
+      '007_query_log_caller.sql',
     ]);
-    expect(db.pragma('user_version', { simple: true })).toBe(6);
+    expect(db.pragma('user_version', { simple: true })).toBe(TARGET_VERSION);
 
     const tables = listTables(db);
     for (const t of CORE_TABLES) expect(tables).toContain(t);
@@ -68,7 +69,7 @@ describe('迁移（详设 §2.7）', () => {
     const { db, dir } = tempDb();
     migrate(db, { backupsDir: path.join(dir, 'backups') });
     const second = migrate(db, { backupsDir: path.join(dir, 'backups') });
-    expect(second.from).toBe(6);
+    expect(second.from).toBe(TARGET_VERSION);
     expect(second.applied).toEqual([]);
     expect(second.backupPath).toBeNull();
   });
@@ -101,7 +102,41 @@ describe('迁移（详设 §2.7）', () => {
 
   it('迁移文件按版本号排序，且命名不合规的被忽略', () => {
     const files = listMigrations(path.resolve(import.meta.dirname, '../../migrations'));
-    expect(files.map((f) => f.version)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(files.map((f) => f.version)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+  });
+
+  it('v6 带数据的库迁到 v7：query_log 加接入层列，历史行留 NULL（P2）', () => {
+    const { db, dir } = tempDb();
+    migrate(db, { backupsDir: path.join(dir, 'backups'), target: 6 });
+    db.exec(
+      "INSERT INTO query_log (id, ts, query_text, query_hash, route, flags_json, latency_ms) " +
+        "VALUES ('q_old','2026-11-01T00:00:00.000Z','old query','h_old','local','{}',1)",
+    );
+    const res = migrate(db, { backupsDir: path.join(dir, 'backups') });
+    expect(res.from).toBe(6);
+    expect(res.to).toBe(TARGET_VERSION);
+    expect(res.applied).toEqual(['007_query_log_caller.sql']);
+    const row = db
+      .prepare(
+        'SELECT caller_id, caller_kind, plugin_id, corr_id, status, in_bytes, out_bytes FROM query_log WHERE id = ?',
+      )
+      .get('q_old') as Record<string, unknown>;
+    expect(row).toEqual({
+      caller_id: null,
+      caller_kind: null,
+      plugin_id: null,
+      corr_id: null,
+      status: null,
+      in_bytes: null,
+      out_bytes: null,
+    });
+    // 索引也建了（日志页按接入点分页要用）
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='query_log'")
+      .all() as { name: string }[];
+    expect(indexes.map((i) => i.name)).toEqual(
+      expect.arrayContaining(['idx_query_log_caller_ts', 'idx_query_log_kind_ts', 'idx_query_log_corr']),
+    );
   });
 
   it('schema_rev 在事实 UPDATE、边写入时也递增（P1-25）', () => {

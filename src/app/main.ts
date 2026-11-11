@@ -16,6 +16,7 @@ import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRun
 import { startCommunityRunner, type CommunityRunner } from './communityRunner.js';
 import { startLayoutRunner, type LayoutRunner } from './layoutRunner.js';
 import { startScheduler, type Scheduler } from './jobs/scheduler.js';
+import { startQueryLogRetention, type QueryLogRetention } from './jobs/queryLogRetention.js';
 import { syncFactVectors } from '../infra/vec/index.js';
 import { syncMissingFts } from '../infra/sqlite/ftsRepo.js';
 import { Breaker } from '../core/read/breaker.js';
@@ -88,6 +89,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let collectRunner: CollectRunner | undefined;
   let layoutRunner: LayoutRunner | undefined;
   let scheduler: Scheduler | undefined;
+  let queryLogRetention: QueryLogRetention | undefined;
   try {
     // sidecar 懒启动：不拉起、不阻塞；状态给 /api/status 与 UI 状态条用
     sidecar = new SidecarClient({ cfg, logger: log });
@@ -224,6 +226,20 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.error({ event: 'scheduler.start.failed', err: (err as Error).message }, 'scheduler failed');
   }
 
+  // P2 接入层：query_log 保留清理（默认 3 天；0 = 永久）。启动跑一次，之后每天一次。
+  try {
+    queryLogRetention = startQueryLogRetention({
+      db: instance.db,
+      keepDays: cfg.storage.query_log_keep_days,
+      log,
+    });
+  } catch (err) {
+    log.error(
+      { event: 'query_log.purge.start.failed', err: (err as Error).message },
+      'query log retention failed',
+    );
+  }
+
   // P1-02 向量同步：启动后延迟一轮事件循环再补索引（encode 走 sidecar）。
   // 先等 sidecar 就绪再批量编码——sync 撞上懒启动窗口（2-5s）会让首轮
   // encode 全部返回 null。只做一次、失败/无数据自然结束；sidecar 不可用时
@@ -250,6 +266,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     log.info({ event: 'daemon.stop', signal }, 'shutting down');
     // 先停消费者：正在跑的一轮 harvest 会自己把事务收尾，停掉就不再唤醒下一轮
     scheduler?.stop();
+    queryLogRetention?.stop();
     runner?.stop();
     schemaRunner?.stop();
     communityRunner?.stop();

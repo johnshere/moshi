@@ -11,7 +11,7 @@ import { rowToEdge, rowToEntity } from './mappers.js';
 
 export interface AuditInput {
   /** `annotation` 只由直写撤销写（P2-23）：撤销要连带回滚队列快照，同样得留痕 */
-  tbl: 'fact' | 'edge' | 'entity' | 'archive_meta' | 'annotation' | 'privacy';
+  tbl: 'fact' | 'edge' | 'entity' | 'archive_meta' | 'annotation' | 'privacy' | 'query_log' | 'trace_log';
   rowId: string;
   field?: string | null;
   before?: unknown;

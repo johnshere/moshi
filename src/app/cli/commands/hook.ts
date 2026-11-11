@@ -29,7 +29,7 @@ const USAGE = [
   '  status            看当前钩子状态（只读）',
   '  diagnose          与入口能力表对照，报告哪些时机兑现（只读）',
   '  recall <text>     跑一次召回，打印会注入的文本',
-  '  trace [条数]      看注入台账（默认 20 条；档位由 debug.trace_level 决定）',
+  '  trace [条数]      看插件运行日志（默认 20 条；档位由 hook_plugin_trace.level 决定）',
   '  launch [--from=magpie] [--cwd=<dir>] [--open]   由 magpie.cmd 调用',
 ].join('\n');
 
@@ -88,7 +88,7 @@ async function runStatus(ctx: CommandContext): Promise<number> {
       [
         `连接: ${status['connected'] === true ? '已连接' : '未连接'}`,
         `开关: 总 ${bool(sw['enabled'])} / 注入 ${bool(sw['inject_existing'])} / 输出记忆 ${bool(sw['capture_reply'])}`,
-        `台账: ${String(status['trace_size'] ?? 0)} 条`,
+        `插件日志: ${String(status['trace_size'] ?? 0)} 条`,
       ].join('\n') + '\n',
     );
     return 0;
@@ -189,7 +189,7 @@ async function runTrace(ctx: CommandContext): Promise<number> {
     };
     const items = snap.items ?? [];
     if (items.length === 0) {
-      ctx.stdout('台账为空（还没发生过召回或落库）\n');
+      ctx.stdout('插件日志为空（还没发生过召回或落库）\n');
       return 0;
     }
     for (const item of items) {
@@ -224,7 +224,7 @@ async function runTrace(ctx: CommandContext): Promise<number> {
     }
     return 0;
   } catch (err) {
-    ctx.stderr(`读台账失败：${messageOf(err)}\n`);
+    ctx.stderr(`读插件日志失败：${messageOf(err)}\n`);
     return 1;
   }
 }
@@ -271,7 +271,7 @@ function messageOf(err: unknown): string {
 
 export const hookCommand: Command = {
   name: 'hook',
-  summary: '钩子入口：状态/诊断/召回/台账/拉起界面（Z-01C）',
+  summary: '钩子入口：状态/诊断/召回/插件运行日志/拉起界面（Z-01C）',
   async run(ctx: CommandContext): Promise<number> {
     const sub = ctx.args[0];
     if (sub === undefined || sub === 'help' || sub === '--help') {

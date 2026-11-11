@@ -8,6 +8,7 @@
  * 所以这里只做两件事：写（一次查询一批）与读（按 `query_id` 反解 `m_id`）。
  * 没有 update / delete——埋点是流水账，改了就失去诊断价值。
  */
+import type { CallerKind } from '../../domain/access.js';
 import type { Pool, Route } from '../../domain/enums.js';
 import type { Db } from './db.js';
 
@@ -29,6 +30,17 @@ export interface QueryLogInput {
   stageMs?: Record<string, number> | null;
   cached?: boolean;
   session?: string | null;
+  /** 接入层（P2）：入口类型 / 接入点 id / 插件名；迁移前的历史行是 null */
+  callerId?: string | null;
+  callerKind?: CallerKind | null;
+  pluginId?: string | null;
+  /** 回执号：把注入（钩子侧）与这一行对上（Z-01C-e） */
+  corrId?: string | null;
+  /** 证据包状态 `ok|degraded` */
+  status?: string | null;
+  /** 入/出字节：查询文本与证据包的 UTF-8 字节数 */
+  inBytes?: number | null;
+  outBytes?: number | null;
 }
 
 export function insertQueryLog(db: Db, input: QueryLogInput): void {
@@ -36,11 +48,13 @@ export function insertQueryLog(db: Db, input: QueryLogInput): void {
     `INSERT INTO query_log (
        id, ts, session, query_text, query_hash, route, flags_json, candidates_json,
        fused_json, packed_json, degraded_json, truncated, coverage, latency_ms,
-       stage_ms_json, cached
+       stage_ms_json, cached, caller_id, caller_kind, plugin_id, corr_id, status,
+       in_bytes, out_bytes
      ) VALUES (
        @id, @ts, @session, @text, @hash, @route, @flags, @candidates,
        @fused, @packed, @degraded, @truncated, @coverage, @latency,
-       @stage, @cached
+       @stage, @cached, @callerId, @callerKind, @pluginId, @corrId, @status,
+       @inBytes, @outBytes
      )`,
   ).run({
     id: input.id,
@@ -63,6 +77,13 @@ export function insertQueryLog(db: Db, input: QueryLogInput): void {
     latency: input.latencyMs,
     stage: input.stageMs === undefined || input.stageMs === null ? null : JSON.stringify(input.stageMs),
     cached: input.cached === true ? 1 : 0,
+    callerId: input.callerId ?? null,
+    callerKind: input.callerKind ?? null,
+    pluginId: input.pluginId ?? null,
+    corrId: input.corrId ?? null,
+    status: input.status ?? null,
+    inBytes: input.inBytes ?? null,
+    outBytes: input.outBytes ?? null,
   });
 }
 
@@ -130,12 +151,31 @@ export function countQueryLogs(db: Db): number {
 }
 
 /**
+ * 分批删除早于 `before` 的查询埋点（P2 保留清理；`storage.query_log_keep_days`）。
+ *
+ * 先删 `evidence_log` 子行：它的 `query_id` 有外键指向 `query_log`，
+ * 顺序反了会直接抛 FOREIGN KEY constraint failed。返回实际删除的行数。
+ */
+export function deleteQueryLogsBefore(db: Db, before: string, limit: number): number {
+  const ids = db
+    .prepare('SELECT id FROM query_log WHERE ts < ? ORDER BY ts ASC LIMIT ?')
+    .all(before, limit) as { id: string }[];
+  if (ids.length === 0) return 0;
+  const placeholders = ids.map(() => '?').join(',');
+  const keyed = ids.map((row) => row.id);
+  const run = db.transaction(() => {
+    db.prepare(`DELETE FROM evidence_log WHERE query_id IN (${placeholders})`).run(...keyed);
+    return db.prepare(`DELETE FROM query_log WHERE id IN (${placeholders})`).run(...keyed).changes;
+  });
+  return run();
+}
+
+/**
  * 最近 `limit` 条**带 `stage_ms_json.subgraph_nodes` 埋点**的查询的平均子图节点数
  * （详设 §7.6 门槛 2）。
  *
  * 只统计有埋点的行：P3-07 之前的查询没这个字段，把它算成 0 会凭空拉低密度。
- */
-export function recentSubgraphNodeStats(
+ */export function recentSubgraphNodeStats(
   db: Db,
   limit: number,
 ): { avg: number | null; observed: number } {
@@ -156,4 +196,139 @@ export function markCited(db: Db, queryId: string, mIds: readonly number[]): voi
   db.prepare(
     `UPDATE evidence_log SET cited = 1 WHERE query_id = ? AND m_id IN (${placeholders})`,
   ).run(queryId, ...mIds);
+}
+
+/** 接入层日志读模型的一行（P3；`src/app/access/logQuery.ts` 只做形状加工） */
+export interface QueryLogRow {
+  id: string;
+  ts: string;
+  callerId: string | null;
+  callerKind: string | null;
+  pluginId: string | null;
+  corrId: string | null;
+  status: string | null;
+  inBytes: number | null;
+  outBytes: number | null;
+  latencyMs: number | null;
+  packedJson: string | null;
+  queryText: string | null;
+}
+
+export interface QueryLogListFilter {
+  /** 精确匹配 `caller_id`；与 `unknownCaller` 互斥 */
+  callerId?: string;
+  /** 历史行 `caller_id IS NULL`（读模型里叫 unknown） */
+  unknownCaller?: boolean;
+  callerKind?: string;
+  unknownKind?: boolean;
+  status?: string;
+  /** 查询文本 LIKE（不引 FTS） */
+  q?: string;
+  /** 只取 `ts <= cursorTs`（keyset 候选范围） */
+  cursorTs?: string;
+  /** 只取 `ts >= sinceTs`（统计窗口） */
+  sinceTs?: string;
+}
+
+const LOG_ROW_COLUMNS =
+  'id, ts, caller_id, caller_kind, plugin_id, corr_id, status, in_bytes, out_bytes, ' +
+  'latency_ms, packed_json, query_text';
+
+function toQueryLogRow(row: Record<string, unknown>): QueryLogRow {
+  return {
+    id: String(row['id']),
+    ts: String(row['ts']),
+    callerId: row['caller_id'] === null ? null : String(row['caller_id']),
+    callerKind: row['caller_kind'] === null ? null : String(row['caller_kind']),
+    pluginId: row['plugin_id'] === null ? null : String(row['plugin_id']),
+    corrId: row['corr_id'] === null ? null : String(row['corr_id']),
+    status: row['status'] === null ? null : String(row['status']),
+    inBytes: row['in_bytes'] === null ? null : Number(row['in_bytes']),
+    outBytes: row['out_bytes'] === null ? null : Number(row['out_bytes']),
+    latencyMs: row['latency_ms'] === null ? null : Number(row['latency_ms']),
+    packedJson: typeof row['packed_json'] === 'string' ? row['packed_json'] : null,
+    queryText: typeof row['query_text'] === 'string' ? row['query_text'] : null,
+  };
+}
+
+/** 列表（keyset 分页）：`ts DESC, id DESC`，`limit` 由调用方按需给 */
+export function listQueryLogs(db: Db, filter: QueryLogListFilter, limit: number): QueryLogRow[] {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter.unknownCaller === true) {
+    where.push('caller_id IS NULL');
+  } else if (filter.callerId !== undefined) {
+    where.push('caller_id = ?');
+    params.push(filter.callerId);
+  }
+  if (filter.unknownKind === true) {
+    where.push('caller_kind IS NULL');
+  } else if (filter.callerKind !== undefined) {
+    where.push('caller_kind = ?');
+    params.push(filter.callerKind);
+  }
+  if (filter.status !== undefined) {
+    where.push('status = ?');
+    params.push(filter.status);
+  }
+  if (filter.q !== undefined) {
+    where.push("query_text LIKE '%' || ? || '%'");
+    params.push(filter.q);
+  }
+  if (filter.cursorTs !== undefined) {
+    where.push('ts <= ?');
+    params.push(filter.cursorTs);
+  }
+  if (filter.sinceTs !== undefined) {
+    where.push('ts >= ?');
+    params.push(filter.sinceTs);
+  }
+  const sql =
+    `SELECT ${LOG_ROW_COLUMNS} FROM query_log` +
+    (where.length === 0 ? '' : ` WHERE ${where.join(' AND ')}`) +
+    (filter.sinceTs !== undefined ? ' ORDER BY ts DESC' : ' ORDER BY ts DESC, id DESC LIMIT ?');
+  const rows =
+    filter.sinceTs !== undefined
+      ? (db.prepare(sql).all(...params) as Record<string, unknown>[])
+      : (db.prepare(sql).all(...params, limit) as Record<string, unknown>[]);
+  return rows.map(toQueryLogRow);
+}
+
+/** 统计窗口内的全部行（只带计数需要的列，不带正文） */
+export function listQueryLogsSince(db: Db, sinceTs: string): QueryLogRow[] {
+  const rows = db
+    .prepare(
+      'SELECT id, ts, caller_id, caller_kind, status, latency_ms, in_bytes, out_bytes ' +
+        'FROM query_log WHERE ts >= ? ORDER BY ts DESC',
+    )
+    .all(sinceTs) as Record<string, unknown>[];
+  return rows.map((row) => ({
+    id: String(row['id']),
+    ts: String(row['ts']),
+    callerId: row['caller_id'] === null ? null : String(row['caller_id']),
+    callerKind: row['caller_kind'] === null ? null : String(row['caller_kind']),
+    pluginId: null,
+    corrId: null,
+    status: row['status'] === null ? null : String(row['status']),
+    inBytes: row['in_bytes'] === null ? null : Number(row['in_bytes']),
+    outBytes: row['out_bytes'] === null ? null : Number(row['out_bytes']),
+    latencyMs: row['latency_ms'] === null ? null : Number(row['latency_ms']),
+    packedJson: null,
+    queryText: null,
+  }));
+}
+
+export function countTableRows(db: Db, table: 'query_log' | 'evidence_log'): number {
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number };
+  return row.n;
+}
+
+/** 清空检索日志（设置页维护动作）：先删子行再删主表，同一事务 */
+export function purgeAllQueryLogs(db: Db): { queryLog: number; evidenceLog: number } {
+  const run = db.transaction(() => {
+    const evidenceLog = db.prepare('DELETE FROM evidence_log').run().changes;
+    const queryLog = db.prepare('DELETE FROM query_log').run().changes;
+    return { queryLog, evidenceLog };
+  });
+  return run();
 }

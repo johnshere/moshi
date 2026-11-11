@@ -56,7 +56,7 @@ describe('迁移 006：ftype 扩值 + 七个正交字段', () => {
     expect(v5.to).toBe(5);
     db.exec(V5_FACT_SQL);
 
-    const v6 = migrate(db, { backupsDir: backups });
+    const v6 = migrate(db, { backupsDir: backups, target: 6 });
     expect(v6.from).toBe(5);
     expect(v6.applied).toEqual(['006_fact_semantics.sql']);
     expect(db.pragma('user_version', { simple: true })).toBe(6);

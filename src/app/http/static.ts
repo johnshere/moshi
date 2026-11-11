@@ -127,6 +127,7 @@ export async function staticRoutes(app: FastifyInstance, opts: StaticRoutesOpts)
     '/ui/inbox',
     '/ui/archive',
     '/ui/settings',
+    '/ui/access',
     HOOK_PAGE_PATH,
   ] as const) {
     // 入口：`/ui/<page>` 与 `/ui/<page>/`（后者靠显式注册，不指望通配符兜空串）

@@ -11,6 +11,7 @@ storage:
   archive_dir: "~/Documents/默识归档"
   backup_keep: 7
   backup_hour: 3
+  query_log_keep_days: 3     # 检索日志保留天数（P2；0=永久；启动+每日按批清理）
 
 ingest:
   sources: ["claude-code"]   # 适配器名，或 `- id/adapter/root` 实例列表
@@ -149,13 +150,14 @@ layout:
   extent: 100                # 归一化范围，100 即 [-100,100]³
   displacement_threshold: 15 # 增量平均位移超过它 → 转全量重算
 
-# 诊断追踪（Z-01C-e / 用户 m01321：不声明环境，只在这开、默认关）。
+# 插件运行日志（原 debug 段，P1 改名；Z-01C-e / 用户 m01321：不声明环境，只在这开、默认关）。
+# 本质是插件运行日志（宿主内调用、注入字节、失败原因、回执号），不是产品功能：正式发版整块摘除。
 # off     = 与历史一致：内存台账只记计数与枚举，不落盘；
 # summary = 落 <数据目录>/hook/trace-YYYY-MM-DD.jsonl，多带证据 id/分数、分阶段耗时与
 #           query/inject/reply 的 sha256 前 16 hex（仍不落正文）；
 # full    = 再落 query/inject/evidence/reply 正文，落盘前必过 redact 段。
-debug:
-  trace_level: "off"         # off | summary | full
-  trace_max_bytes: 16777216  # 单文件上限，超过按 trace-<日期>.<n>.jsonl 切下一个
-  trace_keep_days: 14        # 按文件名日期清理超过天数的文件
+hook_plugin_trace:
+  level: "off"               # off | summary | full
+  max_bytes: 16777216        # 单文件上限，超过按 trace-<日期>.<n>.jsonl 切下一个
+  keep_days: 14              # 按文件名日期清理超过天数的文件
 

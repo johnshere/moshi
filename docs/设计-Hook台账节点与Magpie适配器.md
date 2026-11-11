@@ -544,7 +544,7 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
 
 ### 8.4 `/hook/trace` 契约
 
-环形缓冲（进程内，`src/core/hook/trace.ts` 的 `HookTraceStore`），保留最近 200 条；同一条记录也按 `[debug] trace_level` 落到磁盘（`src/core/hook/traceSink.ts`）：
+环形缓冲（进程内，`src/core/hook/trace.ts` 的 `HookTraceStore`），保留最近 200 条；同一条记录也按 `hook_plugin_trace.level` 落到磁盘（`src/core/hook/traceSink.ts`）：
 
 ```json
 { "schema":"moshi-hook-trace/1", "items":[
@@ -555,7 +555,7 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
     "inject_sha256":"…","query_sha256":"…"} ] }
 ```
 
-三档（`debug.trace_level`）：
+三档（`hook_plugin_trace.level`，原 `debug.trace_level`；P1 改名，D-178）：
 
 | 档位 | 记录内容 | 用途 |
 | --- | --- | --- |
@@ -564,7 +564,7 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
 | `full` | 再加 `query_text`、`inject_text`、`evidence_text`、`reply_text`（落盘前过 `redact`） | 只应出现在开发机 |
 
 - **默认只记计数与枚举，不记正文**（与 `report` 的纪律一致）；正文只在 `full` 出现。
-- 落盘 `<data_dir>/hook/trace-YYYY-MM-DD.jsonl`；单文件超过 `debug.trace_max_bytes` 切 `trace-YYYY-MM-DD.<n>.jsonl`；`debug.trace_keep_days` 之前的按文件名清理。写盘异步补写，不占召回预算。
+- 落盘 `<data_dir>/hook/trace-YYYY-MM-DD.jsonl`；单文件超过 `hook_plugin_trace.max_bytes` 切 `trace-YYYY-MM-DD.<n>.jsonl`；`hook_plugin_trace.keep_days` 之前的按文件名清理。写盘异步补写，不占召回预算。
 - `signal` 也记一条（`turn: "response"`，带回 `corr_id`，只存 `reply_sha256`；`full` 才有 `reply_text`）。
 - `POST /hook/api/trace` 默认只清内存；`?disk=1`（或 body `{"disk":true}`）才清磁盘，响应带 `disk_removed`。
 

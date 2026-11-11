@@ -53,6 +53,11 @@ export interface ConfigRoutesOpts {
   roots?: WriteRoots;
   /** 维护重建里的向量编码；不传时 `vec` 实跑返回 503，dry_run 仍可计数 */
   sidecar?: VecEncoderLike;
+  /**
+   * 写盘成功后把新配置推给同进程消费者（P3：日志档位/保留天数改完即生效，
+   * daemon 不用重启）。缺省不动，测试可注入。
+   */
+  apply?: (next: Config) => void;
 }
 
 const TARGETS = ['fts', 'vec', 'degree', 'all'] as const;
@@ -143,6 +148,12 @@ function publicConfig(cfg: Config, configPath: string): Record<string, unknown> 
         data_dir: cfg.storage.data_dir,
         archive_dir: cfg.storage.archive_dir,
         backup_keep: cfg.storage.backup_keep,
+        query_log_keep_days: cfg.storage.query_log_keep_days,
+      },
+      hook_plugin_trace: {
+        level: cfg.hook_plugin_trace.level,
+        max_bytes: cfg.hook_plugin_trace.max_bytes,
+        keep_days: cfg.hook_plugin_trace.keep_days,
       },
     },
     meta: { config_path: configPath },
@@ -232,6 +243,13 @@ export async function configRoutes(
       }
       writeConfigDocument(configPath, merged, roots);
       const restartRequired = applied.some((path) => RESTART_REQUIRED_PATHS.includes(path));
+      if (opts.apply !== undefined) {
+        const next = loadConfig({
+          file: configPath,
+          ...(opts.home === undefined ? {} : { home: opts.home }),
+        });
+        opts.apply(next);
+      }
       return {
         ok: true,
         schema: PUBLIC_CONFIG_SCHEMA,

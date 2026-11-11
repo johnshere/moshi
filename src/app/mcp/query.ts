@@ -21,6 +21,7 @@ import type {
   TopicHint,
 } from '../../core/read/evidence.js';
 import type { Degraded, Ftype, Status } from '../../domain/enums.js';
+import { MCP_CALLER } from '../../domain/access.js';
 import { searchWithPipeline, type SearchParams } from '../../core/read/search.js';
 import type { McpDeps } from './deps.js';
 import type { QueryInput } from './schemas.js';
@@ -156,6 +157,8 @@ export async function runMemoryQuery(
       ...(input.ftype === undefined ? {} : { ftype: input.ftype as readonly Ftype[] }),
       ...(input.time_range?.from === undefined ? {} : { timeFrom: input.time_range.from }),
       ...(input.time_range?.to === undefined ? {} : { timeTo: input.time_range.to }),
+      // 接入层（P2）：埋点记「MCP 服务面」；MCP 只是 core 的一个子集入口
+      caller: MCP_CALLER,
     },
   );
   return toJson(pack, cached);

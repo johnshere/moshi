@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig, type Config } from '../../src/app/config.js';
 import { AlreadyRunningError, boot, ensureDataDirs, findFreePort, type Instance } from '../../src/app/lifecycle.js';
 import { inspectLock, isPortOpen, readLock, writeLock } from '../../src/app/lock.js';
+import { TARGET_VERSION } from '../../src/infra/sqlite/migrate.js';
 
 const opened: Instance[] = [];
 
@@ -54,8 +55,9 @@ describe('启动即建库（详设 §3.4 第 4 步）', () => {
       '004_edges.sql',
       '005_direct_write.sql',
       '006_fact_semantics.sql',
+      '007_query_log_caller.sql',
     ]);
-    expect(inst.db.pragma('user_version', { simple: true })).toBe(6);
+    expect(inst.db.pragma('user_version', { simple: true })).toBe(TARGET_VERSION);
     // vectorEnabled 由本机 sqlite-vec 探测决定；与迁移结果一致：
     // 装了 → fact_vec 已建；没装 → 打降级标记
     const vecRow = inst.db.prepare(

@@ -127,3 +127,31 @@ describe('TraceSink', () => {
     expect(readdirSync(dir)).toEqual(['keep.txt']);
   });
 });
+
+describe('运行期改档位（P3 设置页）', () => {
+  it('setLevel 之后新条目按新档位落盘', async () => {
+    const dir = tmp();
+    const sink = new TraceSink({ dir, level: 'off', maxBytes: 4096, keepDays: 7 });
+    sink.append(item());
+    await sink.flush();
+    expect(readdirSync(dir)).toEqual([]);
+
+    sink.setLevel('summary');
+    sink.append(item({ query_text: '原文', inject_bytes: 600 }));
+    await sink.flush();
+    const summaryFiles = readdirSync(dir).filter((name) => name.startsWith('trace-'));
+    expect(summaryFiles).toHaveLength(1);
+    const summaryLine = readFileSync(path.join(dir, summaryFiles[0] as string), 'utf8');
+    expect(summaryLine).toContain('inject_bytes');
+    expect(summaryLine).not.toContain('原文');
+
+    sink.setLevel('full');
+    sink.append(item({ query_text: '原文', inject_bytes: 601 }));
+    await sink.flush();
+    const all = readdirSync(dir)
+      .filter((name) => name.startsWith('trace-'))
+      .map((name) => readFileSync(path.join(dir, name), 'utf8'))
+      .join('');
+    expect(all).toContain('原文');
+  });
+});

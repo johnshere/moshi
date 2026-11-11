@@ -90,11 +90,11 @@ describe('配置加载（详设 §3.6）', () => {
     expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('model.gat_mode');
   });
 
-  it('debug 段默认关，档位只接受三档（Z-01C-e）', () => {
+  it('hook_plugin_trace 段默认关，档位只接受三档（Z-01C-e / P1 改名）', () => {
     const defaults = loadConfig({ file: path.join(tmpdir(), 'nope', 'c.yaml'), home: HOME });
-    expect(defaults.debug.trace_level).toBe('off');
-    const file = withYaml('debug:\n  trace_level: "verbose"\n');
-    expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('debug.trace_level');
+    expect(defaults.hook_plugin_trace.level).toBe('off');
+    const file = withYaml('hook_plugin_trace:\n  level: "verbose"\n');
+    expect(expectConfigError(() => loadConfig({ file, home: HOME }))).toContain('hook_plugin_trace.level');
   });
 
   it('非法 YAML 报 E_CONFIG 而不是抛原生异常', () => {
@@ -111,8 +111,8 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.archive.include_raw).toBe(false);
     expect(cfg.ui.theme).toBe('system');
     expect(cfg.log.keep_days).toBe(7);
-    expect(cfg.debug.trace_level).toBe('off');
-    expect(cfg.debug.trace_keep_days).toBe(14);
+    expect(cfg.hook_plugin_trace.level).toBe('off');
+    expect(cfg.hook_plugin_trace.keep_days).toBe(14);
     // P2-23：直写闸门默认必须关着——示例配置哪天写错了，这条会先炸
     expect(cfg.mcp.allow_direct_write).toBe(false);
     expect(cfg.mcp.direct_write_batch_max).toBe(50);
