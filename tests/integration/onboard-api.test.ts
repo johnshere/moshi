@@ -177,6 +177,7 @@ describe('/hook/api/install 安装计划与执行', () => {
 
   it('不带 confirm 一个字节都不写（确认弹窗必须有实际作用）', async () => {
     const pluginRoot = await makeApp();
+    const registry = path.join(path.dirname(pluginRoot), 'plugins.json');
     const body = (await call('POST', '/hook/api/install', { host: 'magpie', kind: 'hook' })).json() as Record<
       string,
       unknown
@@ -184,13 +185,14 @@ describe('/hook/api/install 安装计划与执行', () => {
     expect(body['ok']).toBe(false);
     expect(body['written']).toEqual([]);
     expect(existsSync(path.join(pluginRoot, 'node_modules'))).toBe(false);
-    expect(existsSync(path.join(pluginRoot, 'plugins.json'))).toBe(false);
+    expect(existsSync(registry)).toBe(false);
   });
 
-  it('confirm 后真装：文件到位、清单有 spec、状态可读；再卸载能清干净', async () => {
+  it('confirm 后真装：文件到位、注册表有 path spec、状态可读；再卸载能清干净', async () => {
     const pluginRoot = await makeApp();
+    const registry = path.join(path.dirname(pluginRoot), 'plugins.json');
     writeFileSync(
-      path.join(pluginRoot, 'plugins.json'),
+      registry,
       JSON.stringify({ plugins: [{ spec: '@magpie-community/other@latest' }] }),
     );
 
@@ -201,10 +203,10 @@ describe('/hook/api/install 安装计划与执行', () => {
     expect(install.ok).toBe(true);
     expect(install.written.length).toBe(5);
     expect(existsSync(path.join(pluginRoot, 'node_modules', 'magpie-moshi', 'hook.cjs'))).toBe(true);
-    const spec = JSON.parse(readFileSync(path.join(pluginRoot, 'plugins.json'), 'utf8')) as {
+    const spec = JSON.parse(readFileSync(registry, 'utf8')) as {
       plugins: { spec: string }[];
     };
-    expect(spec.plugins.some((item) => item.spec.startsWith('magpie-moshi@'))).toBe(true);
+    expect(spec.plugins.some((item) => item.spec === path.resolve(path.join(pluginRoot, 'node_modules', 'magpie-moshi')))).toBe(true);
     // 别人的插件不能被顶掉
     expect(spec.plugins.some((item) => item.spec === '@magpie-community/other@latest')).toBe(true);
 

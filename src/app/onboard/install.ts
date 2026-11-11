@@ -1,13 +1,17 @@
 /**
  * Magpie 插件安装器（Z-01C-i / 设计 §16.6）。
  *
- * **实测到的 Magpie 插件形态**（2026-11-10，`~/.config/magpie/`）：
- * - `plugins/` 是一个 bun 工程：`package.json` + `bun.lock` + `node_modules/`；
- * - `plugins.json` 是"要装哪些"的清单，形如 `{"plugins":[{"spec":"@scope/name@latest"}]}`；
- * - 宿主从这份清单解析出包目录，再按 `package.json` 的 main/exports 加载模块、读 `magpie.hooks`。
+ * **实测到的 Magpie 插件形态**（2026-11-11，Magpie 0.1.3616 实测回填，设计 §16.11）：
+ * - `plugins/` 是用户插件的包目录（bun 工程：`package.json` + `bun.lock` + `node_modules/`）；
+ * - **宿主读的注册表在配置根**：`<配置根>/plugins.json`，形如
+ *   `{"plugins":[{"spec":"@scope/name@latest"}]}` 或 `{"plugins":[{"spec":"<本地包绝对路径>"}]}`；
+ *   只写 `plugins/plugins.json` 是静默失效（K7 已证伪）；
+ * - 宿主按清单里的 spec 解析包目录，再按 `package.json` 的 main/exports 加载、读 `magpie.hooks`。
  *
- * 所以本地包安装 = **把包放进 `plugins/node_modules/<name>/` + 往 `plugins.json` 追加 spec**。
+ * 所以本地包安装 = **把包放进 `plugins/node_modules/<name>/` + 往根 `plugins.json` 追加
+ * "该目录绝对路径"的 path spec**（与 `magpie plugin add <本地路径>` 写出来的形状一致）。
  * 不依赖网络、不调 bun（调 bun 会改 `bun.lock`，卸载时更难还原）。
+ * 第二步（打开 `hook.magpie_enabled`）由 `/hook/api/config` 的 connect 负责，不在这里。
  *
  * 三条硬约束：
  * 1. **写盘只走例外通道**：白名单只加"这一个目标根 + 数据目录"，绝不复用 `dataRootsOf()`；
@@ -36,12 +40,24 @@ import {
 
 /** 插件包在 moshi 工程里的目录名（`packages/magpie-moshi` → `dist/magpie-moshi`） */
 export const PLUGIN_PACKAGE_NAME = 'magpie-moshi';
-/** 装进 Magpie 后用的包名（目录名；plugins.json 的 spec 也用这个） */
+/** 装进 Magpie 后用的包名（目录名；注册表里的 spec 是它的绝对路径） */
 export const PLUGIN_INSTALL_NAME = 'magpie-moshi';
 /** 需要拷贝的文件（清单固定：多拷少拷都会让宿主加载失败） */
 export const PLUGIN_FILES = ['hook.cjs', 'identity.cjs', 'index.cjs', 'package.json'] as const;
 /** 环境变量覆盖目标根（测试与非常规安装位置用） */
 export const PLUGIN_DIR_ENV = 'MOSHI_MAGPIE_PLUGIN_DIR';
+/** 注册表文件名（在配置根，不在 `plugins/` 里——K7：写错位置静默失效） */
+const REGISTRY_NAME = 'plugins.json';
+
+/** 装好后的包目录（绝对路径；注册表里就是这条 path spec） */
+export function installedDir(root: string): string {
+  return path.join(root, 'node_modules', PLUGIN_INSTALL_NAME);
+}
+
+/** 注册表路径：`root` 是 `<配置根>/plugins`，注册表在 `<配置根>/plugins.json` */
+function registryFile(root: string): string {
+  return path.join(path.dirname(root), REGISTRY_NAME);
+}
 
 /** Magpie 插件工程目录的候选（按顺序取第一个存在的） */
 export function pluginRootCandidates(home: string, env: NodeJS.ProcessEnv): readonly string[] {
@@ -127,9 +143,8 @@ function resolveRoot(opts: InstallOptions): string | null {
   return null;
 }
 
-/** 读 `plugins.json`，坏掉返回空清单（不抛：安装器不能因为一份 JSON 崩掉） */
-function readPluginsJson(root: string): { raw: string | null; specs: readonly string[] } {
-  const file = path.join(root, 'plugins.json');
+/** 读注册表，坏掉返回空清单（不抛：安装器不能因为一份 JSON 崩掉） */
+function readRegistry(file: string): { raw: string | null; specs: readonly string[] } {
   if (!existsSync(file)) return { raw: null, specs: [] };
   try {
     const raw = readFileSync(file, 'utf8');
@@ -165,7 +180,7 @@ function renderPluginsJson(existing: string | null, specs: readonly string[]): s
 
 /** 目标文件清单：一次算全，plan 与 apply 共用 */
 function targetFiles(root: string): readonly { file: string; name: string }[] {
-  const dest = path.join(root, 'node_modules', PLUGIN_INSTALL_NAME);
+  const dest = installedDir(root);
   return PLUGIN_FILES.map((name) => ({ file: path.join(dest, name), name }));
 }
 
@@ -208,9 +223,9 @@ export function planMagpieHook(opts: InstallOptions): InstallPlan {
     };
   }
   const version = readVersion(sourceDir);
-  const spec = version === null ? PLUGIN_INSTALL_NAME : `${PLUGIN_INSTALL_NAME}@${version}`;
-  const pluginsFile = path.join(root, 'plugins.json');
-  const { specs } = readPluginsJson(root);
+  const spec = installedDir(root);
+  const pluginsFile = registryFile(root);
+  const { specs } = readRegistry(pluginsFile);
   const specsNext = specs.includes(spec) ? specs : [...specs, spec];
   const files = targetFiles(root);
 
@@ -224,7 +239,7 @@ export function planMagpieHook(opts: InstallOptions): InstallPlan {
   steps.push({
     action: pluginsAction,
     path: pluginsFile,
-    note: specs.length === specsNext.length ? '已在清单中，仅确保可加载' : `追加 spec：${spec}`,
+    note: specs.length === specsNext.length ? '已在清单中，仅确保可加载' : `以路径 spec 注册：${spec}`,
   });
 
   return { ...base, root, version, supported: true, reason: null, steps };
@@ -298,11 +313,11 @@ export function applyMagpieHook(opts: InstallOptions & { confirm: boolean }): In
   if (sourceDir === null) {
     throw new MoshiError('E_NOT_FOUND', '安装源目录不存在');
   }
-  const roots: WriteRoots = [opts.dataDir, plan.root];
-  const pluginsFile = path.join(plan.root, 'plugins.json');
+  const roots: WriteRoots = [opts.dataDir, plan.root, path.dirname(plan.root)];
+  const pluginsFile = registryFile(plan.root);
   const backup = existsSync(pluginsFile) ? readFileSync(pluginsFile, 'utf8') : null;
-  const { specs } = readPluginsJson(plan.root);
-  const spec = plan.version === null ? PLUGIN_INSTALL_NAME : `${PLUGIN_INSTALL_NAME}@${plan.version}`;
+  const { specs } = readRegistry(pluginsFile);
+  const spec = installedDir(plan.root);
   const specsNext = specs.includes(spec) ? specs : [...specs, spec];
   const written: string[] = [];
 
@@ -373,25 +388,28 @@ export function uninstallMagpieHook(opts: InstallOptions): InstallOutcome {
   if (record === undefined || record.state !== 'installed' || record.path === null) {
     return { plan, record: record ?? { state: 'absent', at: null, path: null, version: null, reason: null, files: [], backup: null }, written: [] };
   }
-  const roots: WriteRoots = [opts.dataDir, record.path];
+  const roots: WriteRoots = [opts.dataDir, record.path, path.dirname(record.path)];
   const written: string[] = [];
   for (const file of record.files) {
     safeRemoveFile(file, roots);
     written.push(file);
   }
   // 包目录空了就一并删（只在它确实位于 node_modules/magpie-moshi 时）
-  const destDir = path.join(record.path, 'node_modules', PLUGIN_INSTALL_NAME);
+  const destDir = installedDir(record.path);
   if (existsSync(destDir) && readdirSync(destDir).length === 0) {
     safeRemoveDir(destDir, roots);
   }
-  // 还原 plugins.json：有备份就写回原文，没备份就剔除我们的 spec
-  const pluginsFile = path.join(record.path, 'plugins.json');
+  // 还原注册表：有备份就写回原文，没备份就剔除我们的 path spec
+  const pluginsFile = registryFile(record.path);
   if (record.backup !== null) {
     safeWriteFile(pluginsFile, record.backup, roots);
     written.push(pluginsFile);
   } else {
-    const { specs } = readPluginsJson(record.path);
-    const filtered = specs.filter((spec) => !spec.startsWith(`${PLUGIN_INSTALL_NAME}@`) && spec !== PLUGIN_INSTALL_NAME);
+    const { specs } = readRegistry(pluginsFile);
+    const own = installedDir(record.path);
+    const filtered = specs.filter(
+      (spec) => spec !== own && spec !== PLUGIN_INSTALL_NAME && !spec.startsWith(`${PLUGIN_INSTALL_NAME}@`),
+    );
     if (filtered.length !== specs.length) {
       safeWriteFile(pluginsFile, renderPluginsJson(null, filtered), roots);
       written.push(pluginsFile);

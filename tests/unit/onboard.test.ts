@@ -184,17 +184,23 @@ describe('Magpie 插件安装器', () => {
   }
 
   function setup(existingSpecs: readonly string[] = []): {
+    configDir: string;
     root: string;
     dataDir: string;
     sourceDir: string;
     env: NodeJS.ProcessEnv;
   } {
-    const root = tempDir();
-    // 真实 Magpie 插件目录里有 plugins.json（清单），这里照造一份
+    const configDir = tempDir();
+    const root = path.join(configDir, 'plugins');
+    mkdirSync(root, { recursive: true });
+    // 注册表在配置根、不在 plugins/ 里（设计 §16.11 E2：写错位置会静默失效）
     if (existingSpecs.length > 0) {
-      writeFileSync(path.join(root, 'plugins.json'), JSON.stringify({ plugins: existingSpecs.map((spec) => ({ spec })) }));
+      writeFileSync(
+        path.join(configDir, 'plugins.json'),
+        JSON.stringify({ plugins: existingSpecs.map((spec) => ({ spec })) }),
+      );
     }
-    return { root, dataDir: tempDir(), sourceDir: fakeSource(), env: { [PLUGIN_DIR_ENV]: root } };
+    return { configDir, root, dataDir: tempDir(), sourceDir: fakeSource(), env: { [PLUGIN_DIR_ENV]: root } };
   }
 
   it('没有 Magpie 插件目录 → 计划 unsupported，不猜路径', () => {
@@ -211,8 +217,8 @@ describe('Magpie 插件安装器', () => {
     expect(pluginRootCandidates('/home/u', {})).toContain(path.join('/home/u', '.config', 'magpie', 'plugins'));
   });
 
-  it('计划 = 4 个包文件 + plugins.json，且每条都带动作', () => {
-    const { root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
+  it('计划 = 4 个包文件 + 注册表，且每条都带动作', () => {
+    const { configDir, root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
     const plan = planMagpieHook({ dataDir, env, sourceDir });
     expect(plan.supported).toBe(true);
     expect(plan.root).toBe(path.resolve(root));
@@ -224,48 +230,51 @@ describe('Magpie 插件安装器', () => {
       'package.json',
       'plugins.json',
     ]);
+    // 注册表必须在配置根，不在 plugins/ 里（K7）
+    expect(plan.steps[plan.steps.length - 1]?.path).toBe(path.join(configDir, 'plugins.json'));
+    expect(plan.steps[plan.steps.length - 1]?.note).toContain('以路径 spec 注册');
     expect(plan.steps.map((step) => step.action)).toEqual(['新增', '新增', '新增', '新增', '修改']);
     expect(plan.risk).toContain('尚未端到端验证');
   });
 
   it('没点确认就一个字节都不写（确认弹窗不是装饰）', () => {
-    const { root, dataDir, sourceDir, env } = setup();
+    const { configDir, root, dataDir, sourceDir, env } = setup();
     const outcome = applyMagpieHook({ dataDir, env, sourceDir, confirm: false });
     expect(outcome.written).toEqual([]);
     expect(existsSync(path.join(root, 'node_modules'))).toBe(false);
-    expect(existsSync(path.join(root, 'plugins.json'))).toBe(false);
+    expect(existsSync(path.join(configDir, 'plugins.json'))).toBe(false);
   });
 
-  it('确认后真写：包文件到位、清单追加 spec、记录可回推', () => {
-    const { root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
+  it('确认后真写：包文件到位、注册表追加 path spec、记录可回推', () => {
+    const { configDir, root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
     const outcome = applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     expect(outcome.record.state).toBe('installed');
     expect(outcome.written.length).toBe(5);
     const installed = path.join(root, 'node_modules', 'magpie-moshi');
     expect(existsSync(path.join(installed, 'hook.cjs'))).toBe(true);
-    const spec = JSON.parse(readFileSync(path.join(root, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
-    expect(spec.plugins.map((p) => p.spec)).toContain('magpie-moshi@0.2.0');
+    const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
+    // 注册表写的是包目录的绝对路径（与 `magpie plugin add <本地路径>` 一致）
+    expect(spec.plugins.map((p) => p.spec)).toContain(path.resolve(installed));
     // 原有插件不能被顶掉
     expect(spec.plugins.map((p) => p.spec)).toContain('@magpie-community/other@latest');
     expect(readOnboarding(dataDir).installs['magpie-hook']?.state).toBe('installed');
   });
 
-  it('重复安装幂等：清单里不出现两条同名 spec', () => {
-    const { dataDir, sourceDir, env } = setup();
+  it('重复安装幂等：注册表里不出现两条本包 spec', () => {
+    const { configDir, root, dataDir, sourceDir, env } = setup();
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
-    const root = path.resolve(env[PLUGIN_DIR_ENV] ?? '');
-    const spec = JSON.parse(readFileSync(path.join(root, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
-    expect(spec.plugins.filter((p) => p.spec.startsWith('magpie-moshi@')).length).toBe(1);
+    const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
+    expect(spec.plugins.filter((p) => p.spec === path.resolve(path.join(root, 'node_modules', 'magpie-moshi'))).length).toBe(1);
   });
 
   it('卸载：删包文件、清掉我们的 spec、把状态标回 absent', () => {
-    const { root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
+    const { configDir, root, dataDir, sourceDir, env } = setup(['@magpie-community/other@latest']);
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     const outcome = uninstallMagpieHook({ dataDir, env, sourceDir });
     expect(outcome.record.state).toBe('absent');
     expect(existsSync(path.join(root, 'node_modules', 'magpie-moshi', 'hook.cjs'))).toBe(false);
-    const spec = JSON.parse(readFileSync(path.join(root, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
+    const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
     expect(spec.plugins.map((p) => p.spec)).toEqual(['@magpie-community/other@latest']);
   });
 

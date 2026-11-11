@@ -51,11 +51,11 @@ if (existsSync(join(root, UI_DIST_SRC))) {
 /**
  * Magpie 插件包（`packages/magpie-moshi`）：安装器按 `dist/magpie-moshi` 找源目录，
  * 回退才是仓库里的 `packages/magpie-moshi`（见 `src/app/onboard/install.ts`）。
- * 只搬四个运行时文件，不带 node_modules（这个包零依赖）。
+ * 只搬运行时文件 + README，不带 node_modules（这个包零依赖）。
  */
 const PLUGIN_SRC = 'packages/magpie-moshi';
 const PLUGIN_DEST = 'dist/magpie-moshi';
-const PLUGIN_FILES = ['hook.cjs', 'identity.cjs', 'index.cjs', 'package.json'];
+const PLUGIN_FILES = ['hook.cjs', 'identity.cjs', 'index.cjs', 'package.json', 'README.md'];
 if (existsSync(join(root, PLUGIN_SRC, 'hook.cjs'))) {
   rmSync(join(root, PLUGIN_DEST), { recursive: true, force: true });
   mkdirSync(join(root, PLUGIN_DEST), { recursive: true });
