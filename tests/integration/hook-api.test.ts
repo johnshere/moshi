@@ -72,6 +72,8 @@ function uiDist(home: string): string {
 async function makeApp(over: Record<string, unknown> = {}): Promise<void> {
   const home = tempDir();
   const cfg = loadConfig({ home });
+  // 绝大多数用例关心"这一轮注入了什么"，所以默认关掉节流（节流另有专门用例）
+  cfg.hook.inject_refresh_ms = 0;
   const db = freshDb();
   dbRef.db = db;
   const { app } = await buildHttpApp({
@@ -331,6 +333,14 @@ describe('/hook/api/status 与 F8 连接态', () => {
     expect(page.statusCode).toBe(200);
     // 连接语义留在服务端（onRequest 钩子），不靠前端脚本——所以壳里不会出现标记
     expect((await call('GET', '/hook/api/status')).json().connected).toBe(true);
+  });
+
+  it('注入节流命中：不检索、不注入，只回 throttled（低频注入，m04102）', async () => {
+    await makeApp({ hookInjectThrottle: { allow: () => false, mark: () => {} } });
+    const res = await call('POST', '/hook/api/recall', envelope());
+    expect(res.statusCode).toBe(200);
+    expect(res.json().inject).toBe(false);
+    expect(res.json().degraded).toContain('throttled');
   });
 
   it('caps 表里 magpie 只有两个时机（2/7，如实标 absent 的来源）', async () => {

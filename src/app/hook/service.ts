@@ -16,7 +16,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import type { Breaker } from '../../core/read/breaker.js';
 import type { EvidenceCache } from '../../core/read/cache.js';
 import { searchWithPipeline, type SearchOutcome } from '../../core/read/search.js';
-import { captureSignal, renderHookMail, type HookTraceItem } from '../../core/hook/index.js';
+import { captureSignal, chooseInjectMode, renderHookMail, type HookTraceItem } from '../../core/hook/index.js';
 import { cleanHookText } from '../../core/hook/clean.js';
 import { HOOK_SCHEMA, type HookEnvelope, type HookInjection, type HookSignalResult } from '../../core/hook/protocol.js';
 import { sessionMoshiId } from '../../domain/identity.js';
@@ -28,6 +28,7 @@ import { searchParamsOf } from '../mcp/query.js';
 import type { ModelScoreFn } from '../../core/read/search.js';
 import type { EncodeFn } from '../mcp/deps.js';
 import { resolveProjectIdentity, type ProjectIdentity } from './projectIdentity.js';
+import { createInjectThrottle, type InjectThrottle } from './throttle.js';
 
 export interface HookDeps {
   db: Db;
@@ -44,6 +45,8 @@ export interface HookDeps {
   markerRoots?: readonly string[];
   /** 注入时钟（测试可注入） */
   now?: () => number;
+  /** 注入节流状态（服务面按 `cfg.hook.inject_refresh_ms` 建一份；不传则用默认 10 分钟） */
+  injectThrottle?: InjectThrottle;
 }
 
 export interface RecallOutcome {
@@ -71,6 +74,10 @@ function identityOf(envelope: HookEnvelope): HookEnvelope['identity'] {
   const id = sessionMoshiId({ id: raw });
   return id === null ? envelope.identity : { ...envelope.identity, moshi_id: id };
 }
+
+/** 没有服务面注入时的兜底节流：与 `hook.inject_refresh_ms` 默认值一致 */
+const fallbackThrottle = createInjectThrottle(() => 600_000);
+const DEFAULT_ANONYMOUS_SESSION = 'anonymous';
 
 /**
  * 台账用的短哈希（前 16 hex）：summary 档靠它在不落正文的前提下定位
@@ -190,6 +197,19 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
     };
   }
 
+  // 低频注入（m04102）：同一会话在 `inject_refresh_ms` 窗口内只注入一次。
+  // 窗口从「上一次真正注入」起算；没证据/超时/被节流都不重置窗口。
+  const throttle = deps.injectThrottle ?? fallbackThrottle;
+  const throttleKey = mergedIdentity.moshi_id ?? envelope.session.id ?? DEFAULT_ANONYMOUS_SESSION;
+  if (!throttle.allow(throttleKey, now())) {
+    return {
+      injection: emptyInjection(mergedIdentity, deadline, ['throttled'], corrId),
+      trace: { ...traceBase, status: 'skipped', degraded: ['throttled'] },
+      project,
+      identity: mergedIdentity,
+    };
+  }
+
   // unknown 档：没有工程身份 → 查 global，注入文本不带工程标签（设计 §5.7）
   const scope = projectId === null || project.root === null ? 'global' : projectScopeOf(project.root);
 
@@ -245,11 +265,12 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
     };
   }
 
+  throttle.mark(throttleKey, now());
   return {
     injection: {
       schema: HOOK_SCHEMA,
       inject: true,
-      mode: 'system-append',
+      mode: chooseInjectMode(envelope.caps.injectModes),
       text: mail.text,
       evidence: mail.evidence,
       degraded: [...outcome.pack.degraded],

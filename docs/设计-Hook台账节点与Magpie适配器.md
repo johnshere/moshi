@@ -38,7 +38,7 @@ tags: [hook, magpie, injection, identity, design]
 2. **"Claude Code 标准钩子 = 所有插件通用"不成立**：钩子要宿主触发才有意义。Magpie 没有事件式钩子系统，只有请求前/响应后两个时机，且 ctx 里**没有 session / cwd / project**。所以值只在"宿主层归一"这一个动作上，不在"用哪套 JSON 字段名"上。
 3. **时机降级被写进协议而不是靠适配器各自应急**：`HookTurn` 枚举 Claude Code 的 7 个时机；每个入口用 `caps` 自报支持哪些；**不支持就如实报告，不静默伪装成功**（用户已裁决：灯必须真）。
 4. **身份 = 会话级 `moshi_id` + 项目级 `project_id`，都取 `sha256` 前 32 位十六进制**；不放盐、不做设备哈希、不回传任何明文 ID。哈希的输入在白名单内，`identity_source` 记录可信度（`vcs` / `local` / `unknown` 三档）。
-5. **注入的硬边界**：Magpie 单钩子预算默认 1000ms、总预算 `min(10000, max(2000, Σ))`，且改写后 `tools/model/stream` 等字段必须与原请求一致否则整次结果作废。因此注入只能在**已经存在 `system` 消息**里追加、其余键一律不碰，超预算直接放弃注入并 `report('unavailable')`。
+5. **注入的硬边界**：Magpie 单钩子预算默认 1000ms、总预算 `min(10000, max(2000, Σ))`，且改写后 `tools/model/stream` 等字段必须与原请求一致否则整次结果作废。因此注入只改 `messages` 一条：**优先追加到末条 user 消息末尾**（`messages[0]` 不动，不破坏前缀缓存），入口不支持时才退回 system 消息追加；超预算直接放弃注入并 `report('unavailable')`。注入是低频操作（`hook.inject_refresh_ms`，默认 10 分钟），同一会话窗口内不重复注入。
 6. **开关必须能从 magpie.cmd 点进图形界面**（用户新增要求 F7）：`GET /hook/` + `/hook/api/*` 是**无 token 的同源页面**，复用 `x-moshi-token` 页面下发机制与 CORS 白名单，**不放行任何全局免鉴权路由**。
 7. **入驻与界面 IA 是另一件事，单列一章（§16）**：首启弹窗（探测 → 勾选 → 二次确认 → 安装 → 跳接入页）、设置从一个大融合页拆成**五个二级**（接入/配置/维护/隐私/诊断）、左侧菜单**树展开**、Hook 页从服务端内联 HTML 迁成 React 组件并**一组件挂两路由**（`/ui/hook` 独立整页 + `/ui/settings/access` 设置内嵌）。本轮只出设计，落地拆 **U-IA → ONBOARD → INSTALL** 三个节点。
 
@@ -126,7 +126,7 @@ tags: [hook, magpie, injection, identity, design]
 interface HookCaps {
   turns: HookTurn[];                    // 本入口会触发的时机
   inject: boolean;                      // 能否改写请求
-  injectModes: ('system-append' | 'user-prefix')[];  // Magpie 只有 system-append
+  injectModes: ('user-append' | 'system-append')[];  // 顺序即优先级；Magpie 是 ['user-append','system-append']
   replyBody: boolean;                   // 能否拿到回复正文
   configWrite: boolean;                 // 能否被界面写入配置
   budget: { phaseMs: number; deadlineMs: number };
@@ -176,7 +176,7 @@ interface HookEnvelope {
 interface HookInjection {
   schema: 'moshi-hook/1';
   inject: boolean;
-  mode: 'system-append' | 'user-prefix';
+  mode: 'user-append' | 'system-append';
   text: string;            // Markdown；渲染规则见 §3.5
   evidence: { m_id: string; fact_id: string; content: string; confidence: number }[];
   degraded: string[];      // 与 /hook/recall 的 degraded 同口径
@@ -472,11 +472,14 @@ POST {endpoint}/hook/recall   （AbortSignal.timeout(deadlineMs - 安全余量)�
    ↓
 {inject, mode, text, evidence, degraded, moshi_id, project_id}
    ↓
-inject=false → 原样返回原 body（report('empty')）
-inject=true  → 在 messages 里找第一条 role==='system'
-                 ├─ 有 → content 追加 text（content 为字符串才改；数组则 push {type:'text',text}）
-                 └─ 无 → 在 messages 最前面插入 {role:'system', content:text}
-             ↓ 其余键一律用原引用（tools/model/stream 不动）
+inject=false → 原样返回原 body（report('empty' | 'skipped')）
+inject=true  → 按 daemon 给的 mode 放块：
+                 mode=user-append（Magpie 实际走这条）
+                   → 末条 user 消息末尾追加 text（content 是字符串就拼，是数组就 push {type:'text',text}）
+                   → 没有 user 消息时才退回 system-append
+                 mode=system-append
+                   → 找第一条 role==='system' 追加；没有就最前面插一条
+             ↓ 其余键一律用原引用（tools/model/stream 不动；system 一个字节不动）
 report('ready', 字节数); return body
 ```
 
@@ -530,7 +533,7 @@ report('ready' | 'empty' | 'unavailable')；return undefined（返回值被 Magp
 响应：
 
 ```json
-{ "schema":"moshi-hook/1","inject":true,"mode":"system-append",
+{ "schema":"moshi-hook/1","inject":true,"mode":"user-append",
   "text":"## 记忆台账…","evidence":[{...}],"degraded":[],
   "identity":{"moshi_id":"…","project_id":"…","identity_source":"vcs"},
   "deadline_ms":712 }

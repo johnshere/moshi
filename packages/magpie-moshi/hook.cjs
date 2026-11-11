@@ -17,6 +17,11 @@
  *   stream` 等字段必须和原来完全一致，否则整次改写被丢弃 → 这里只改 `messages`；
  * - `ctx.report(code, count)` 只接受 ready/empty/unbound/unauthorized/unavailable/
  *   invalid/skipped 这几个固定值，且不能带出任何正文。
+ *
+ * 两处刻意保持的克制（m04102）：
+ * - **只在最后一条消息是 user 时召回**：工具回合的续请求不该重复注入；
+ * - **注入块放在最后一条 user 消息末尾**：`messages[0]` 不动，前缀缓存只从尾部失效；
+ *   位置由 daemon 的 `mode` 决定（本文件声明支持 `user-append` 与 `system-append`）。
  */
 'use strict';
 
@@ -270,7 +275,7 @@ function envelopeOf(turn, info, payload, budgetMs, phaseMs, corr) {
     caps: {
       turns: ['user_prompt', 'response'],
       inject: true,
-      injectModes: ['system-append'],
+      injectModes: ['user-append', 'system-append'],
       replyBody: true,
       configWrite: true,
       budget: { phaseMs: phaseMs, deadlineMs: budgetMs },
@@ -306,6 +311,14 @@ function lastUserText(body) {
   return null;
 }
 
+/** 这个请求的最后一条消息是不是用户消息（工具回合的续请求是 tool/assistant） */
+function lastRole(body) {
+  const messages = body && Array.isArray(body.messages) ? body.messages : null;
+  if (!messages || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  return last && typeof last.role === 'string' ? last.role : null;
+}
+
 /** 把 `## 记忆台账` 块追加到 system 消息；没有 system 就插一条在最前 */
 function injectMail(body, text) {
   const clone = { ...body };
@@ -321,6 +334,42 @@ function injectMail(body, text) {
   }
   clone.messages = [{ role: 'system', content: text }, ...messages];
   return clone;
+}
+
+/**
+ * 把块追加到**最后一条 user 消息末尾**：`messages[0]`（system）一个字节不动，
+ * 前缀缓存只从尾部开始失效（m04102；实测 system 变一次整段历史全 miss）。
+ * 没有 user 消息时返回 null，交给 system-append 兜底。
+ */
+function appendToLastUser(body, text) {
+  const messages = Array.isArray(body.messages) ? body.messages.slice() : [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!m || m.role !== 'user') continue;
+    if (typeof m.content === 'string') {
+      if (m.content.includes(MAIL_START)) return body;
+      messages[i] = { ...m, content: m.content === '' ? text : m.content + '\n\n' + text };
+    } else if (Array.isArray(m.content)) {
+      const joined = m.content
+        .map((part) => (part && typeof part.text === 'string' ? part.text : ''))
+        .join('\n');
+      if (joined.includes(MAIL_START)) return body;
+      messages[i] = { ...m, content: [...m.content, { type: 'text', text: text }] };
+    } else {
+      return null;
+    }
+    return { ...body, messages: messages };
+  }
+  return null;
+}
+
+/** 按 daemon 选定的 `mode` 放置注入块 */
+function placeMail(body, text, mode) {
+  if (mode === 'user-append') {
+    const placed = appendToLastUser(body, text);
+    if (placed !== null) return placed;
+  }
+  return injectMail(body, text);
 }
 
 function report(ctx, code, count) {
@@ -343,6 +392,12 @@ async function onRequest(body, ctx) {
   info.sessionId = session.id;
   info.sessionSource = session.source;
   rememberIdentity(ctx, info);
+  // 只有"这一条是用户消息"的请求才召回：一个用户回合里往往十几步工具循环，
+  // 每步都召回既浪费预算，也会把同一段记忆重复塞进上下文（m04102）。
+  if (lastRole(body) !== 'user') {
+    report(ctx, 'skipped', 0);
+    return undefined;
+  }
   const query = lastUserText(body);
   if (!query) {
     report(ctx, 'skipped', 0);
@@ -360,12 +415,14 @@ async function onRequest(body, ctx) {
   }
   rememberCorr(ctx, result.corr_id);
   if (!result.inject || typeof result.text !== 'string' || result.text === '') {
-    report(ctx, Array.isArray(result.degraded) && result.degraded.length > 0 ? 'empty' : 'skipped', 0);
+    const degraded = Array.isArray(result.degraded) ? result.degraded : [];
+    // 节流不是"没找到"，是 daemon 说这一轮先不注；宿主那边记 skipped 更准
+    report(ctx, degraded.includes('throttled') ? 'skipped' : degraded.length > 0 ? 'empty' : 'skipped', 0);
     return undefined;
   }
   // 宿主把第二个参数当**注入字节数**记账（面板上的「已注入 N 字节」），不是证据条数
   report(ctx, 'ready', Math.min(new TextEncoder().encode(result.text).length, 32768));
-  return injectMail(body, result.text);
+  return placeMail(body, result.text, result.mode);
 }
 
 /** 回复里最后一段文本（`onResponse` 的 reply 形状在不同版本里不完全一样） */

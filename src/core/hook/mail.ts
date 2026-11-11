@@ -14,7 +14,7 @@
  * "记忆系统在工作，只是没有相关内容"，这是谎报。
  */
 import type { EvidenceEntry } from '../read/evidence.js';
-import { HOOK_MAIL_END, HOOK_MAIL_START, type HookEvidence } from './protocol.js';
+import { HOOK_MAIL_END, HOOK_MAIL_START, type HookEvidence, type HookInjectMode } from './protocol.js';
 
 /** 每条证据的码点上限 */
 export const MAX_ITEM_CODEPOINTS = 200;
@@ -130,11 +130,13 @@ export function renderHookMail(
 }
 
 /**
- * 从入口自报的 `injectModes` 里挑一种：优先追加到 system，退而求其次拼到用户消息前面。
- * 挑不出来就不该注入——入口自己已经说了它不会改 system。
+ * 从入口自报的 `injectModes` 里挑一种（**顺序即优先级**）。
+ * 挑不出来就按 `system-append` 兜底——入口已经说了它支持注入。
  */
-export function chooseInjectMode(injectModes: readonly string[]): 'system-append' | 'user-prefix' {
-  return injectModes.includes('system-append') ? 'system-append' : 'user-prefix';
+export function chooseInjectMode(injectModes: readonly string[]): HookInjectMode {
+  return injectModes.find((mode) => mode === 'user-append') === 'user-append'
+    ? 'user-append'
+    : 'system-append';
 }
 
 /**

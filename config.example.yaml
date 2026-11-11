@@ -22,6 +22,17 @@ ingest:
   quarantine_confidence: 0.25
   # field_map: { ts: timestamp, session_id: sessionId }   # 通用 JSONL 的字段名映射
 
+hook:
+  enabled: true              # 功能总开关（关掉 = 钩子一律放行，不注入、不落库）
+  inject_existing: true      # 注入方向：把已有事实注入对话
+  capture_reply: false       # 入库方向：把模型回复写成信号（开发机建议开，正式机谨慎）
+  magpie_enabled: false      # 连接态（由页面「连接」按钮 / magpie.cmd 写）
+  recall_timeout_ms: 600     # 单次召回预算（Magpie 单钩子默认 1000ms，留 400ms 给改写）
+  inject_refresh_ms: 600000  # 低频注入：同一会话 10 分钟内只注一次；0 = 每轮都注
+  top_k: 5
+  max_inject_bytes: 4000     # 注入块上限（UTF-8 字节）
+  capture_tool_output: false # 入库是否带工具输出正文
+
 collect:
   enabled: true              # 是否启用后台块扫描
   interval_ms: 60000         # 后台扫描周期（0 = 不自动跑）

@@ -60,13 +60,24 @@ export const HOOK_REPORT_CODES = [
 ] as const;
 export type HookReportCode = (typeof HOOK_REPORT_CODES)[number];
 
+/**
+ * 注入位置。
+ *
+ * - `user-append`（默认）：追加到最后一条 user 消息末尾——system 一个字节不动，
+ *   前缀缓存不受影响（messages[0] 变化会让整段历史失效，2026-11-11 实测命中率
+ *   从 98% 掉到 90%）。
+ * - `system-append`：追加到最后一条 system 消息；只给不支持尾部注入的宿主用。
+ */
+export type HookInjectMode = 'user-append' | 'system-append';
+
 /** 入口能力自报（设计 §2.3） */
 export interface HookCaps {
   /** 本入口真的会触发的时机 */
   turns: HookTurn[];
   /** 能否改写请求 */
   inject: boolean;
-  injectModes: ('system-append' | 'user-prefix')[];
+  /** 支持的注入位置；**顺序即优先级**（首项优先） */
+  injectModes: HookInjectMode[];
   /** 能否拿到回复正文 */
   replyBody: boolean;
   /** 能否被界面写入配置 */
@@ -132,7 +143,8 @@ export interface HookEvidence {
 export interface HookInjection {
   schema: typeof HOOK_SCHEMA;
   inject: boolean;
-  mode: 'system-append' | 'user-prefix';
+  /** 实际采用的注入位置（从 `caps.injectModes` 里按优先级选） */
+  mode: HookInjectMode;
   text: string;
   evidence: HookEvidence[];
   degraded: string[];
@@ -159,7 +171,8 @@ export interface HookSignalResult {
 export const MAGPIE_CAPS: HookCaps = {
   turns: ['user_prompt', 'response'],
   inject: true,
-  injectModes: ['system-append'],
+  // 末条 user 消息之后追加：system 不动，前缀缓存不受影响（2026-11-11 实测）
+  injectModes: ['user-append', 'system-append'],
   replyBody: true,
   configWrite: true,
   budget: { phaseMs: 1000, deadlineMs: 800 },

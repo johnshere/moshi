@@ -101,7 +101,7 @@ export function createHookConnection(initial = false): HookConnection {
   'claude-code': {
     turns: [...HOOK_TURN_NAMES],
     inject: true,
-    injectModes: ['system-append', 'user-prefix'],
+    injectModes: ['user-append', 'system-append'],
     replyBody: true,
     configWrite: true,
     budget: { phaseMs: 30000, deadlineMs: 8000 },

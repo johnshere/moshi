@@ -144,7 +144,7 @@ describe('hook.cjs 身份：扁平 ctx + 无 session 头时的会话开头指纹
     globalThis.fetch = savedFetch;
   });
 
-  function setup(reply: { text: string } | null): { envelopes: Envelope[]; reports: [string, number][] } {
+  function setup(reply: { text: string; mode?: string } | null): { envelopes: Envelope[]; reports: [string, number][] } {
     const envelopes: Envelope[] = [];
     const reports: [string, number][] = [];
     globalThis.fetch = (async (_url: string, init: { body: string }) => {
@@ -152,7 +152,7 @@ describe('hook.cjs 身份：扁平 ctx + 无 session 头时的会话开头指纹
       const json = async () =>
         reply === null
           ? { schema: 'moshi-hook/1', inject: false, degraded: [], text: '' }
-          : { schema: 'moshi-hook/1', inject: true, degraded: [], text: reply.text, evidence: [1, 2, 3, 4, 5] };
+          : { schema: 'moshi-hook/1', inject: true, degraded: [], text: reply.text, mode: reply.mode ?? 'system-append', evidence: [1, 2, 3, 4, 5] };
       return { ok: true, json };
     }) as unknown as typeof fetch;
     return { envelopes, reports };
@@ -221,5 +221,49 @@ describe('hook.cjs 身份：扁平 ctx + 无 session 头时的会话开头指纹
     await new Promise((resolve) => setTimeout(resolve, 20));
     const signal = envelopes.find((e) => e.turn === 'response');
     expect(signal?.session.id).toBe(envelopes[0]?.session.id);
+  });
+
+  it('user-append：块追加到末条 user 消息末尾，system 一个字节不动（不破坏前缀缓存）', async () => {
+    const mail = '## 记忆台账（moshi）\n[M1] hello';
+    const { reports } = setup({ text: mail, mode: 'user-append' });
+    const body = {
+      messages: [
+        { role: 'system', content: 'SYS' },
+        { role: 'user', content: '第一句' },
+        { role: 'assistant', content: '答' },
+        { role: 'user', content: '第二句' },
+      ],
+    };
+    const out = await hook.onRequest(body, ctxOf(reports));
+    expect(out).toBeDefined();
+    const messages = (out as { messages: { role: string; content: string }[] }).messages;
+    expect(messages).toHaveLength(4);
+    expect(messages[0]).toEqual({ role: 'system', content: 'SYS' });
+    expect(messages[3]?.content).toBe(`第二句\n\n${mail}`);
+    expect(reports[reports.length - 1]?.[0]).toBe('ready');
+  });
+
+  it('工具回合的续请求不召回（最后一条不是 user）：一个请求都不发', async () => {
+    const { envelopes, reports } = setup({ text: '## 记忆台账（moshi）\n[M1] x', mode: 'user-append' });
+    const out = await hook.onRequest(
+      {
+        messages: [
+          { role: 'user', content: 'q' },
+          { role: 'assistant', content: '调用工具' },
+          { role: 'tool', content: '结果' },
+        ],
+      },
+      ctxOf(reports),
+    );
+    expect(out).toBeUndefined();
+    expect(envelopes).toHaveLength(0);
+    expect(reports[reports.length - 1]?.[0]).toBe('skipped');
+  });
+
+  it('caps 声明两种注入位置，user-append 优先', async () => {
+    const { envelopes, reports } = setup(null);
+    await hook.onRequest({ messages: [{ role: 'user', content: 'q' }] }, ctxOf(reports));
+    const caps = (envelopes[0] as unknown as { caps?: { injectModes?: string[] } }).caps;
+    expect(caps?.injectModes).toEqual(['user-append', 'system-append']);
   });
 });

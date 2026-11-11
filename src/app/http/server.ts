@@ -49,6 +49,7 @@ import { TraceSink } from '../../core/hook/traceSink.js';
 import { hookRoutes, createHookConnection, type HookConnection } from './routes/hook.js';
 import { onboardRoutes } from '../onboard/routes.js';
 import type { HookDeps } from '../hook/service.js';
+import { createInjectThrottle, type InjectThrottle } from '../hook/throttle.js';
 import { dataPaths, defaultConfigPath } from '../config.js';
 
 export interface HttpDeps {
@@ -82,6 +83,8 @@ export interface HttpDeps {
   hookTrace?: HookTraceStore;
   /** 钩子台账落盘（三档裁剪 + 按日轮转）；测试可注入，不传按 `debug` 段自建 */
   hookTraceSink?: TraceSink;
+  /** 注入节流状态（测试可替换；不传按 `cfg.hook.inject_refresh_ms` 新建） */
+  hookInjectThrottle?: InjectThrottle;
   /** F8 连接态（内存）；测试可注入以复现"断开后打开界面" */
   hookConnection?: HookConnection;
   /** 配置文件路径（`/hook/api/config` 写这里）；默认按 `defaultConfigPath()` */
@@ -222,6 +225,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     ...(deps.encode === undefined ? (encode === undefined ? {} : { encode }) : { encode: deps.encode }),
     ...(deps.score === undefined ? (score === undefined ? {} : { score }) : { score: deps.score }),
     ...(deps.breaker === undefined ? {} : { breaker: deps.breaker }),
+    injectThrottle: deps.hookInjectThrottle ?? createInjectThrottle(() => deps.cfg.hook.inject_refresh_ms),
   };
   await app.register(hookRoutes, {
     prefix: '/hook/api',

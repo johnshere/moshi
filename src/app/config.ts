@@ -340,6 +340,13 @@ const HookSchema = z
     magpie_enabled: z.boolean().default(false),
     /** 单次召回预算（毫秒，≤ 1000 = Magpie 单钩子默认超时） */
     recall_timeout_ms: z.number().int().min(100).max(1000).default(600),
+    /**
+     * 注入频率（毫秒）：同一会话多久才重新注入一次；`0` = 每轮都注入。
+     *
+     * 记忆注入是低频操作（m04102）：每轮都注等于每轮都把上下文尾部换一遍，
+     * 编码/前缀缓存的代价远大于那几百字记忆的收益。默认 10 分钟。
+     */
+    inject_refresh_ms: z.number().int().min(0).max(86_400_000).default(600_000),
     top_k: z.number().int().min(1).max(20).default(5),
     /** 注入文本上限（UTF-8 字节） */
     max_inject_bytes: z.number().int().min(256).max(16000).default(4000),

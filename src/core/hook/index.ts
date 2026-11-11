@@ -25,6 +25,7 @@ export type {
   HookCaps,
   HookBudget,
   HookIdentity,
+  HookInjectMode,
   HookEnvelope,
   HookEvidence,
   HookInjection,
