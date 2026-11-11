@@ -179,7 +179,7 @@ describe('Magpie 插件安装器', () => {
     writeFileSync(path.join(dir, 'hook.cjs'), 'module.exports = {};\n');
     writeFileSync(path.join(dir, 'identity.cjs'), 'module.exports = {};\n');
     writeFileSync(path.join(dir, 'index.cjs'), "require('./hook.cjs');\n");
-    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'magpie-moshi', version: '0.2.0' }));
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: 'moshi', version: '0.2.0' }));
     return dir;
   }
 
@@ -250,7 +250,7 @@ describe('Magpie 插件安装器', () => {
     const outcome = applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     expect(outcome.record.state).toBe('installed');
     expect(outcome.written.length).toBe(5);
-    const installed = path.join(root, 'node_modules', 'magpie-moshi');
+    const installed = path.join(root, 'node_modules', 'moshi');
     expect(existsSync(path.join(installed, 'hook.cjs'))).toBe(true);
     const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
     // 注册表写的是包目录的绝对路径（与 `magpie plugin add <本地路径>` 一致）
@@ -265,7 +265,7 @@ describe('Magpie 插件安装器', () => {
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
-    expect(spec.plugins.filter((p) => p.spec === path.resolve(path.join(root, 'node_modules', 'magpie-moshi'))).length).toBe(1);
+    expect(spec.plugins.filter((p) => p.spec === path.resolve(path.join(root, 'node_modules', 'moshi'))).length).toBe(1);
   });
 
   it('卸载：删包文件、清掉我们的 spec、把状态标回 absent', () => {
@@ -273,7 +273,7 @@ describe('Magpie 插件安装器', () => {
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     const outcome = uninstallMagpieHook({ dataDir, env, sourceDir });
     expect(outcome.record.state).toBe('absent');
-    expect(existsSync(path.join(root, 'node_modules', 'magpie-moshi', 'hook.cjs'))).toBe(false);
+    expect(existsSync(path.join(root, 'node_modules', 'moshi', 'hook.cjs'))).toBe(false);
     const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
     expect(spec.plugins.map((p) => p.spec)).toEqual(['@magpie-community/other@latest']);
   });

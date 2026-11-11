@@ -1,5 +1,5 @@
 {
-  "name": "magpie-moshi",
+  "name": "moshi",
   "version": "0.1.0",
   "private": true,
   "description": "moshi 记忆台账 × Magpie 网关钩子（Z-01C）：请求前注入既有事实，响应后投递信号",

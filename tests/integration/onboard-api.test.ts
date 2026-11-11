@@ -202,11 +202,11 @@ describe('/hook/api/install 安装计划与执行', () => {
     };
     expect(install.ok).toBe(true);
     expect(install.written.length).toBe(5);
-    expect(existsSync(path.join(pluginRoot, 'node_modules', 'magpie-moshi', 'hook.cjs'))).toBe(true);
+    expect(existsSync(path.join(pluginRoot, 'node_modules', 'moshi', 'hook.cjs'))).toBe(true);
     const spec = JSON.parse(readFileSync(registry, 'utf8')) as {
       plugins: { spec: string }[];
     };
-    expect(spec.plugins.some((item) => item.spec === path.resolve(path.join(pluginRoot, 'node_modules', 'magpie-moshi')))).toBe(true);
+    expect(spec.plugins.some((item) => item.spec === path.resolve(path.join(pluginRoot, 'node_modules', 'moshi')))).toBe(true);
     // 别人的插件不能被顶掉
     expect(spec.plugins.some((item) => item.spec === '@magpie-community/other@latest')).toBe(true);
 
@@ -219,7 +219,7 @@ describe('/hook/api/install 安装计划与执行', () => {
       ok: boolean;
     };
     expect(uninstall.ok).toBe(true);
-    expect(existsSync(path.join(pluginRoot, 'node_modules', 'magpie-moshi', 'hook.cjs'))).toBe(false);
+    expect(existsSync(path.join(pluginRoot, 'node_modules', 'moshi', 'hook.cjs'))).toBe(false);
     const after = (await call('GET', '/hook/api/onboard')).json() as {
       installs: Record<string, { state: string }>;
     };

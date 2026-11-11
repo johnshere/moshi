@@ -38,10 +38,10 @@ import {
   type InstallRecord,
 } from './state.js';
 
-/** 插件包在 moshi 工程里的目录名（`packages/magpie-moshi` → `dist/magpie-moshi`） */
+/** 插件包在 moshi 工程里的目录名（`packages/magpie-moshi` → `dist/magpie-moshi`；本地目录名不改） */
 export const PLUGIN_PACKAGE_NAME = 'magpie-moshi';
-/** 装进 Magpie 后用的包名（目录名；注册表里的 spec 是它的绝对路径） */
-export const PLUGIN_INSTALL_NAME = 'magpie-moshi';
+/** 装进 Magpie 后的名字：包目录名与注册表 path spec 都用它，宿主面板也显示这个（不带前缀） */
+export const PLUGIN_INSTALL_NAME = 'moshi';
 /** 需要拷贝的文件（清单固定：多拷少拷都会让宿主加载失败） */
 export const PLUGIN_FILES = ['hook.cjs', 'identity.cjs', 'index.cjs', 'package.json'] as const;
 /** 环境变量覆盖目标根（测试与非常规安装位置用） */
@@ -394,7 +394,7 @@ export function uninstallMagpieHook(opts: InstallOptions): InstallOutcome {
     safeRemoveFile(file, roots);
     written.push(file);
   }
-  // 包目录空了就一并删（只在它确实位于 node_modules/magpie-moshi 时）
+  // 包目录空了就一并删（只在它确实位于 node_modules/moshi 时）
   const destDir = installedDir(record.path);
   if (existsSync(destDir) && readdirSync(destDir).length === 0) {
     safeRemoveDir(destDir, roots);

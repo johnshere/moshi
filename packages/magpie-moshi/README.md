@@ -1,6 +1,7 @@
-# magpie-moshi
+# moshi
 
-moshi（默识）的 **Magpie 网关钩子**。挂在 Magpie 的 LLM 网关上，每轮对话前向本机 moshi daemon
+moshi（默识）的 **Magpie 网关钩子**（源码目录仍叫 `packages/magpie-moshi`，装进 Magpie 后
+名字就是 `moshi`，面板也显示 `moshi`）。挂在 Magpie 的 LLM 网关上，每轮对话前向本机 moshi daemon
 要一段"记忆注入"追加进 system 提示，回复后再把这一轮信号投回去落库。零依赖，只有两个时机：
 `onRequest(body, ctx)` / `onResponse(reply, ctx)`。
 

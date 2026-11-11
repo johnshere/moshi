@@ -52,10 +52,10 @@ export const HOST_LABELS: Record<HookHost, string> = {
  */
 export const MANUAL_HOOK: Record<HookHost, string> = {
   magpie: [
-    '1. 找到 Magpie 插件工程目录：~/.config/magpie/plugins（bun 工程，含 package.json 与 node_modules/）',
-    '2. 把 moshi 安装目录下的 magpie-moshi 整个文件夹拷到 <插件目录>/node_modules/magpie-moshi/',
-    '3. 编辑 <插件目录>/plugins.json，在 plugins 数组里追加 {"spec":"magpie-moshi@<版本>"}',
-    '4. 重启 Magpie，日志出现该插件加载记录即生效',
+    '1. 找到 Magpie 配置根：~/.config/magpie（plugins/ 是插件包目录，plugins.json 是注册表）',
+    '2. 把安装器产出的包目录整个拷到 <配置根>/plugins/node_modules/moshi/（目录名就是插件名）',
+    '3. 编辑 <配置根>/plugins.json（注册表在配置根，不在 plugins/ 里），追加 {"spec":"<该目录的绝对路径>"}',
+    '4. 重启 Magpie（或结束 magpie-bun 让宿主重拉），app.log 出现该插件加载记录即生效',
   ].join('\n'),
   'claude-code': [
     '在 ~/.claude/settings.json 加 hooks 段（时机：UserPromptSubmit / PostToolUse / Stop）：',
