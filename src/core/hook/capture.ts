@@ -13,6 +13,7 @@
  * 钩子进程内**不做模型调用、不触发 harvest**（用户 R5：钩子只投递信号）。
  */
 import { redactText } from '../write/redact.js';
+import { cleanHookText } from './clean.js';
 import { ingestEvent, type IngestResult } from '../write/ingest.js';
 import type { RawEvent } from '../adapters/session-source.js';
 import type { Db } from '../../infra/sqlite/db.js';
@@ -95,8 +96,22 @@ export function captureSignal(db: Db, envelope: HookEnvelope, options: SignalOpt
     };
   }
 
+  // 纯文本事件：先把宿主脚手架剥掉（ACP 引用、压缩段、时间采样等），
+  // 否则 episode 里存的是"元数据 + 意图"的混合物，将来抽取会吃到噪声（用户 m03879）。
+  // 助手回复不洗：回复里的代码块与列表是正文，不是脚手架。
+  const body = planned.role === 'user' ? cleanHookText(planned.text) : planned.text;
+  if (body === '') {
+    return {
+      captured: false,
+      reason: '清洗后正文为空：只有宿主元数据',
+      result: null,
+      turn: envelope.turn,
+      rawPath,
+    };
+  }
+
   // 脱敏先于落盘（Z-01A 验收项）：钩子侧不自己实现规则，复用同一条 redactText
-  const redacted = redactText(planned.text, {
+  const redacted = redactText(body, {
     enabled: options.redact.enabled,
     privateIp: options.redact.privateIp,
   });

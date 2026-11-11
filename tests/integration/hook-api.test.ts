@@ -168,6 +168,39 @@ describe('/hook/api/recall', () => {
   });
 
 
+  it('只有宿主元数据的 user 消息：不检索、不注入（empty_query，清洗见 core/hook/clean）', async () => {
+    await makeApp();
+    const raw = [
+      '<acp tokens="63" type="text" time="2026-11-10 16:12:43">m00694</acp>',
+      'Time sampled while preparing turn 2, step 208: 2026-11-10T16:12:42+08:00[Asia/Shanghai]',
+      'Browser time zone for this request: Asia/Shanghai. Interpret otherwise-unqualified dates and times in this zone.',
+      'Elapsed since the preceding step context: 11m 21s.',
+    ].join('\n');
+    const res = await call('POST', '/hook/api/recall', envelope({ payload: { text: raw } }));
+    expect(res.json().inject).toBe(false);
+    expect(res.json().degraded).toContain('empty_query');
+    const db = dbRef.db;
+    if (db === undefined) throw new Error('db not built');
+    // 空查询不进检索，也就不写 query_log
+    const row = db.prepare('SELECT count(*) AS c FROM query_log').get() as { c: number };
+    expect(row.c).toBe(0);
+  });
+
+  it('检索用的 query 先清洗：ACP 标记不落 query_log', async () => {
+    await makeApp();
+    await call(
+      'POST',
+      '/hook/api/recall',
+      envelope({ payload: { text: '<acp tokens="1" type="text">m00001</acp>\n范围模型是什么' } }),
+    );
+    const db = dbRef.db;
+    if (db === undefined) throw new Error('db not built');
+    const row = db.prepare('SELECT query_text FROM query_log ORDER BY rowid DESC LIMIT 1').get() as {
+      query_text: string;
+    };
+    expect(row.query_text).toBe('范围模型是什么');
+  });
+
   it('cwd 缺失 → unknown 档，且不拿 daemon 自己的 cwd 充数', async () => {
     await makeApp();
     const res = await call('POST', '/hook/api/identity', {});
@@ -229,6 +262,19 @@ describe('/hook/api/signal', () => {
     const second = await call('POST', '/hook/api/signal', envelope());
     expect(second.json().duplicate).toBe(true);
     expect(second.json().episode_id).toBe(first.json().episode_id);
+  });
+
+  it('落库前先清洗：只有宿主元数据的用户消息不落 episode', async () => {
+    await makeApp();
+    const raw = '<acp tokens="1" type="text">m00001</acp>\nTime sampled while preparing turn 1';
+    const res = await call(
+      'POST',
+      '/hook/api/signal',
+      envelope({ turn: 'user_prompt', payload: { text: raw } }),
+    );
+    expect(res.json().ok).toBe(true);
+    expect(res.json().captured).toBe(false);
+    expect(String(res.json().reason)).toContain('清洗后正文为空');
   });
 
   it('输出记忆关掉时回复不落库，但 ok 仍 true（不是错误）', async () => {

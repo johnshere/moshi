@@ -17,6 +17,7 @@ import type { Breaker } from '../../core/read/breaker.js';
 import type { EvidenceCache } from '../../core/read/cache.js';
 import { searchWithPipeline, type SearchOutcome } from '../../core/read/search.js';
 import { captureSignal, renderHookMail, type HookTraceItem } from '../../core/hook/index.js';
+import { cleanHookText } from '../../core/hook/clean.js';
 import { HOOK_SCHEMA, type HookEnvelope, type HookInjection, type HookSignalResult } from '../../core/hook/protocol.js';
 import { sessionMoshiId } from '../../domain/identity.js';
 import { MAGPIE_HOOK_CALLER } from '../../domain/access.js';
@@ -178,7 +179,8 @@ export async function recallForHook(deps: HookDeps, envelope: HookEnvelope): Pro
     };
   }
 
-  const query = (envelope.payload.text ?? '').trim();
+  // 清洗在先：ACP 引用、压缩段、时间采样等脚手架不进检索（用户 m03879，清洗见 core/hook/clean）
+  const query = cleanHookText(envelope.payload.text ?? '');
   if (query === '') {
     return {
       injection: emptyInjection(mergedIdentity, deadline, ['empty_query'], corrId),
