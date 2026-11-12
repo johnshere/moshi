@@ -6,10 +6,11 @@ import { MoshiError } from '../domain/errors.js';
 import { buildLogger, pruneLogs } from '../infra/log/logger.js';
 import { SidecarClient } from '../infra/sidecar/client.js';
 import { runCli, extractConfigArgv } from './cli/index.js';
+import { DETACHED_ENV, detachDaemon, waitDaemonUp, wantsDetach } from './detach.js';
 import { dataPaths, loadConfig, resolveSources } from './config.js';
 import { startCollectRunner, type CollectRunner } from './collectRunner.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
-import { removeLock } from './lock.js';
+import { inspectLock, removeLock } from './lock.js';
 import { buildHttpApp } from './http/server.js';
 import { startHarvestRunner, type HarvestRunner } from './harvestRunner.js';
 import { startSchemaInferRunner, type SchemaInferRunner } from './schemaInferRunner.js';
@@ -49,6 +50,38 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   const args = global.argv;
   const mode = parseMode(args);
+
+  // 后台模式：交给自启/计划任务/init 用，父进程立刻退出，子进程没有控制台。
+  // 默认不带 --detach 时仍是前台 daemon（受当前窗口约束，Ctrl-C 停）。
+  if (mode === 'daemon' && wantsDetach(args) && process.env[DETACHED_ENV] !== '1') {
+    try {
+      const spawned = detachDaemon();
+      // 等子进程真的把锁写下来再返回：父进程 0 退出 = 后台确实起来了；
+      // 超时返回 1，让计划任务的「失败后重启」策略接手，而不是假装成功。
+      let lockPid: number | null = null;
+      try {
+        const cfgForWait = global.file === undefined ? loadConfig() : loadConfig({ file: global.file });
+        const paths = dataPaths(cfgForWait);
+        // 用 inspectLock 而不是 readLock：上一轮被强杀的 daemon 会留下陈旧锁，
+        // 直接读文件会立刻"看到"一个已经死掉的 pid，报出假的成功。
+        lockPid = await waitDaemonUp(async () => {
+          const current = await inspectLock(paths.lock, cfgForWait.server.host);
+          return current.kind === 'live' ? current.info.pid : null;
+        });
+      } catch {
+        // 配置坏了/锁路径推不出来：不加判断，后台进程会自己把错误写进日志
+      }
+      if (lockPid === null) {
+        process.stdout.write(`daemon 已转到后台（spawn pid=${spawned ?? '?'}），但 5s 内没拿到锁\n`);
+        return 1;
+      }
+      process.stdout.write(`daemon 已在后台运行（pid=${lockPid}），关掉窗口也不会停\n`);
+      return 0;
+    } catch (err) {
+      process.stderr.write(`后台拉起 daemon 失败：${(err as Error).message}\n`);
+      return 1;
+    }
+  }
 
   if (mode === 'version') {
     process.stdout.write(`moshi ${VERSION}\n`);

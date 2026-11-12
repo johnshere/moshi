@@ -186,7 +186,7 @@ Section "默识主程序" SEC_APP
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ${If} $AutoStart == "1"
-    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "moshi" '"$SYSDIR\wscript.exe" //nologo "$INSTDIR\launch.vbs" daemon'
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "moshi" '"$SYSDIR\wscript.exe" //nologo "$INSTDIR\launch.vbs" daemon --detach'
   ${Else}
     DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "moshi"
   ${EndIf}

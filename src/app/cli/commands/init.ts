@@ -15,6 +15,7 @@ import { safeWriteFile } from '../../../infra/fs/safeWrite.js';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { ensureDataDirs } from '../../lifecycle.js';
+import { detachCreationFlags } from '../../detach.js';
 import { inspectLock, readLock } from '../../lock.js';
 import type { Command, CommandContext } from '../types.js';
 
@@ -93,7 +94,12 @@ interface ChildLike {
 export type SpawnFn = (
   cmd: string,
   args: readonly string[],
-  opts: { detached: boolean; stdio: 'ignore' },
+  opts: {
+    detached: boolean;
+    stdio: 'ignore';
+    windowsHide?: boolean;
+    creationFlags?: number;
+  },
 ) => ChildLike;
 
 export interface DaemonStatus {
@@ -242,7 +248,15 @@ export async function runInit(ctx: CommandContext, deps: InitDeps = {}): Promise
       say(status === null ? 'daemon 状态：未响应 /api/status\n' : `daemon 状态：${String(status.daemon ?? 'ok')}\n`);
     } else {
       const entry = process.argv[1]!; // 命令在主逻辑内执行，入口必然存在
-      const child = spawnFn(process.execPath, [entry, 'daemon'], { detached: true, stdio: 'ignore' });
+      const child = spawnFn(process.execPath, [entry, 'daemon'], {
+        detached: true,
+        stdio: 'ignore',
+        // Windows：detached 会给子进程开一个新的控制台窗口——从资源管理器/快捷方式跑
+        // `init` 也就罢了，从命令行跑会多闪一个黑框。daemon 常年后台，不需要控制台，
+        // 直接 DETACHED_PROCESS：没有窗口，也不会被任何窗口的关闭连带杀掉。
+        windowsHide: true,
+        ...detachCreationFlags(deps.platform ?? process.platform),
+      });
       child.unref?.();
 
       // 等锁写入（最多 ~2s），拿到实际端口

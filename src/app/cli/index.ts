@@ -40,7 +40,7 @@ export function usage(): string {
     '用法：moshi <命令> [参数]',
     '',
     '命令：',
-    '  daemon        前台启动守护进程（默认）',
+    '  daemon        前台启动守护进程（默认，绑当前窗口；--detach 转后台，无窗口）',
     '  version       打印版本',
   ];
   for (const c of COMMANDS) lines.push(`  ${c.name.padEnd(12)}  ${c.summary}`);
