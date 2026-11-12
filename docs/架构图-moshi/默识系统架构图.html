@@ -1503,7 +1503,7 @@ flowchart TD
     var st = document.createElement("style");
     st.textContent = ".canvas{cursor:grab}";
     document.head.appendChild(st);
-    var drag = null, dragged = false;
+    var drag = null, dragged = false, lastDragEnd = 0;
     function endDrag(){
       if(!drag) return;
       drag.canvas.style.cursor = "grab";
@@ -1517,7 +1517,6 @@ flowchart TD
       dragged = false;
       canvas.style.cursor = "grabbing";
       canvas.style.userSelect = "none";
-      try{ canvas.setPointerCapture(e.pointerId); }catch(err){}
     });
     document.addEventListener("pointermove", function(e){
       if(!drag || e.pointerId !== drag.id) return;
@@ -1527,11 +1526,15 @@ flowchart TD
         drag.canvas.scrollTop -= dy;
         drag.x = e.clientX; drag.y = e.clientY;
       }
-      if(Math.abs(e.clientX - drag.sx) > 4 || Math.abs(e.clientY - drag.sy) > 4) dragged = true;
+      if(!dragged && (Math.abs(e.clientX - drag.sx) > 4 || Math.abs(e.clientY - drag.sy) > 4)){
+        dragged = true;
+        try{ drag.canvas.setPointerCapture(drag.id); }catch(err){}
+      }
     });
     document.addEventListener("pointerup", function(e){
       if(!drag || e.pointerId !== drag.id) return;
       try{ drag.canvas.releasePointerCapture(e.pointerId); }catch(err){}
+      lastDragEnd = Date.now();
       endDrag();
     });
     document.addEventListener("pointercancel", function(e){
@@ -1542,6 +1545,7 @@ flowchart TD
     document.addEventListener("click", function(e){
       if(!dragged) return;
       dragged = false;
+      if(Date.now() - lastDragEnd > 400) return;
       e.stopPropagation();
       e.preventDefault();
     }, true);
