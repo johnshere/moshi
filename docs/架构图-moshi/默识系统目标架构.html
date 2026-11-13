@@ -84,6 +84,8 @@ h2.title{font:400 clamp(24px,2.4vw,32px)/1.25 var(--serif);margin:0;color:#EEF3F
   radial-gradient(ellipse at 20% 0%,rgba(127,161,196,.06),transparent 60%)}
 .canvas:fullscreen{background:var(--ink);padding:28px}
 .canvas svg{display:block;margin:0 auto}
+/* 紧凑布局下子图标题会贴到同类边标签上（实测「L1 · 机理」与「改判 · 审计」盒相交 3px），整体右移 4px 清零 */
+.canvas g.cluster-label foreignObject{transform:translateX(4px)}
 .mermaid:not([data-processed]){visibility:hidden}
 .legend{display:flex;gap:20px;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font:11.5px/1.6 var(--mono);color:var(--muted)}
 .legend b{font-weight:400;color:#D8E3E9}
@@ -206,143 +208,175 @@ tr:last-child td{border-bottom:0}
 
 <section id="t-layers">
   <div class="sechead"><span class="no">01</span><h2 class="title">六层总架构：主干纵穿，分支横挂</h2></div>
-  <p class="sub">每一层只对下一层负责：宿主只产生对话，方言只翻译，装配置调度，用例给能力，机理给算法，不变量给约束。两条主干（出=蓝、入=琥珀）从宿主一路穿到 SQLite，其它分支都横挂在某一层上，不许自己开洞。</p>
+  <p class="sub">每一层只对下一层负责：宿主只产生对话，方言只翻译，装配置调度，用例给能力，机理给算法，不变量给约束。两条主干（出=蓝、入=琥珀）从宿主一路穿到 SQLite：L1 里它们各自展开成一条流水线（出链 7 段、入链 8 段），段与段之间写的是一次处理做了什么。其它分支都横挂在某一层上，不许自己开洞。</p>
   <div class="figure">
-    <div class="figbar"><span class="t">图 1 · 六层总架构与主干</span><span class="tag">FLOWCHART TD</span><span class="sp"></span>
+    <div class="figbar"><span class="t">图 1 · 六层总架构与主干</span><span class="tag">FLOWCHART TB</span><span class="sp"></span>
       <button class="btn" data-zoom="in">放大</button><button class="btn" data-zoom="out">缩小</button><button class="btn" data-zoom="fit">适应</button><button class="btn" data-zoom="full">全屏</button><button class="btn" data-svg>导出 SVG</button></div>
     <div class="canvas">
 <pre class="mermaid">
-flowchart TD
-  subgraph L5["L5 · 宿主（不可信输入）"]
+flowchart TB
+  subgraph L5["L5 · 宿主"]
+    S_SESS["宿主会话文件<br>只读尾随"]
     H_MAG["Magpie"]
     H_CC["Claude Code"]
     H_DSH["DSH"]
     H_TERM["终端"]
     H_WEB["浏览器"]
   end
-  subgraph L4["L4 · 方言（只翻译）"]
+  subgraph L4["L4 · 方言"]
     D_HOOK["hook 方言"]
-    D_MCP["MCP 工具"]
+    D_MCP["MCP 工具<br>stdio"]
     D_REST["REST /api"]
     D_CLI["CLI"]
-    D_UI["UI"]
+    D_UI["UI 页面<br>只经 REST"]
+    D_SESS["会话源方言<br>CC·DSH JSONL"]
   end
-  subgraph L3["L3 · 装配（只调度）"]
+  subgraph L3["L3 · 装配"]
     A_SERVERS["服务装配"]
     A_CLI["cli 装配"]
     A_SCHED["scheduler"]
     A_RUNNER["runner"]
   end
-  subgraph L2["L2 · 用例（一能力一函数）"]
+  subgraph L2["L2 · 用例"]
     U_RECALL["recall"]
     U_CAPTURE["capture"]
     U_ANNOTATE["annotate"]
     U_CORRECT["correct"]
     U_BROWSE["browse"]
-    U_MAINTAIN["maintain"]
     U_IMPORT["import"]
+    U_MAINTAIN["maintain"]
+    U_DIAG["diag·ops"]
+    U_ACCESS["access·caller"]
   end
-  subgraph L1["L1 · 机理（core，不认 config）"]
-    C_READ["core/read"]
-    C_WRITE["core/write"]
-    C_LIFE["lifecycle"]
-    C_ARCH["archive·layout"]
-    C_COLL["collect·parse"]
-    C_OPS["diag·ops"]
-    C_HOOK["hook"]
+  subgraph L1["L1 · 机理"]
+    subgraph C_W["入链 · 一次写入"]
+      direction TB
+      WR0["扫会话块<br>游标"] -->|"新块"| WR1["脱敏<br>先于落盘"] -->|"净化"| WR2["隔离筛查<br>0.25 · 2KB"] -->|"通过"| WR3["episode 落库<br>append-only"] -->|"入队"| WR4["harvest 解析<br>0..n 草稿"] -->|"草稿"| WR5["消解 · 幂等 · 冲突<br>A·B·C·D"] -->|"raw_hash 去重"| WR7["事实图<br>fact · edge"] -->|"链尾巩固"| WR8["投影<br>归档 · 布局 · 社区"]
+    end
+    subgraph C_R["出链 · 一次召回"]
+      direction TB
+      RD1["入口<br>身份 · 预算"] -->|"3ms 分流"| RD2["分流<br>global / local"] -->|"5ms"| RD3["三路召回<br>KNN · BM25 · PPR"] -->|"top20 × 3"| RD4["RRF 融合 + 子图<br>k = 60 · 1–2 跳"] -->|"≤64 / ≤192"| RD6["模型 /score<br>GAT · 可降级"] -->|"25ms"| RD7["五步裁决 + 装箱<br>1500 token · 7 : 3"] -->|"10ms"| RD9["证据包<br>M#"]
+    end
+    OPS1["自检 · 清理"]
   end
-  subgraph L0["L0 · 不变量（domain，无 IO）"]
-    D_TYPE["types·enums"]
-    D_ID["identity·scope"]
+  subgraph L0["L0 · 不变量"]
+    D_TYPE["types · enums"]
+    D_ID["identity · scope"]
     D_ACC["access"]
   end
-  subgraph LS["存储与外部"]
+  subgraph LX["进程外"]
+    X_PY["sidecar<br>/encode · /score"]
+  end
+  subgraph LS["存储"]
     S_SQL[("moshi.db")]
-    S_FILE[("归档·日志")]
-    S_SESS[("宿主会话")]
-    S_PY["sidecar encode/score"]
+    S_FILE[("归档 · 日志")]
   end
 
-  H_MAG ==> D_HOOK
-  H_DSH ==> D_HOOK
-  H_TERM ==> D_CLI
-  H_WEB ==> D_UI
-  D_HOOK ==> A_SERVERS
+  H_MAG ==>|"onRequest / onResponse"| D_HOOK
+  H_CC --> D_MCP
+  H_DSH --> D_MCP
+  H_TERM --> D_CLI
+  H_WEB --> D_UI
+  S_SESS -.->|"只读尾随"| D_SESS
+
+  D_HOOK ==>|"moshi-hook/1"| A_SERVERS
   D_MCP ==> A_SERVERS
   D_REST ==> A_SERVERS
   D_CLI ==> A_CLI
+  D_SESS ==>|"块事件"| A_SERVERS
+
   A_SERVERS ==> U_RECALL
   A_SERVERS ==> U_CAPTURE
+  A_SERVERS --> U_ANNOTATE
+  A_SERVERS --> U_BROWSE
+  A_SERVERS --> U_CORRECT
+  A_SERVERS -.->|"caller 声明"| U_ACCESS
   A_CLI --> U_IMPORT
-  A_SCHED -->|"只触发"| U_MAINTAIN
+  A_CLI -->|"doctor · eval"| U_DIAG
+  A_SCHED -.->|"只触发"| U_MAINTAIN
   A_RUNNER -->|"只执行"| U_MAINTAIN
-  U_RECALL ==> C_READ
-  U_CAPTURE ==> C_WRITE
-  U_MAINTAIN --> C_LIFE
-  C_READ --> D_TYPE
-  C_WRITE --> D_TYPE
-  C_ARCH --> D_ID
-  C_READ ==> S_SQL
-  C_WRITE ==> S_SQL
-  C_ARCH --> S_FILE
-  C_COLL --> S_SESS
-  C_READ -.->|"可降级"| S_PY
+
+  U_ACCESS -->|"解析后的 caller · scope"| C_R
+  U_RECALL ==> C_R
+  U_CAPTURE ==> C_W
+  U_ANNOTATE -->|"annotation"| C_W
+  U_CORRECT -->|"改判 · 审计"| C_W
+  U_BROWSE -->|"读投影"| C_W
+  U_IMPORT -->|"批量"| C_W
+  U_MAINTAIN -->|"链尾"| C_W
+  U_DIAG -->|"探针 · 清理 · 读诊断"| OPS1
+
+  C_R -->|"五步判据"| D_TYPE
+  L1 -.->|"caller"| D_ACC
+  L1 --> D_ID
+
+  L1 ==> S_SQL
+  L1 --> S_FILE
+  OPS1 -.->|"对账 · 清理"| S_SQL
+
+  L1 -.-> X_PY
+
   classDef cOut fill:#0F1E2E,stroke:#7FA1C4,color:#DCE9F4,stroke-width:2.5px;
   classDef cIn fill:#2A2118,stroke:#DFA24A,color:#F7E7CD,stroke-width:2.5px;
   classDef host fill:#1A1B2E,stroke:#5B5F87,color:#DDE0F0,stroke-width:1px;
   classDef entry fill:#14262B,stroke:#4FB3A1,color:#DDF3EE,stroke-width:1px;
   classDef app fill:#17242E,stroke:#7FA1C4,color:#DCE9F4,stroke-width:1px;
   classDef read fill:#12282A,stroke:#4FB3A1,color:#D9F0EA,stroke-width:1px;
+  classDef write fill:#2A2118,stroke:#DFA24A,color:#F7E7CD,stroke-width:1px;
   classDef life fill:#2A1A20,stroke:#C98D96,color:#F4E1E4,stroke-width:1px;
   classDef domain fill:#1B2129,stroke:#7A8B99,color:#DAE3E9,stroke-width:1px;
   classDef infra fill:#1D2024,stroke:#96A0A6,color:#DCE2E5,stroke-width:1px;
   classDef ext fill:#0F171E,stroke:#3F5060,color:#B9C7D1,stroke-width:1px;
   classDef store fill:#101B21,stroke:#4FB3A1,color:#D6EDE7,stroke-width:1px;
 
-  class H_MAG,H_CC,H_DSH,H_TERM,H_WEB host;
-  class D_HOOK,D_MCP,D_REST,D_CLI,D_UI entry;
-  class A_SERVERS,A_CLI,A_SCHED,A_RUNNER app;
-  class U_CORRECT,U_BROWSE,U_IMPORT,U_ANNOTATE app;
-  class U_MAINTAIN life;
-  class U_RECALL,C_READ cOut;
-  class U_CAPTURE,C_WRITE cIn;
-  class C_LIFE,C_ARCH life;
-  class C_COLL,C_HOOK domain;
-  class C_OPS infra;
+  class H_WEB,S_SESS host;
+  class H_MAG,H_CC,H_DSH,H_TERM,D_HOOK,D_MCP,D_REST,D_CLI,D_UI,D_SESS entry;
+  class A_SERVERS,A_CLI,A_SCHED,A_RUNNER,U_ANNOTATE,U_BROWSE,U_IMPORT,U_CORRECT app;
+  class U_RECALL cOut;
+  class U_CAPTURE cIn;
+  class U_MAINTAIN,U_DIAG,U_ACCESS life;
+  class RD2,RD4,RD6,RD7 read;
+  class RD1,RD3,RD9 cOut;
+  class WR0,WR3,WR4,WR5,WR7,WR8 write;
+  class WR1,WR2 cIn;
+  class OPS1 life;
   class D_TYPE,D_ID,D_ACC domain;
-  class S_SQL,S_FILE,S_SESS store;
-  class S_PY ext;
+  class X_PY ext;
+  class S_SQL,S_FILE store;
   style L5 fill:#0D151B,stroke:#23333E,color:#93A7B4
   style L4 fill:#0D151B,stroke:#23333E,color:#93A7B4
   style L3 fill:#0D151B,stroke:#23333E,color:#93A7B4
   style L2 fill:#0D151B,stroke:#23333E,color:#93A7B4
   style L1 fill:#0D151B,stroke:#23333E,color:#93A7B4
+  style C_R fill:#0F1E2E,stroke:#2E4354,color:#9FC0DA
+  style C_W fill:#241C14,stroke:#4A3A26,color:#E0BE8F
   style L0 fill:#0D151B,stroke:#23333E,color:#93A7B4
+  style LX fill:#0D151B,stroke:#23333E,color:#93A7B4
   style LS fill:#0D151B,stroke:#23333E,color:#93A7B4
 </pre>
     </div>
   </div>
-  <p class="sub">图例：粗箭头 = 主干；细实线 = 依赖；虚线 = 触发、只读或可降级。<b>横挂点只有三处</b>：L4 方言挂 L3 装配、L3 挂 L2 用例、L2 挂 L1 机理；任何跨层直连都算越界。</p>
+  <p class="sub">图例：粗箭头 = 主干（出链蓝、入链琥珀）；细实线 = 依赖；虚线 = 触发、只读或可降级。<b>横挂点只有四处</b>：L4 方言挂 L3 装配、L3 挂 L2 用例、L2 挂 L1 机理、L5 的宿主会话文件只读尾随进 L4 会话源方言、随块事件进 L1 入链；除此之外任何跨层直连都算越界。L1 两条主干由 <code>core/{read,write,lifecycle,archive,collect,parse,hook,diag,ops}</code> 承担，逐段细节见图 2 / 图 3。</p>
   <div class="tblwrap"><table>
     <colgroup><col style="width:110px"><col><col></colgroup>
     <thead><tr><th>层</th><th>唯一的职责</th><th>不许做的事</th></tr></thead>
     <tbody>
-      <tr><td class="up">L5 宿主</td><td>产生对话、发起请求；Magpie / Claude Code / DSH / CLI / 浏览器</td><td>不直连 daemon 之外的任何东西</td></tr>
+      <tr><td class="up">L5 宿主</td><td>产生对话、发起请求；Magpie / Claude Code / DSH / CLI / 浏览器，外加宿主会话文件（CC/DSH 写，我们只读尾随）</td><td>不直连 daemon 之外的任何东西</td></tr>
       <tr><td class="up">L4 方言</td><td>协议翻译、渲染、能力自报（caps）；hook 还要守 800ms 预算</td><td>不组装参数、不查仓储、不写事实</td></tr>
       <tr><td class="mdl">L3 装配</td><td>起进程、注入依赖、排调度、发权限；<code>main</code> 是唯一组合根</td><td>不含业务判断，不写 SQL</td></tr>
       <tr><td class="mdl">L2 用例</td><td>一个能力一个函数：参数、身份、预算、降级码、审计都在这里定</td><td>不实现算法，不拼 SQL，不做渲染</td></tr>
-      <tr><td class="up">L1 机理</td><td>core：召回、融合、裁决、归一、幂等、生边、巩固</td><td>不读 config，不认 caller，不认识协议</td></tr>
+      <tr><td class="up">L1 机理</td><td>core：两条主干各一条流水线——出链（入口·预算→分流→三路召回→RRF+子图→模型→裁决+装箱→证据包）与入链（扫会话→脱敏→隔离→episode→解析→消解·幂等·冲突→事实图→投影）</td><td>不读 config，不认 caller，不认识协议</td></tr>
       <tr><td>L0 不变量</td><td>类型、枚举、身份、scope、hash、纯函数</td><td>不 import 任何 infra / core / app</td></tr>
     </tbody>
   </table></div>
-  <p class="tblnote">存储与外部（SQLite / 归档 / 宿主会话 / Python sidecar）不是层，是用例与机理共同的落地端：只经仓储接口进入，interface 归 L0。</p>
+  <p class="tblnote">存储（<code>moshi.db</code> / 归档 MD / 日志）与进程外 Python sidecar 都不是层：存储是用例与机理共同的落地端，只经仓储接口进入，interface 归 L0；sidecar 只是被 L1 调用的模型运行时（<code>/encode</code> · <code>/score</code>），可降级。宿主会话文件不是我们的存储，它作为外部输入挂在 L5。</p>
 </section>
 
 <section id="t-read">
   <div class="sechead"><span class="no">02</span><h2 class="title">出主干：一次召回走完十二步</h2></div>
   <p class="sub">入口只有 <code>recall</code> 一个函数。它拿 <code>caller / budgetMs / channels</code> 进来，出去是一个带 M# 编号与降级码的证据包。中间十二步全部是纯函数或可替换阶段，任何一步失败只降级、不抛错。</p>
   <div class="figure">
-    <div class="figbar"><span class="t">图 2 · 出主干 · 召回管线</span><span class="tag">FLOWCHART LR</span><span class="sp"></span>
+    <div class="figbar"><span class="t">图 2 · 出主干 · 召回管线</span><span class="tag">FLOWCHART TB（两段横排）</span><span class="sp"></span>
       <button class="btn" data-zoom="in">放大</button><button class="btn" data-zoom="out">缩小</button><button class="btn" data-zoom="fit">适应</button><button class="btn" data-zoom="full">全屏</button><button class="btn" data-svg>导出 SVG</button></div>
     <div class="canvas">
 <pre class="mermaid">
@@ -430,7 +464,7 @@ flowchart TB
   <div class="sechead"><span class="no">03</span><h2 class="title">入主干：一次写入穿过五条红线</h2></div>
   <p class="sub">写入的入口可以有很多（hook 每轮、MCP 标注、CLI 导入、UI 纠正），但<strong>消费只有一个</strong>：harvest。前面的部分只管把证据安全地、可去重地存下来；后面的部分才动事实图。</p>
   <div class="figure">
-    <div class="figbar"><span class="t">图 3 · 入主干 · 写入管线与五条红线</span><span class="tag">FLOWCHART LR</span><span class="sp"></span>
+    <div class="figbar"><span class="t">图 3 · 入主干 · 写入管线与五条红线</span><span class="tag">FLOWCHART TB（三段横排）</span><span class="sp"></span>
       <button class="btn" data-zoom="in">放大</button><button class="btn" data-zoom="out">缩小</button><button class="btn" data-zoom="fit">适应</button><button class="btn" data-zoom="full">全屏</button><button class="btn" data-svg>导出 SVG</button></div>
     <div class="canvas">
 <pre class="mermaid">
@@ -508,18 +542,18 @@ flowchart TB
 
 <section id="t-usecase">
   <div class="sechead"><span class="no">04</span><h2 class="title">用例 × 触发源：谁会调起谁</h2></div>
-  <p class="sub">能力只有一列：7 个用例（<code>maintain.*</code> 在其内部再分）。左边是触发源——<strong>runner 与 scheduler 只是执行器与触发器</strong>，它们出现在图里是为了说清「谁按了按钮」，不是为了给它们新增能力。</p>
+  <p class="sub">能力只有一排：7 个用例（<code>maintain.*</code> 在其内部再分）。下面是触发源——<strong>runner 与 scheduler 只是执行器与触发器</strong>，它们出现在图里是为了说清「谁按了按钮」，不是为了给它们新增能力。</p>
   <div class="figure">
-    <div class="figbar"><span class="t">图 4 · 用例与触发源</span><span class="tag">FLOWCHART TD</span><span class="sp"></span>
+    <div class="figbar"><span class="t">图 4 · 用例与触发源</span><span class="tag">FLOWCHART BT（触发自下而上）</span><span class="sp"></span>
       <button class="btn" data-zoom="in">放大</button><button class="btn" data-zoom="out">缩小</button><button class="btn" data-zoom="fit">适应</button><button class="btn" data-zoom="full">全屏</button><button class="btn" data-svg>导出 SVG</button></div>
     <div class="canvas">
 <pre class="mermaid">
-flowchart TD
+flowchart BT
   N0["能力只由 7 个用例提供<br>runner 与 scheduler 是执行器 / 触发器，不产生能力"]
   SC{{"scheduler<br>触发器 · 不含语义"}}
   RU{{"runner<br>执行器 · 串行 / 超时"}}
-  TR1["cron 定时"]
-  TR2["链尾 after"]
+  TR1["cron 定时<br>export · community 兜底"]
+  TR2["链尾 after<br>harvest → schema · community"]
   TR3["事件唤醒"]
   TR4["宿主事件<br>hook 每轮 capture / recall"]
   TR5["人机手动<br>UI · CLI · MCP/REST 工具调用"]
@@ -532,8 +566,8 @@ flowchart TD
   SC --> TR3
   RU -.->|"只执行 maintain.*"| U_MAINTAIN
 
-  TR1 -->|"export · community 兜底"| U_MAINTAIN
-  TR2 -->|"harvest → schema → community"| U_MAINTAIN
+  TR1 --> U_MAINTAIN
+  TR2 --> U_MAINTAIN
   TR3 -->|"annotate 提交"| U_ANNOTATE
   TR3 -->|"episode 落库"| U_MAINTAIN
   TR4 -->|"hook recall"| U_RECALL
@@ -613,7 +647,7 @@ flowchart TD
   end
   subgraph BR2["同层 · 非请求路径"]
     direction LR
-    B_UI["UI"]
+    B_UI["UI 页面<br>只经 REST"]
     B_SCHED["scheduler<br>触发器"]
     B_RUN["runner<br>执行器"]
     B_AUDIT["审计"]
@@ -638,10 +672,10 @@ flowchart TD
   B_REST --> U_ANNOTATE
   B_REST --> U_BROWSE
   B_REST --> U_CORRECT
-  B_REST -.->|"运维面 · rebuild / update / config"| U_MAINTAIN
+  B_REST -.->|"运维面"| U_MAINTAIN
   B_CLI --> U_IMPORT
   B_CLI --> U_BROWSE
-  B_UI -.->|"只经 REST"| B_REST
+  B_UI -.-> B_REST
   B_SCHED -->|"只触发"| U_MAINTAIN
   B_RUN -->|"只执行"| U_MAINTAIN
   B_AUDIT -.->|"只读回放"| U_BROWSE
@@ -651,11 +685,6 @@ flowchart TD
   B_MCP -.->|"✗ 越界"| NOPE
   B_REST -.->|"✗ 越界"| NOPE
 
-  CAPS["能力差异须在 caps 自报<br>800ms · 无预算 · 分页 · 离线"]
-  CAPS -.->|"声明"| B_HOOK
-  CAPS -.->|"声明"| B_MCP
-  CAPS -.->|"声明"| B_REST
-  CAPS -.->|"声明"| B_CLI
 
   classDef entry fill:#14262B,stroke:#4FB3A1,color:#DDF3EE,stroke-width:1px;
   classDef app fill:#17242E,stroke:#7FA1C4,color:#DCE9F4,stroke-width:1px;
@@ -669,7 +698,7 @@ flowchart TD
   class U_RECALL,U_CAPTURE,U_BROWSE app;
   class U_ANNOTATE,U_IMPORT write;
   class U_CORRECT,U_MAINTAIN domain;
-  class NOPE,CAPS life;
+  class NOPE life;
   style BR fill:#0D151B,stroke:#23333E,color:#93A7B4
   style UC fill:#0D151B,stroke:#23333E,color:#93A7B4
 </pre>
@@ -761,6 +790,7 @@ var NODE_INFO = {
   D_REST:{k:"方言",t:"REST",d:"HTTP 方言：分页、token 鉴权、更新语义；只翻译，不做业务判断。",m:{"前缀":"/api","鉴权":"X-Moshi-Token"}},
   D_CLI:{k:"方言",t:"CLI",d:"命令行方言：退出码、可离线、可长时间跑；同一批用例，另一套输出。",m:{"接入":"import · maintain.* · browse","约束":"退出码稳定"}},
   D_UI:{k:"方言",t:"UI 页面",d:"浏览器里的壳，只经 REST 拿数据；不许自己拼查询，也不许直连 daemon 的其它端点。",m:{"依赖":"只经 REST","页面":"图谱·记忆·待办·归档·接入·设置"}},
+  D_SESS:{k:"方言",t:"会话源 · CC/DSH JSONL",d:"把宿主会话文件翻译成事件：按游标只读尾随、按各家格式归一，永不改宿主文件；它是采集的入口方言，不是存储。",m:{"来源":"~/.claude/projects · DSH","模式":"只读尾随"}},
 
   A_SERVERS:{k:"装配",t:"服务装配",d:"把 http / mcp / hook 三个服务装起来，注入 db、sidecar client、cache、trace；只有这一层碰得到 infra 的具体实现。",m:{"文件":"app/main.ts · http/server.ts · mcp/server.ts","职责":"组合根"}},
   A_CLI:{k:"装配",t:"CLI 装配",d:"解析 argv、装配依赖、把命令映射到用例，再把结果渲染成文本或退出码。",m:{"文件":"app/cli/*","职责":"命令 → 用例"}},
@@ -775,13 +805,6 @@ var NODE_INFO = {
   U_MAINTAIN:{k:"用例",t:"maintain.*",d:"后台维护的集合：harvest、schema、community、export、layout、backup、retention 七个动作，各是一个函数。",m:{"目标位置":"app/services/maintain/*","触发":"cron · 链尾 · 事件"}},
   U_IMPORT:{k:"用例",t:"import",d:"批量导入：读宿主会话文件、适配成事件、走同一条写入主干；可同步跑完也可只入队。",m:{"目标位置":"app/services/import.ts","上游":"core/collect + parse"}},
 
-  C_READ:{k:"机理",t:"core/read",d:"召回机理：分流、三路召回、RRF、子图、模型打分、五步裁决、装箱；纯函数为主，只认 L0 与仓储接口。",m:{"文件":"core/read/*","不读":"config · caller"}},
-  C_WRITE:{k:"机理",t:"core/write",d:"写入机理：归一、脱敏、幂等判定、冲突检测、置信重估、生边；不碰协议，不认识 turn。",m:{"文件":"core/write/*","红线":"五条"}},
-  C_LIFE:{k:"机理",t:"lifecycle",d:"生命周期：强度计算、衰减、情景→语义巩固、社区划分与摘要；只被 maintain 与写入链尾调用。",m:{"文件":"core/lifecycle/*","字段":"strength 不进 GAT 特征"}},
-  C_ARCH:{k:"机理",t:"archive · layout",d:"投影机理：把事实图渲染成 Markdown、给图算布局坐标；全部可重建，坏了就重跑。",m:{"文件":"core/archive/*","性质":"可重建"}},
-  C_COLL:{k:"机理",t:"collect · parse · adapters",d:"采集与解析：扫描宿主会话文件、把各家格式归一成事件、从工具调用里抽出事实草稿。",m:{"文件":"core/collect/* · core/parse/*","输入":"只读会话文件"}},
-  C_HOOK:{k:"机理 · hook 面",t:"core/hook",d:"宿主事件在 core 里的落点：capture 把 hook 信封落成 episode / annotation，mail 把证据包渲染成注入文本，trace 记三档埋点；只出纯数据，不碰协议与 HTTP。",m:{"文件":"capture.ts · mail.ts · protocol.ts · trace.ts","边界":"不 import app/http"}},
-  C_OPS:{k:"机理",t:"diag · ops",d:"诊断与运维：健康探针、污染清理、迁移校验；只做检查与清理，不改语义。",m:{"文件":"core/diag/* · core/ops/*","输出":"诊断包"}},
 
   D_TYPE:{k:"不变量",t:"types · enums · invariants",d:"所有共享类型、枚举与不变量断言；任何两层之间共享的东西只能下沉到这里。",m:{"文件":"domain/*","规则":"无 IO、无依赖"}},
   D_ID:{k:"不变量",t:"identity · scope · hash",d:"身份与范围：project 身份怎么算、scope 怎么比较、幂等用的 raw_hash 与 dedup_key 长什么样。",m:{"文件":"domain/identity.ts · scope.ts · hash.ts","用途":"钩子与写入共用"}},
@@ -790,7 +813,6 @@ var NODE_INFO = {
   S_SQL:{k:"存储",t:"moshi.db",d:"唯一事实源：SQLite WAL，19 张实表 + FTS5 虚表 + vec0 向量表；单写者串行，读写同进程。",m:{"路径":"~/.moshi/moshi.db","扩展":"FTS5 · vec0 512 维"}},
   S_FILE:{k:"存储",t:"归档 · 日志 · 备份",d:"派生物：归档 Markdown、JSONL 日志与 trace、热备文件；全部可由库重建。",m:{"保留":"query_log 3 天 · hook trace 14 天 · 备份 7 份"}},
   S_SESS:{k:"存储",t:"宿主会话文件",d:"Claude Code / DSH 自己写的会话文件，moshi 只读尾随并记游标，永不修改。",m:{"路径":"~/.claude/projects · 类似目录","模式":"只读"}},
-  S_PY:{k:"外部",t:"Python sidecar",d:"进程外的向量与打分服务：/encode 生成 512 维向量，/score 跑 GAT；缺席时降级为纯符号。",m:{"接口":"/encode · /score","降级":"no_sidecar"}},
 
   /* ===== 图 2 · 出主干 ===== */
   Q1:{k:"召回",t:"Q1 入口",d:"召回的统一入口：接 caller、预算、通道开关；先查同会话缓存，命中就整包返回。",m:{"入参":"query · scope · topK · budgetMs"}},
@@ -855,7 +877,26 @@ var NODE_INFO = {
   B_RUN:{k:"分支",t:"runner",d:"只执行 maintain.*；不是能力，不许绕过用例直接调仓储。",m:{"性质":"执行器"}},
   B_AUDIT:{k:"分支",t:"日志审计",d:"只读回放 query_log / evidence_log / audit；不改数据。",m:{"范围":"只读"}},
   NOPE:{k:"禁止",t:"L1 内部阶段",d:"Q4 向量、Q6 PPR、Q9 模型属于机理内部阶段，方言不得直呼；要换行为就改用例的参数。",m:{"违规表现":"少调一步更快"}},
-  CAPS:{k:"约束",t:"caps 自报",d:"分支间能力差异必须显式声明：hook 800ms、MCP 无预算、REST 分页、CLI 离线。",m:{"位置":"app/access/registry.ts"}}
+  /* ===== 图 1 · 出链与入链（新） ===== */
+  RD1:{k:"出链",t:"入口 · 身份预算",d:"recall 的第一站：解析 caller 与 scope、定 budgetMs 与可用通道，后面每步都可能因预算被跳过。",m:{"入参":"caller · scope · budgetMs"}},
+  RD2:{k:"出链",t:"分流 global / local",d:"纯规则判断这次问的是全局常识还是本机状态：决定后面三路召回各自要不要跑、权重怎么给。",m:{"耗时":"≤3ms","性质":"纯函数"}},
+  RD3:{k:"出链",t:"三路召回",d:"向量 KNN + BM25 + PPR 三路各取 top20；任一路挂了不影响其它路，缺哪路记哪个降级码。",m:{"路数":"3","降级码":"no_vector / no_bm25 / no_ppr"}},
+  RD4:{k:"出链",t:"RRF 融合 + 子图",d:"按 rank 倒数融合三路候选（实体命中加分、近期加分），再从种子在事实图上扩 1–2 跳；只重排与扩边，不做语义判断。",m:{"参数":"k=60","上限":"≤64 节点 / ≤192 边"}},
+  RD6:{k:"出链",t:"模型 /score",d:"把子图交给进程外 sidecar 的 GAT 打分；缺席、超时或 shadow 模式时退回纯符号分，不影响出包。",m:{"超时":"120ms","降级":"no_sidecar → 符号兜底"}},
+  RD7:{k:"出链",t:"五步裁决 + 装箱",d:"时态失效 → 互斥取一 → 低置信 → 依赖失效 → 身份未决，每步可跳过并留痕；随后在 1500 token 内选证据：utility 池 7 成、value_floor 池 3 成，单条 ≤80 token。",m:{"输出":"adjudicated_by","预算":"1500 token · 7:3"}},
+  RD9:{k:"出链",t:"证据包",d:"稳定的 M# 引用清单 + 降级码 + 耗时；同一会话内可命中缓存整包返回。",m:{"协议":"moshi-evidence/1","落库":"evidence_log · query_log"}},
+  WR0:{k:"入链",t:"collect · adapters",d:"扫宿主会话文件的新块：按游标增量读、按各家格式归一成事件；只读，永不改宿主文件。",m:{"来源":"~/.claude/projects · DSH","模式":"只读尾随"}},
+  WR1:{k:"入链",t:"脱敏",d:"落盘之前先抹掉私钥、令牌、家目录与内网地址；一旦先落库再脱敏就等于泄漏，这一步不许后移。",m:{"红线":"脱敏先于落盘"}},
+  WR2:{k:"入链",t:"隔离筛查",d:"低置信、超长、控制字符占比高、不可序列化的内容挑出来隔离，不进入事实链。",m:{"判据":"0.25 / 2KB / 5% / 50"}},
+  WR3:{k:"入链",t:"episode 落库",d:"episode 与 annotation 只追加：raw_hash 去重，写进去就不改；这是整条链唯一的原始证据。",m:{"表":"episode · annotation","性质":"append-only"}},
+  WR4:{k:"入链",t:"harvest 解析",d:"唯一消费者：从 episode 抽出 0..n 条事实草稿；解析不出来的只记 skipped，不进隔离。",m:{"入口":"harvestRunner","批次":"50 / 200"}},
+  WR5:{k:"入链",t:"消解 · 幂等 · 冲突",d:"实体/别名/时间归到已有身份；再按 A 全新 / B 完全重复 / C 复活 / D 不同取值判幂等，D 走作废 + 争议并重估置信。",m:{"表":"entity · alias","唯一键":"canonical_key + valid_at"}},
+  WR7:{k:"入链",t:"事实图",d:"落 fact / edge 并算强度；这是系统里唯一可写的事实层，任何入口都不得绕过它直写。",m:{"红线":"fact 表唯一可写"}},
+  WR8:{k:"入链",t:"投影",d:"链尾巩固、社区划分、归档 Markdown、图布局：全是派生物，坏了可以整批重跑。",m:{"模块":"lifecycle · archive · layout"}},
+  OPS1:{k:"运维",t:"自检 · 清理",d:"diag 探针与 ops 清理：迁移校验、污染清理、对账；只检查与清理，不改语义。",m:{"模块":"core/diag · core/ops"}},
+  U_DIAG:{k:"用例",t:"diag·ops",d:"把自检与清理包装成用例：doctor 体检、迁移校验、污染清理都从这里进，供 CLI 与 REST 共用。",m:{"目标位置":"app/services/diag.ts"}},
+  U_ACCESS:{k:"用例",t:"access·caller",d:"身份与能力登记：把 caller 种类、scope、预算、caps 收成一处，再注入给 recall 等用例。",m:{"目标位置":"app/access/registry.ts"}},
+  X_PY:{k:"进程外",t:"Python sidecar",d:"模型运行时，不是存储：/encode 出 512 维向量，/score 跑 GAT；懒启、熔断、缺席则整体降级。",m:{"接口":"/encode · /score","降级":"no_sidecar"}},
 };
 
   var LABELS = {}, FIGS = {}, panel = document.getElementById("nodePanel"),
@@ -1022,7 +1063,7 @@ var NODE_INFO = {
       clusterBorder: "#23333E",
       titleColor: "#93A7B4"
     },
-    flowchart: {htmlLabels:true, curve:"linear", nodeSpacing:38, rankSpacing:58, padding:14, useMaxWidth:false, diagramPadding:12, subGraphTitleMargin:{top:8, bottom:14}}
+    flowchart: {htmlLabels:true, curve:"linear", nodeSpacing:20, rankSpacing:10, padding:6, useMaxWidth:false, diagramPadding:8, subGraphTitleMargin:{top:6, bottom:34}}
   });
 
   // 鼠标按住拖拽平移：左键拖动只改容器的 scrollLeft/scrollTop，不影响缩放与节点点击
