@@ -31,7 +31,7 @@ body{
 a{color:var(--up);text-decoration:none}
 ::selection{background:rgba(223,162,74,.28)}
 /* ===== 布局 ===== */
-.wrap{max-width:1720px;margin:0 auto;padding:0 28px 120px}
+.wrap{max-width:1920px;margin:0 auto;padding:0 28px 120px}
 .masthead{padding:56px 0 34px;border-bottom:1px solid var(--line)}
 .kicker{font:12px/1.6 var(--mono);letter-spacing:.14em;color:var(--muted);display:flex;gap:18px;flex-wrap:wrap}
 .kicker b{color:var(--down);font-weight:400}
@@ -153,13 +153,13 @@ tr:last-child td{border-bottom:0}
     <span>基线 2026-11-12</span>
   </div>
   <h1>默识（moshi）<em>目标架构</em></h1>
-  <p class="lede">目标形态是<strong>六层依赖边界（L0–L5）</strong>加<strong>两条主干</strong>（入=捕获、出=检索），分支只在用例层留接入点。本页讲<em>应当怎么设计</em>：一个能力只有一个函数，四种方言只是壳；与现状（01A）的差异单列在 §06，不粉饰。</p>
+  <p class="lede">目标形态是<strong>六层依赖边界（L0–L5）</strong>加<strong>两条主干</strong>（入=捕获、出=检索），分支只在能力层留接入点。本页讲<em>应当怎么设计</em>：一个能力只有一个函数，五个对接口只是壳，所有入口在服务装配处收口；与现状（01A）的差异单列在 §06，不粉饰。</p>
   <div class="chips">
     <div class="chip"><span>两条主干</span><strong>入=捕获 · 出=检索</strong></div>
     <div class="chip"><span>分层</span><strong>L0–L5 六层 + 观测横切</strong></div>
     <div class="chip"><span>用例</span><strong>7 个 · 触发源 5 类</strong></div>
     <div class="chip"><span>规模</span><strong>图 5 张 · 表 6 张</strong></div>
-    <div class="chip"><span>方言</span><strong>hook / MCP / REST / CLI / UI</strong></div>
+    <div class="chip"><span>接入面</span><strong>hook / MCP / REST / CLI / UI</strong></div>
     <div class="chip"><span>与现状差异</span><strong>7 条，见 §06</strong></div>
   </div>
 </header>
@@ -187,16 +187,16 @@ tr:last-child td{border-bottom:0}
 <!-- ===== 00 读图 ===== -->
 <section id="read0">
   <div class="sechead"><span class="no">00</span><h2 class="title">读图约定：这是目标形态，不是现状快照</h2></div>
-  <p class="sub">本页画的是<strong>主干收口之后</strong>应当长成的样子：一个能力只有一个函数，四个方言只是壳。看的时候先认三件事：层是<em>依赖边界</em>，用例是<em>能力边界</em>，主干是<em>两端各一条数据通路</em>。</p>
+  <p class="sub">本页画的是<strong>主干收口之后</strong>应当长成的样子：一个能力只有一个函数，五个对接口只是壳。看的时候先认三件事：层是<em>依赖边界</em>，能力是<em>可被调用的动作边界</em>，主干是<em>两端各一条数据通路</em>。</p>
   <div class="grid3">
-    <div class="cell"><h3>竖着看：层</h3><p>L5 宿主 → L4 方言 → L3 装配 → L2 用例 → L1 机理 → L0 不变量。箭头只指被依赖方；下层不认识上层。</p></div>
-    <div class="cell"><h3>横着看：方言</h3><p>hook / MCP / REST / CLI 四件协议外套，外加 UI 一类只做视图；它们只做翻译、渲染与能力自报，互不 import，也不许直呼 L1 内部阶段。</p></div>
+    <div class="cell"><h3>竖着看：层</h3><p>L5 边界域 → L4 接入层 → L3 装配层 → L2 能力层 → L1 机理层 → L0 不变量。箭头只指被依赖方；下层不认识上层。</p></div>
+    <div class="cell"><h3>横着看：接入面</h3><p>hook / MCP / REST / CLI / UI 五件协议外套，各配一个装配层对接口；对接口只做校验、参数归一与渲染，再统一汇入服务装配，谁也不许直呼 L1 内部阶段。</p></div>
     <div class="cell"><h3>顺着看：主干</h3><p>出主干 = 一次召回（蓝），入主干 = 一次写入（琥珀）。两条主干在 SQLite 交汇，但代码路径永不交叉。</p></div>
   </div>
   <div class="legend" style="border:1px solid var(--line);border-top:0;margin-bottom:8px">
     <span><span class="sw" style="background:#1A1B2E;border-color:#5B5F87"></span><b>宿主</b></span>
-    <span><span class="sw" style="background:#14262B;border-color:#4FB3A1"></span><b>方言</b></span>
-    <span><span class="sw" style="background:#17242E;border-color:#7FA1C4"></span><b>装配 / 用例</b></span>
+    <span><span class="sw" style="background:#14262B;border-color:#4FB3A1"></span><b>接入面</b></span>
+    <span><span class="sw" style="background:#17242E;border-color:#7FA1C4"></span><b>装配 / 能力</b></span>
     <span><span class="sw" style="background:#2A2118;border-color:#DFA24A"></span><b>写入</b></span>
     <span><span class="sw" style="background:#12282A;border-color:#4FB3A1"></span><b>读取 / 机理</b></span>
     <span><span class="sw" style="background:#2A1A20;border-color:#C98D96"></span><b>治理 · 触发 · 红线</b></span>
@@ -208,161 +208,392 @@ tr:last-child td{border-bottom:0}
 
 <section id="t-layers">
   <div class="sechead"><span class="no">01</span><h2 class="title">六层总架构：主干纵穿，分支横挂</h2></div>
-  <p class="sub">每一层只对下一层负责：宿主只产生对话，方言只翻译，装配置调度，用例给能力，机理给算法，不变量给约束。两条主干（出=蓝、入=琥珀）从宿主一路穿到 SQLite：L1 里它们各自展开成一条流水线（出链 7 段、入链 8 段），段与段之间写的是一次处理做了什么。其它分支都横挂在某一层上，不许自己开洞。</p>
+  <p class="sub">每一层只对下一层负责：边界域提供宿主与外部数据，接入层只做协议归一与渲染，装配层把入口接到对接口并注入 caller / scope / budget，能力层是唯一可被调用的动作，机理层给算法，不变量给编译期约束。两条主干（出=蓝、入=琥珀）从会话文件与宿主事件出发一路穿到 SQLite：L1 里各自展开成一条流水线（出链 7 段、入链 8 段）。能力节点第二行直接标了它落在哪一段，对接口第二行标了它能调哪些能力。</p>
   <div class="figure">
-    <div class="figbar"><span class="t">图 1 · 六层总架构与主干</span><span class="tag">FLOWCHART TB</span><span class="sp"></span>
+    <div class="figbar"><span class="t">图 1 · 六层总架构与主干</span><span class="tag">分层网格 · 静态 SVG · 可横向拖动 / 全屏看</span><span class="sp"></span>
       <button class="btn" data-zoom="in">放大</button><button class="btn" data-zoom="out">缩小</button><button class="btn" data-zoom="fit">适应</button><button class="btn" data-zoom="full">全屏</button><button class="btn" data-svg>导出 SVG</button></div>
-    <div class="canvas">
-<pre class="mermaid">
-flowchart TB
-  subgraph L5["L5 · 宿主"]
-    S_SESS["宿主会话文件<br>只读尾随"]
-    H_MAG["Magpie"]
-    H_CC["Claude Code"]
-    H_DSH["DSH"]
-    H_TERM["终端"]
-    H_WEB["浏览器"]
-  end
-  subgraph L4["L4 · 方言"]
-    D_HOOK["hook 方言"]
-    D_MCP["MCP 工具<br>stdio"]
-    D_REST["REST /api"]
-    D_CLI["CLI"]
-    D_UI["UI 页面<br>只经 REST"]
-    D_SESS["会话源方言<br>CC·DSH JSONL"]
-  end
-  subgraph L3["L3 · 装配"]
-    A_SERVERS["服务装配"]
-    A_CLI["cli 装配"]
-    A_SCHED["scheduler"]
-    A_RUNNER["runner"]
-  end
-  subgraph L2["L2 · 用例"]
-    U_RECALL["recall"]
-    U_CAPTURE["capture"]
-    U_ANNOTATE["annotate"]
-    U_CORRECT["correct"]
-    U_BROWSE["browse"]
-    U_IMPORT["import"]
-    U_MAINTAIN["maintain"]
-    U_DIAG["diag·ops"]
-    U_ACCESS["access·caller"]
-  end
-  subgraph L1["L1 · 机理"]
-    subgraph C_W["入链 · 一次写入"]
-      direction TB
-      WR0["扫会话块<br>游标"] -->|"新块"| WR1["脱敏<br>先于落盘"] -->|"净化"| WR2["隔离筛查<br>0.25 · 2KB"] -->|"通过"| WR3["episode 落库<br>append-only"] -->|"入队"| WR4["harvest 解析<br>0..n 草稿"] -->|"草稿"| WR5["消解 · 幂等 · 冲突<br>A·B·C·D"] -->|"raw_hash 去重"| WR7["事实图<br>fact · edge"] -->|"链尾巩固"| WR8["投影<br>归档 · 布局 · 社区"]
-    end
-    subgraph C_R["出链 · 一次召回"]
-      direction TB
-      RD1["入口<br>身份 · 预算"] -->|"3ms 分流"| RD2["分流<br>global / local"] -->|"5ms"| RD3["三路召回<br>KNN · BM25 · PPR"] -->|"top20 × 3"| RD4["RRF 融合 + 子图<br>k = 60 · 1–2 跳"] -->|"≤64 / ≤192"| RD6["模型 /score<br>GAT · 可降级"] -->|"25ms"| RD7["五步裁决 + 装箱<br>1500 token · 7 : 3"] -->|"10ms"| RD9["证据包<br>M#"]
-    end
-    OPS1["自检 · 清理"]
-  end
-  subgraph L0["L0 · 不变量"]
-    D_TYPE["types · enums"]
-    D_ID["identity · scope"]
-    D_ACC["access"]
-  end
-  subgraph LX["进程外"]
-    X_PY["sidecar<br>/encode · /score"]
-  end
-  subgraph LS["存储"]
-    S_SQL[("moshi.db")]
-    S_FILE[("归档 · 日志")]
-  end
-
-  H_MAG ==>|"onRequest / onResponse"| D_HOOK
-  H_CC --> D_MCP
-  H_DSH --> D_MCP
-  H_TERM --> D_CLI
-  H_WEB --> D_UI
-  S_SESS -.->|"只读尾随"| D_SESS
-
-  D_HOOK ==>|"moshi-hook/1"| A_SERVERS
-  D_MCP ==> A_SERVERS
-  D_REST ==> A_SERVERS
-  D_CLI ==> A_CLI
-  D_SESS ==>|"块事件"| A_SERVERS
-
-  A_SERVERS ==> U_RECALL
-  A_SERVERS ==> U_CAPTURE
-  A_SERVERS --> U_ANNOTATE
-  A_SERVERS --> U_BROWSE
-  A_SERVERS --> U_CORRECT
-  A_SERVERS -.->|"caller 声明"| U_ACCESS
-  A_CLI --> U_IMPORT
-  A_CLI -->|"doctor · eval"| U_DIAG
-  A_SCHED -.->|"只触发"| U_MAINTAIN
-  A_RUNNER -->|"只执行"| U_MAINTAIN
-
-  U_ACCESS -->|"解析后的 caller · scope"| C_R
-  U_RECALL ==> C_R
-  U_CAPTURE ==> C_W
-  U_ANNOTATE -->|"annotation"| C_W
-  U_CORRECT -->|"改判 · 审计"| C_W
-  U_BROWSE -->|"读投影"| C_W
-  U_IMPORT -->|"批量"| C_W
-  U_MAINTAIN -->|"链尾"| C_W
-  U_DIAG -->|"探针 · 清理 · 读诊断"| OPS1
-
-  C_R -->|"五步判据"| D_TYPE
-  L1 -.->|"caller"| D_ACC
-  L1 --> D_ID
-
-  L1 ==> S_SQL
-  L1 --> S_FILE
-  OPS1 -.->|"对账 · 清理"| S_SQL
-
-  L1 -.-> X_PY
-
-  classDef cOut fill:#0F1E2E,stroke:#7FA1C4,color:#DCE9F4,stroke-width:2.5px;
-  classDef cIn fill:#2A2118,stroke:#DFA24A,color:#F7E7CD,stroke-width:2.5px;
-  classDef host fill:#1A1B2E,stroke:#5B5F87,color:#DDE0F0,stroke-width:1px;
-  classDef entry fill:#14262B,stroke:#4FB3A1,color:#DDF3EE,stroke-width:1px;
-  classDef app fill:#17242E,stroke:#7FA1C4,color:#DCE9F4,stroke-width:1px;
-  classDef read fill:#12282A,stroke:#4FB3A1,color:#D9F0EA,stroke-width:1px;
-  classDef write fill:#2A2118,stroke:#DFA24A,color:#F7E7CD,stroke-width:1px;
-  classDef life fill:#2A1A20,stroke:#C98D96,color:#F4E1E4,stroke-width:1px;
-  classDef domain fill:#1B2129,stroke:#7A8B99,color:#DAE3E9,stroke-width:1px;
-  classDef infra fill:#1D2024,stroke:#96A0A6,color:#DCE2E5,stroke-width:1px;
-  classDef ext fill:#0F171E,stroke:#3F5060,color:#B9C7D1,stroke-width:1px;
-  classDef store fill:#101B21,stroke:#4FB3A1,color:#D6EDE7,stroke-width:1px;
-
-  class H_WEB,S_SESS host;
-  class H_MAG,H_CC,H_DSH,H_TERM,D_HOOK,D_MCP,D_REST,D_CLI,D_UI,D_SESS entry;
-  class A_SERVERS,A_CLI,A_SCHED,A_RUNNER,U_ANNOTATE,U_BROWSE,U_IMPORT,U_CORRECT app;
-  class U_RECALL cOut;
-  class U_CAPTURE cIn;
-  class U_MAINTAIN,U_DIAG,U_ACCESS life;
-  class RD2,RD4,RD6,RD7 read;
-  class RD1,RD3,RD9 cOut;
-  class WR0,WR3,WR4,WR5,WR7,WR8 write;
-  class WR1,WR2 cIn;
-  class OPS1 life;
-  class D_TYPE,D_ID,D_ACC domain;
-  class X_PY ext;
-  class S_SQL,S_FILE store;
-  style L5 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style L4 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style L3 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style L2 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style L1 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style C_R fill:#0F1E2E,stroke:#2E4354,color:#9FC0DA
-  style C_W fill:#241C14,stroke:#4A3A26,color:#E0BE8F
-  style L0 fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style LX fill:#0D151B,stroke:#23333E,color:#93A7B4
-  style LS fill:#0D151B,stroke:#23333E,color:#93A7B4
-</pre>
+    <div class="canvas" data-static="1">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2060 1180" width="2260" height="1294" font-family='"Microsoft YaHei UI","Microsoft YaHei","PingFang SC",sans-serif' role="img" aria-label="默识目标架构总图">
+<defs>
+<marker id="ar-call" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6E7B87"/></marker>
+<marker id="ar-write" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DFA24A"/></marker>
+<marker id="ar-read" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4FB3A1"/></marker>
+<marker id="ar-dash" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#55606B"/></marker>
+<marker id="ar-compile" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7A8B99"/></marker>
+<marker id="ar-wake" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C98D96"/></marker>
+</defs>
+<g transform="scale(1.0971)">
+<rect width="2060" height="1180" fill="#0B1218"/>
+<rect x="120" y="38" width="1720" height="124" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="54" font-size="12" fill="#93A7B4" letter-spacing="0.5">L5 · 边界域（不归我们控制）</text>
+<rect x="120" y="176" width="1720" height="112" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="192" font-size="12" fill="#93A7B4" letter-spacing="0.5">L4 · 接入层（只归一协议 + 渲染）</text>
+<rect x="120" y="302" width="1720" height="200" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="318" font-size="12" fill="#93A7B4" letter-spacing="0.5">L3 · 装配层（组合根 · 对接口 · 执行器）</text>
+<rect x="120" y="516" width="1720" height="130" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="532" font-size="12" fill="#93A7B4" letter-spacing="0.5">L2 · 能力层（纯能力，不认协议）</text>
+<rect x="120" y="660" width="1720" height="332" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="676" font-size="12" fill="#93A7B4" letter-spacing="0.5">L1 · 机理层（两条主干）</text>
+<rect x="120" y="1006" width="1720" height="98" rx="10" fill="#0D151B" stroke="#23333E"/>
+<text x="132" y="1022" font-size="12" fill="#93A7B4" letter-spacing="0.5">L0 · 不变量（编译期依赖）</text>
+<polyline points="310.0,123.0 310.0,207.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="310.0" y="144.9" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">onRequest 800ms</text>
+<polyline points="480.0,123.0 480.0,207.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="480.0" y="144.9" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">stdio</text>
+<polyline points="565.0,100.0 550.0,230.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="560.2" y="136.6" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">stdio</text>
+<polyline points="820.0,123.0 820.0,207.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="820.0" y="144.9" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">argv</text>
+<polyline points="990.0,123.0 985.0,207.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="988.4" y="144.9" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">/ui + 页面</text>
+<polyline points="920.0,230.0 920.0,270.0 650.0,270.0 720.0,230.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="920.0" y="237.8" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">页面 fetch /api</text>
+<polyline points="1615.0,100.0 1710.0,300.0 1320.0,300.0 1395.0,445.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="1645.4" y="159.0" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">只读尾随 · 旁路 L4</text>
+<polyline points="310.0,253.0 310.0,327.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="480.0,253.0 480.0,327.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="650.0,253.0 650.0,327.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="820.0,253.0 820.0,327.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="985.0,253.0 985.0,327.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="230.0,350.0 260.0,445.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="239.6" y="375.4" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">装配</text>
+<polyline points="230.0,350.0 180.0,408.0 1150.0,408.0 1075.0,445.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="214.0" y="363.6" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">起调度</text>
+<polyline points="390.0,350.0 260.0,445.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="560.0,350.0 260.0,445.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="650.0,373.0 660.0,420.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="740.0,350.0 1060.0,445.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="905.0,350.0 1060.0,445.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1225.0,445.0 1245.0,445.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="1225.0,445.0 1415.0,445.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="1285.8" y="440.0" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">cron / after</text>
+<polyline points="1245.0,445.0 650.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1245.0" y="508.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">只跑扫描</text>
+<polyline points="1415.0,445.0 1240.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1390.0" y="505.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">只执行</text>
+<polyline points="260.0,445.0 365.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="260.0,445.0 510.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1060.0,445.0 800.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1060.0,445.0 940.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1060.0,445.0 1415.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="660.0,470.0 725.0,547.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1060.0,445.0 1080.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="1060.0,445.0 1255.0,570.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/>
+<polyline points="215.0,570.0 235.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="215.0,570.0 380.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="215.0,570.0 800.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="215.0,570.0 940.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="215.0,570.0 1415.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="215.0,570.0 660.0,570.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="300.0,593.0 300.0,810.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/><text x="300.0" y="657.4" text-anchor="middle" font-size="10" fill="#DFA24A" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">query·scope·budget</text>
+<polyline points="445.0,593.0 460.0,680.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="585.0,593.0 460.0,680.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/><text x="545.0" y="615.8" text-anchor="middle" font-size="10" fill="#DFA24A" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">扫描新块</text>
+<polyline points="660.0,570.0 520.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/><text x="615.2" y="606.6" text-anchor="middle" font-size="10" fill="#DFA24A" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">批量源</text>
+<polyline points="865.0,593.0 910.0,680.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="879.4" y="615.8" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">人判</text>
+<polyline points="1070.0,570.0 1150.0,700.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1058.0" y="640.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">改判·审计</text>
+<polyline points="1160.0,593.0 1060.0,680.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1112.0" y="668.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">harvest/schema</text>
+<polyline points="1240.0,570.0 1450.0,700.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1330.0" y="660.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">export/layout</text>
+<polyline points="1160.0,593.0 1160.0,612.0 1435.0,612.0 1450.0,920.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="1400.0" y="900.0" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">backup/retention</text>
+<polyline points="1320.0,593.0 1320.0,604.0 1435.0,604.0 1450.0,920.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/>
+<polyline points="1545.0,570.0 1480.0,640.0 1750.0,640.0 1675.0,700.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="1610.0" y="660.0" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">只读投影</text>
+<polyline points="520.0,700.0 550.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="670.0,700.0 700.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="820.0,700.0 850.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="970.0,700.0 1000.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="1120.0,700.0 1150.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="1270.0,700.0 1300.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="1420.0,700.0 1450.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/>
+<polyline points="360.0,830.0 390.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="510.0,830.0 540.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="660.0,830.0 690.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="810.0,830.0 840.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="960.0,830.0 990.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="1110.0,830.0 1140.0,830.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/>
+<polyline points="1570.0,700.0 1675.0,700.0" fill="none" stroke="#DFA24A" stroke-width="2.6" marker-end="url(#ar-write)"/><text x="1603.6" y="695.0" text-anchor="middle" font-size="10" fill="#DFA24A" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">全链写入</text>
+<polyline points="1570.0,700.0 1570.0,760.0 1675.0,760.0 1675.0,800.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1570.0" y="714.2" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">投影 MD</text>
+<polyline points="1260.0,830.0 1260.0,780.0 1675.0,780.0 1675.0,700.0" fill="none" stroke="#4FB3A1" stroke-width="1.8" marker-end="url(#ar-read)"/><text x="1260.0" y="809.0" text-anchor="middle" font-size="10" fill="#4FB3A1" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">只读</text>
+<polyline points="1210.0,720.0 1330.0,732.0 1330.0,1028.0 1330.0,1028.0" fill="none" stroke="#7A8B99" stroke-width="1.2" stroke-dasharray="2 4"/><text x="1248.4" y="718.8" text-anchor="middle" font-size="10" fill="#7A8B99" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">canonical_key</text>
+<polyline points="1050.0,850.0 1050.0,1028.0" fill="none" stroke="#7A8B99" stroke-width="1.2" stroke-dasharray="2 4"/><text x="1050.0" y="902.0" text-anchor="middle" font-size="10" fill="#7A8B99" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">白名单判据</text>
+<polyline points="450.0,850.0 450.0,1028.0" fill="none" stroke="#7A8B99" stroke-width="1.2" stroke-dasharray="2 4"/><text x="450.0" y="902.0" text-anchor="middle" font-size="10" fill="#7A8B99" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">越界即拒</text>
+<polyline points="1515.0,940.0 1450.0,918.0 1675.0,818.0 1675.0,800.0" fill="none" stroke="#6E7B87" stroke-width="1.5" marker-end="url(#ar-call)"/><text x="1494.2" y="928.0" text-anchor="middle" font-size="10" fill="#6E7B87" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">append</text>
+<polyline points="960.0,830.0 960.0,860.0 1675.0,860.0 1675.0,900.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="960.0" y="834.6" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">/score（可缺席）</text>
+<polyline points="1120.0,700.0 1120.0,965.0 1750.0,965.0 1675.0,900.0" fill="none" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ar-dash)"/><text x="1120.0" y="779.8" text-anchor="middle" font-size="10" fill="#55606B" style="paint-order:stroke;stroke:#0D151B;stroke-width:3px">/encode（可缺席）</text>
+<g class="node" id="flowchart-H_MAG-0">
+<rect x="235.0" y="77.0" width="150.0" height="46.0" rx="7" fill="#1A1B2E" stroke="#5B5F87" stroke-width="1.2"/>
+<text x="310.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">Magpie</text>
+<text x="310.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">800ms 同步</text>
+</g>
+<g class="node" id="flowchart-H_CC-0">
+<rect x="415.0" y="77.0" width="130.0" height="46.0" rx="7" fill="#1A1B2E" stroke="#5B5F87" stroke-width="1.2"/>
+<text x="480.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">Claude Code</text>
+<text x="480.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">MCP 客户端</text>
+</g>
+<g class="node" id="flowchart-H_DSH-0">
+<rect x="565.0" y="77.0" width="110.0" height="46.0" rx="7" fill="#1A1B2E" stroke="#5B5F87" stroke-width="1.2"/>
+<text x="620.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">DSH</text>
+<text x="620.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">MCP 客户端</text>
+</g>
+<g class="node" id="flowchart-H_TERM-0">
+<rect x="755.0" y="77.0" width="130.0" height="46.0" rx="7" fill="#1A1B2E" stroke="#5B5F87" stroke-width="1.2"/>
+<text x="820.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">终端</text>
+<text x="820.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">argv</text>
+</g>
+<g class="node" id="flowchart-H_WEB-0">
+<rect x="925.0" y="77.0" width="130.0" height="46.0" rx="7" fill="#1A1B2E" stroke="#5B5F87" stroke-width="1.2"/>
+<text x="990.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">浏览器</text>
+<text x="990.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">/ui + /api</text>
+</g>
+<g class="node" id="flowchart-S_SESS-0">
+<rect x="1615.0" y="77.0" width="190.0" height="46.0" rx="7" fill="#0F171E" stroke="#3F5060" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="1710.0" y="99.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">会话文件</text>
+<text x="1710.0" y="114.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">外部数据 · 只读</text>
+</g>
+<g class="node" id="flowchart-D_HOOK-0">
+<rect x="240.0" y="207.0" width="140.0" height="46.0" rx="7" fill="#14262B" stroke="#4FB3A1" stroke-width="1.2"/>
+<text x="310.0" y="229.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">hook 面</text>
+<text x="310.0" y="244.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">§HOOK 信封</text>
+</g>
+<g class="node" id="flowchart-D_MCP-0">
+<rect x="410.0" y="207.0" width="140.0" height="46.0" rx="7" fill="#14262B" stroke="#4FB3A1" stroke-width="1.2"/>
+<text x="480.0" y="229.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">MCP 面</text>
+<text x="480.0" y="244.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">tools/call</text>
+</g>
+<g class="node" id="flowchart-D_REST-0">
+<rect x="580.0" y="207.0" width="140.0" height="46.0" rx="7" fill="#14262B" stroke="#4FB3A1" stroke-width="1.2"/>
+<text x="650.0" y="229.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">REST 面</text>
+<text x="650.0" y="244.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">/api/*</text>
+</g>
+<g class="node" id="flowchart-D_CLI-0">
+<rect x="750.0" y="207.0" width="140.0" height="46.0" rx="7" fill="#14262B" stroke="#4FB3A1" stroke-width="1.2"/>
+<text x="820.0" y="229.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">CLI 面</text>
+<text x="820.0" y="244.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">argv</text>
+</g>
+<g class="node" id="flowchart-D_UI-0">
+<rect x="920.0" y="207.0" width="130.0" height="46.0" rx="7" fill="#14262B" stroke="#4FB3A1" stroke-width="1.2"/>
+<text x="985.0" y="229.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">UI 面</text>
+<text x="985.0" y="244.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">/ui + 页面</text>
+</g>
+<g class="node" id="flowchart-A_MAIN-0">
+<rect x="130.0" y="327.0" width="100.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="180.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">组合根 main</text>
+<text x="180.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">cfg·lock·DI</text>
+</g>
+<g class="node" id="flowchart-A_HOOK-0">
+<rect x="230.0" y="327.0" width="160.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="310.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">hook 口</text>
+<text x="310.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">recall·capture</text>
+</g>
+<g class="node" id="flowchart-A_MCP-0">
+<rect x="400.0" y="327.0" width="160.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="480.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">MCP 口</text>
+<text x="480.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">recall·capture·annot</text>
+</g>
+<g class="node" id="flowchart-A_REST-0">
+<rect x="570.0" y="327.0" width="160.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="650.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">REST 口</text>
+<text x="650.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">browse·correct·annot</text>
+</g>
+<g class="node" id="flowchart-A_CLI-0">
+<rect x="740.0" y="327.0" width="160.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="820.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">CLI 口</text>
+<text x="820.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">import·recall·maintain</text>
+</g>
+<g class="node" id="flowchart-A_UI-0">
+<rect x="905.0" y="327.0" width="160.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="985.0" y="349.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">UI 口</text>
+<text x="985.0" y="364.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">browse·correct·annot</text>
+</g>
+<g class="node" id="flowchart-A_SERVE-0">
+<rect x="260.0" y="420.0" width="800.0" height="50.0" rx="7" fill="#20303C" stroke="#C79A5B" stroke-width="2.0"/>
+<text x="660.0" y="444.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">服务装配 · 唯一收敛口</text>
+<text x="660.0" y="459.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">caller · scope · budget · trace</text>
+</g>
+<g class="node" id="flowchart-A_SCHED-0">
+<rect x="1075.0" y="422.0" width="150.0" height="46.0" rx="7" fill="#1C242B" stroke="#8A959E" stroke-width="1.2"/>
+<text x="1150.0" y="444.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">scheduler ◇</text>
+<text x="1150.0" y="459.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">interval / cron</text>
+</g>
+<g class="node" id="flowchart-A_COLL-0">
+<rect x="1245.0" y="422.0" width="150.0" height="46.0" rx="7" fill="#1C242B" stroke="#8A959E" stroke-width="1.2"/>
+<text x="1320.0" y="444.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">collectRunner ◇</text>
+<text x="1320.0" y="459.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">扫会话块</text>
+</g>
+<g class="node" id="flowchart-A_RUN-0">
+<rect x="1415.0" y="422.0" width="150.0" height="46.0" rx="7" fill="#1C242B" stroke="#8A959E" stroke-width="1.2"/>
+<text x="1490.0" y="444.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">jobRunner ◇</text>
+<text x="1490.0" y="459.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">串行执行</text>
+</g>
+<g class="node" id="flowchart-U_ACCESS-0">
+<rect x="115.0" y="547.0" width="100.0" height="46.0" rx="7" fill="#1B2129" stroke="#7A8B99" stroke-width="1.2"/>
+<text x="165.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">access</text>
+<text x="165.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">前置</text>
+</g>
+<g class="node" id="flowchart-U_RECALL-0">
+<rect x="235.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="2.2"/>
+<text x="300.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">recall</text>
+<text x="300.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 RD1</text>
+</g>
+<g class="node" id="flowchart-U_CAPTURE-0">
+<rect x="380.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="2.2"/>
+<text x="445.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">capture</text>
+<text x="445.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 WR0</text>
+</g>
+<g class="node" id="flowchart-U_COLLECT-0">
+<rect x="520.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#2A1A20" stroke="#C98D96" stroke-width="1.4"/>
+<text x="585.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">collect</text>
+<text x="585.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 WR0 · 仅调度</text>
+</g>
+<g class="node" id="flowchart-U_IMPORT-0">
+<rect x="660.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="2.2"/>
+<text x="725.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">import</text>
+<text x="725.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 WR0 · 复用 capture</text>
+</g>
+<g class="node" id="flowchart-U_ANNOTATE-0">
+<rect x="800.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="2.2"/>
+<text x="865.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">annotate</text>
+<text x="865.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 WR3</text>
+</g>
+<g class="node" id="flowchart-U_CORRECT-0">
+<rect x="940.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="1005.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">correct</text>
+<text x="1005.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">落 WR5</text>
+</g>
+<g class="node" id="flowchart-U_MAINTAIN-0">
+<rect x="1080.0" y="547.0" width="160.0" height="46.0" rx="7" fill="#2A1A20" stroke="#C98D96" stroke-width="1.4"/>
+<text x="1160.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">maintain</text>
+<text x="1160.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">WR4 · WR8 · OPS</text>
+</g>
+<g class="node" id="flowchart-U_DIAG-0">
+<rect x="1255.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#2A1A20" stroke="#C98D96" stroke-width="1.4"/>
+<text x="1320.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">diag · ops</text>
+<text x="1320.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">探针 · 清理</text>
+</g>
+<g class="node" id="flowchart-U_BROWSE-0">
+<rect x="1415.0" y="547.0" width="130.0" height="46.0" rx="7" fill="#17242E" stroke="#7FA1C4" stroke-width="1.2"/>
+<text x="1480.0" y="569.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">browse</text>
+<text x="1480.0" y="584.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">投影只读</text>
+</g>
+<g class="node" id="flowchart-WR0-0">
+<rect x="400.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="460.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR0 扫块</text>
+<text x="460.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">游标增量</text>
+</g>
+<g class="node" id="flowchart-WR1-0">
+<rect x="550.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="610.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR1 脱敏</text>
+<text x="610.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">先于落盘</text>
+</g>
+<g class="node" id="flowchart-WR2-0">
+<rect x="700.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="760.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR2 隔离</text>
+<text x="760.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">0.25 · 2KB</text>
+</g>
+<g class="node" id="flowchart-WR3-0">
+<rect x="850.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="910.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR3 episode</text>
+<text x="910.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">append-only</text>
+</g>
+<g class="node" id="flowchart-WR4-0">
+<rect x="1000.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="1060.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR4 harvest</text>
+<text x="1060.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">0..n 草稿</text>
+</g>
+<g class="node" id="flowchart-WR5-0">
+<rect x="1150.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="1210.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR5 消解幂等</text>
+<text x="1210.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">A·B·C·D</text>
+</g>
+<g class="node" id="flowchart-WR7-0">
+<rect x="1300.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="1360.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR7 事实图</text>
+<text x="1360.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">fact · edge</text>
+</g>
+<g class="node" id="flowchart-WR8-0">
+<rect x="1450.0" y="680.0" width="120.0" height="40.0" rx="7" fill="#2A2118" stroke="#DFA24A" stroke-width="1.6"/>
+<text x="1510.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">WR8 投影</text>
+<text x="1510.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">归档 · 布局</text>
+</g>
+<g class="node" id="flowchart-RD1-0">
+<rect x="240.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="300.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD1 入口</text>
+<text x="300.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">身份 · 预算</text>
+</g>
+<g class="node" id="flowchart-RD2-0">
+<rect x="390.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="450.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD2 分流</text>
+<text x="450.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">global / local</text>
+</g>
+<g class="node" id="flowchart-RD3-0">
+<rect x="540.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="600.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD3 三路召回</text>
+<text x="600.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">KNN·BM25·PPR</text>
+</g>
+<g class="node" id="flowchart-RD4-0">
+<rect x="690.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="750.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD4 RRF+子图</text>
+<text x="750.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">k=60 · 1-2 跳</text>
+</g>
+<g class="node" id="flowchart-RD6-0">
+<rect x="840.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="900.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD6 GAT</text>
+<text x="900.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">可缺席</text>
+</g>
+<g class="node" id="flowchart-RD7-0">
+<rect x="990.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="1050.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD7 裁决装箱</text>
+<text x="1050.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">1500 token</text>
+</g>
+<g class="node" id="flowchart-RD9-0">
+<rect x="1140.0" y="810.0" width="120.0" height="40.0" rx="7" fill="#0F1E2E" stroke="#7FA1C4" stroke-width="1.6"/>
+<text x="1200.0" y="829.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">RD9 证据包</text>
+<text x="1200.0" y="844.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">M# · 降级码</text>
+</g>
+<g class="node" id="flowchart-OPS1-0">
+<rect x="1385.0" y="920.0" width="130.0" height="40.0" rx="7" fill="#2A1A20" stroke="#C98D96" stroke-width="1.4"/>
+<text x="1450.0" y="939.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">OPS 自检</text>
+<text x="1450.0" y="954.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">diag · 清理</text>
+</g>
+<g class="node" id="flowchart-D_TYPE-0">
+<rect x="975.0" y="1028.0" width="150.0" height="44.0" rx="7" fill="#1B2129" stroke="#7A8B99" stroke-width="1.2"/>
+<text x="1050.0" y="1049.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">types · enums</text>
+<text x="1050.0" y="1064.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">白名单判据</text>
+</g>
+<g class="node" id="flowchart-D_ID-0">
+<rect x="1255.0" y="1028.0" width="150.0" height="44.0" rx="7" fill="#1B2129" stroke="#7A8B99" stroke-width="1.2"/>
+<text x="1330.0" y="1049.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">identity · scope</text>
+<text x="1330.0" y="1064.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">canonical_key</text>
+</g>
+<g class="node" id="flowchart-D_ACC-0">
+<rect x="375.0" y="1028.0" width="150.0" height="44.0" rx="7" fill="#1B2129" stroke="#7A8B99" stroke-width="1.2"/>
+<text x="450.0" y="1049.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">access 规则</text>
+<text x="450.0" y="1064.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">越界即拒</text>
+</g>
+<g class="node" id="flowchart-S_SQL-0">
+<rect x="1675.0" y="672.0" width="150.0" height="56.0" rx="7" fill="#101B21" stroke="#4FB3A1" stroke-width="1.4"/>
+<text x="1750.0" y="699.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">moshi.db</text>
+<text x="1750.0" y="714.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">单写者 · WAL</text>
+</g>
+<g class="node" id="flowchart-S_FILE-0">
+<rect x="1675.0" y="777.0" width="150.0" height="46.0" rx="7" fill="#101B21" stroke="#4FB3A1" stroke-width="1.4"/>
+<text x="1750.0" y="799.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">归档 · 日志</text>
+<text x="1750.0" y="814.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">可重建 · append</text>
+</g>
+<g class="node" id="flowchart-PY-0">
+<rect x="1675.0" y="877.0" width="150.0" height="46.0" rx="7" fill="#0F171E" stroke="#3F5060" stroke-width="1.2" stroke-dasharray="6 4"/>
+<text x="1750.0" y="899.0" text-anchor="middle" font-size="12.5" fill="#E4EBF0">sidecar</text>
+<text x="1750.0" y="914.0" text-anchor="middle" font-size="10.5" fill="#93A7B4">/encode · /score</text>
+</g>
+<text x="132" y="1132" font-size="11.5" fill="#7F8C98">图例：</text>
+<line x1="190" y1="1128" x2="224" y2="1128" stroke="#6E7B87" stroke-width="1.5"/>
+<text x="232" y="1132" font-size="11" fill="#93A7B4">结构调用</text>
+<line x1="306" y1="1128" x2="340" y2="1128" stroke="#DFA24A" stroke-width="2.6"/>
+<text x="348" y="1132" font-size="11" fill="#93A7B4">写入主干</text>
+<line x1="422" y1="1128" x2="456" y2="1128" stroke="#4FB3A1" stroke-width="1.8"/>
+<text x="464" y="1132" font-size="11" fill="#93A7B4">读取主干</text>
+<line x1="538" y1="1128" x2="572" y2="1128" stroke="#55606B" stroke-width="1.4" stroke-dasharray="5 4"/>
+<text x="580" y="1132" font-size="11" fill="#93A7B4">触发 · 只读 · 可缺席</text>
+<line x1="762" y1="1128" x2="796" y2="1128" stroke="#7A8B99" stroke-width="1.2" stroke-dasharray="2 4"/>
+<text x="804" y="1132" font-size="11" fill="#93A7B4">编译期依赖（无箭头）</text>
+<text x="132" y="1154" font-size="11" fill="#6C7A86">注：能力节点第二行是它的机理落点；对接口第二行是它能调的能力；会话文件由调度直接读，不经过接入层。</text>
+</g>
+</svg>
     </div>
   </div>
-  <p class="sub">图例：粗箭头 = 主干（出链蓝、入链琥珀）；细实线 = 依赖；虚线 = 触发、只读或可降级。<b>横挂点只有四处</b>：L4 方言挂 L3 装配、L3 挂 L2 用例、L2 挂 L1 机理、L5 的宿主会话文件只读尾随进 L4 会话源方言、随块事件进 L1 入链；除此之外任何跨层直连都算越界。L1 两条主干由 <code>core/{read,write,lifecycle,archive,collect,parse,hook,diag,ops}</code> 承担，逐段细节见图 2 / 图 3。</p>
+  <p class="sub">图例：粗箭头 = 主干（出链蓝、入链琥珀）；细实线 = 依赖；虚线 = 触发、只读或可降级。<b>横挂点只有四处</b>：L5 宿主 → L4 接入面、L4 接入面 → L3 对接口、L3 对接口统一汇入服务装配、服务装配 → L2 能力、L2 能力 → L1 段落。会话文件是例外：它<b>不经过接入层</b>——scheduler 定时读它，collectRunner 扫出块，collect 落到 WR0；除此之外任何跨层直连都算越界。L1 两条主干由 <code>core/{read,write,lifecycle,archive,collect,parse,hook,diag,ops}</code> 承担，逐段细节见图 2 / 图 3。</p>
   <div class="tblwrap"><table>
     <colgroup><col style="width:110px"><col><col></colgroup>
     <thead><tr><th>层</th><th>唯一的职责</th><th>不许做的事</th></tr></thead>
     <tbody>
       <tr><td class="up">L5 宿主</td><td>产生对话、发起请求；Magpie / Claude Code / DSH / CLI / 浏览器，外加宿主会话文件（CC/DSH 写，我们只读尾随）</td><td>不直连 daemon 之外的任何东西</td></tr>
-      <tr><td class="up">L4 方言</td><td>协议翻译、渲染、能力自报（caps）；hook 还要守 800ms 预算</td><td>不组装参数、不查仓储、不写事实</td></tr>
+      <tr><td class="up">L4 接入层</td><td>协议翻译、渲染、能力自报（caps）；hook 还要守 800ms 预算</td><td>不组装参数、不查仓储、不写事实</td></tr>
       <tr><td class="mdl">L3 装配</td><td>起进程、注入依赖、排调度、发权限；<code>main</code> 是唯一组合根</td><td>不含业务判断，不写 SQL</td></tr>
       <tr><td class="mdl">L2 用例</td><td>一个能力一个函数：参数、身份、预算、降级码、审计都在这里定</td><td>不实现算法，不拼 SQL，不做渲染</td></tr>
       <tr><td class="up">L1 机理</td><td>core：两条主干各一条流水线——出链（入口·预算→分流→三路召回→RRF+子图→模型→裁决+装箱→证据包）与入链（扫会话→脱敏→隔离→episode→解析→消解·幂等·冲突→事实图→投影）</td><td>不读 config，不认 caller，不认识协议</td></tr>
@@ -785,25 +1016,25 @@ var NODE_INFO = {
   H_TERM:{k:"宿主",t:"终端",d:"人直接敲命令的地方；CLI 的输出受窗口约束，退出码是契约的一部分。",m:{"方言":"CLI","约束":"可交互、可长任务"}},
   H_WEB:{k:"宿主",t:"浏览器",d:"只看不改的外壳：所有数据都经 REST 取，页面本身不持有业务逻辑。",m:{"方言":"REST","载体":"/ui 六页"}},
 
-  D_HOOK:{k:"方言",t:"hook",d:"协议壳：moshi-hook/1 的解析、caps 自报、预算裁剪、注入渲染、失败降级都在这里；不含任何检索或写入逻辑。",m:{"协议":"moshi-hook/1","接入":"recall · capture","预算":"800/600ms"}},
-  D_MCP:{k:"方言",t:"MCP",d:"结构化工具方言：4 个工具 2 个协议资源；把工具参数翻译成用例入参，把证据包渲染成编号列表。",m:{"工具":"query · annotate · feedback · correct","接入":"recall · annotate · correct · browse"}},
-  D_REST:{k:"方言",t:"REST",d:"HTTP 方言：分页、token 鉴权、更新语义；只翻译，不做业务判断。",m:{"前缀":"/api","鉴权":"X-Moshi-Token"}},
-  D_CLI:{k:"方言",t:"CLI",d:"命令行方言：退出码、可离线、可长时间跑；同一批用例，另一套输出。",m:{"接入":"import · maintain.* · browse","约束":"退出码稳定"}},
-  D_UI:{k:"方言",t:"UI 页面",d:"浏览器里的壳，只经 REST 拿数据；不许自己拼查询，也不许直连 daemon 的其它端点。",m:{"依赖":"只经 REST","页面":"图谱·记忆·待办·归档·接入·设置"}},
-  D_SESS:{k:"方言",t:"会话源 · CC/DSH JSONL",d:"把宿主会话文件翻译成事件：按游标只读尾随、按各家格式归一，永不改宿主文件；它是采集的入口方言，不是存储。",m:{"来源":"~/.claude/projects · DSH","模式":"只读尾随"}},
+  D_HOOK:{k:"接入面",t:"hook",d:"协议壳：moshi-hook/1 的解析、caps 自报、预算裁剪、注入渲染、失败降级都在这里；不含任何检索或写入逻辑。",m:{"协议":"moshi-hook/1","接入":"recall · capture","预算":"800/600ms"}},
+  D_MCP:{k:"接入面",t:"MCP",d:"结构化工具方言：4 个工具 2 个协议资源；把工具参数翻译成用例入参，把证据包渲染成编号列表。",m:{"工具":"query · annotate · feedback · correct","接入":"recall · annotate · correct · browse"}},
+  D_REST:{k:"接入面",t:"REST",d:"HTTP 方言：分页、token 鉴权、更新语义；只翻译，不做业务判断。",m:{"前缀":"/api","鉴权":"X-Moshi-Token"}},
+  D_CLI:{k:"接入面",t:"CLI",d:"命令行方言：退出码、可离线、可长时间跑；同一批用例，另一套输出。",m:{"接入":"import · maintain.* · browse","约束":"退出码稳定"}},
+  D_UI:{k:"接入面",t:"UI 页面",d:"浏览器里的壳，只经 REST 拿数据；不许自己拼查询，也不许直连 daemon 的其它端点。",m:{"依赖":"只经 REST","页面":"图谱·记忆·待办·归档·接入·设置"}},
+  D_SESS:{k:"接入面",t:"会话源 · CC/DSH JSONL",d:"把宿主会话文件翻译成事件：按游标只读尾随、按各家格式归一，永不改宿主文件；它是采集的入口方言，不是存储。",m:{"来源":"~/.claude/projects · DSH","模式":"只读尾随"}},
 
   A_SERVERS:{k:"装配",t:"服务装配",d:"把 http / mcp / hook 三个服务装起来，注入 db、sidecar client、cache、trace；只有这一层碰得到 infra 的具体实现。",m:{"文件":"app/main.ts · http/server.ts · mcp/server.ts","职责":"组合根"}},
   A_CLI:{k:"装配",t:"CLI 装配",d:"解析 argv、装配依赖、把命令映射到用例，再把结果渲染成文本或退出码。",m:{"文件":"app/cli/*","职责":"命令 → 用例"}},
   A_SCHED:{k:"装配",t:"scheduler",d:"只管「什么时候该跑」：cron、链尾 after、事件唤醒、串行队列与优先级；不知道任务内容。",m:{"文件":"app/jobs/scheduler.ts","性质":"触发器"}},
   A_RUNNER:{k:"装配",t:"runner",d:"只管「怎么跑」：取批、超时、重试、进度回调；不含业务语义。",m:{"文件":"app/*Runner.ts","性质":"执行器"}},
 
-  U_RECALL:{k:"用例",t:"recall",d:"一次召回的唯一边界：定 caller 与预算、解析身份与 scope、调 core/read 管线、装箱、把降级码翻译成方言能表达的东西。",m:{"目标位置":"app/services/recall.ts","现状":"逻辑散在 hook/service.ts 与 mcp/query.ts"}},
-  U_CAPTURE:{k:"用例",t:"capture",d:"把一轮对话变成证据链里的一行：归一、清洗、脱敏、隔离筛查、落 episode，然后唤醒队列。",m:{"目标位置":"app/services/capture.ts","下游":"core/write/ingest"}},
-  U_ANNOTATE:{k:"用例",t:"annotate",d:"把显式标注写成 annotation 并入队；不直接写事实图，除非显式开了直写闸门。",m:{"目标位置":"app/services/annotate.ts","闸门":"mcp.allow_direct_write"}},
-  U_CORRECT:{k:"用例",t:"correct",d:"人工纠正的唯一实现：改置信、改状态、作废、留审计；MCP 与 REST 两条路都走它。",m:{"目标位置":"app/services/correct.ts","现状":"mcp/correct.ts 与 PATCH /api/facts/:id 两套"}},
-  U_BROWSE:{k:"用例",t:"browse.*",d:"只读浏览：事实列表、图谱邻域、时间线；分页与字段白名单在这里定，方言只负责摆盘。",m:{"目标位置":"app/services/browse.ts","现状":"13/16 个 REST 路由直连仓储"}},
-  U_MAINTAIN:{k:"用例",t:"maintain.*",d:"后台维护的集合：harvest、schema、community、export、layout、backup、retention 七个动作，各是一个函数。",m:{"目标位置":"app/services/maintain/*","触发":"cron · 链尾 · 事件"}},
-  U_IMPORT:{k:"用例",t:"import",d:"批量导入：读宿主会话文件、适配成事件、走同一条写入主干；可同步跑完也可只入队。",m:{"目标位置":"app/services/import.ts","上游":"core/collect + parse"}},
+  U_RECALL:{k:"能力",t:"recall",d:"一次召回的唯一边界：定 caller 与预算、解析身份与 scope、调 core/read 管线、装箱、把降级码翻译成方言能表达的东西。",m:{"目标位置":"app/services/recall.ts","现状":"逻辑散在 hook/service.ts 与 mcp/query.ts"}},
+  U_CAPTURE:{k:"能力",t:"capture",d:"把一轮对话变成证据链里的一行：归一、清洗、脱敏、隔离筛查、落 episode，然后唤醒队列。",m:{"目标位置":"app/services/capture.ts","下游":"core/write/ingest"}},
+  U_ANNOTATE:{k:"能力",t:"annotate",d:"把显式标注写成 annotation 并入队；不直接写事实图，除非显式开了直写闸门。",m:{"目标位置":"app/services/annotate.ts","闸门":"mcp.allow_direct_write"}},
+  U_CORRECT:{k:"能力",t:"correct",d:"人工纠正的唯一实现：改置信、改状态、作废、留审计；MCP 与 REST 两条路都走它。",m:{"目标位置":"app/services/correct.ts","现状":"mcp/correct.ts 与 PATCH /api/facts/:id 两套"}},
+  U_BROWSE:{k:"能力",t:"browse.*",d:"只读浏览：事实列表、图谱邻域、时间线；分页与字段白名单在这里定，方言只负责摆盘。",m:{"目标位置":"app/services/browse.ts","现状":"13/16 个 REST 路由直连仓储"}},
+  U_MAINTAIN:{k:"能力",t:"maintain.*",d:"后台维护的集合：harvest、schema、community、export、layout、backup、retention 七个动作，各是一个函数。",m:{"目标位置":"app/services/maintain/*","触发":"cron · 链尾 · 事件"}},
+  U_IMPORT:{k:"能力",t:"import",d:"批量导入：读宿主会话文件、适配成事件、走同一条写入主干；可同步跑完也可只入队。",m:{"目标位置":"app/services/import.ts","上游":"core/collect + parse"}},
 
 
   D_TYPE:{k:"不变量",t:"types · enums · invariants",d:"所有共享类型、枚举与不变量断言；任何两层之间共享的东西只能下沉到这里。",m:{"文件":"domain/*","规则":"无 IO、无依赖"}},
@@ -894,8 +1125,19 @@ var NODE_INFO = {
   WR7:{k:"入链",t:"事实图",d:"落 fact / edge 并算强度；这是系统里唯一可写的事实层，任何入口都不得绕过它直写。",m:{"红线":"fact 表唯一可写"}},
   WR8:{k:"入链",t:"投影",d:"链尾巩固、社区划分、归档 Markdown、图布局：全是派生物，坏了可以整批重跑。",m:{"模块":"lifecycle · archive · layout"}},
   OPS1:{k:"运维",t:"自检 · 清理",d:"diag 探针与 ops 清理：迁移校验、污染清理、对账；只检查与清理，不改语义。",m:{"模块":"core/diag · core/ops"}},
-  U_DIAG:{k:"用例",t:"diag·ops",d:"把自检与清理包装成用例：doctor 体检、迁移校验、污染清理都从这里进，供 CLI 与 REST 共用。",m:{"目标位置":"app/services/diag.ts"}},
-  U_ACCESS:{k:"用例",t:"access·caller",d:"身份与能力登记：把 caller 种类、scope、预算、caps 收成一处，再注入给 recall 等用例。",m:{"目标位置":"app/access/registry.ts"}},
+  U_DIAG:{k:"能力",t:"diag·ops",d:"把自检与清理包装成用例：doctor 体检、迁移校验、污染清理都从这里进，供 CLI 与 REST 共用。",m:{"目标位置":"app/services/diag.ts"}},
+  U_ACCESS:{k:"能力",t:"access·caller",d:"身份与能力登记：把 caller 种类、scope、预算、caps 收成一处，再注入给 recall 等用例。",m:{"目标位置":"app/access/registry.ts"}},
+  A_MAIN:{k:"装配",t:"组合根 main",d:"进程启动的唯一入口：读配置、拿单实例锁、决定这次是守护进程、CLI 还是 MCP stdio，然后把具体依赖注入给下面的对接口与执行器。它不承载业务判断。",m:{"文件":"app/main.ts · config.ts · lock.ts","职责":"装配与生命周期"}},
+  A_HOOK:{k:"对接口",t:"hook 口",d:"只认 moshi-hook/1：解析信封、校验 caps 自报、裁预算、调 recall / capture，再把结果渲染成注入文本或 inject:false。协议细节不出这个节点。",m:{"接入":"recall · capture","预算":"800 / 600ms","文件":"app/hook/*"}},
+  A_MCP:{k:"对接口",t:"MCP 口",d:"tools/call 的 schema 校验与参数归一，把工具名映射到能力，把证据包渲染成编号列表；不做检索本身。",m:{"接入":"recall · capture · annotate","工具":"query · annotate · feedback · correct"}},
+  A_REST:{k:"对接口",t:"REST 口",d:"/api/* 的路由、DTO、分页与 token；业务一律下沉到能力。现状是路由直接注入 db 直查 SQLite，属目标态要收掉的债。",m:{"接":["browse · correct · annotate"],"债":"routes 直注入 db"}},
+  A_CLI:{k:"对接口",t:"CLI 口",d:"argv 解析、命令表、退出码与文本渲染；与 hook / MCP / REST 同构，一律经服务装配，不许在命令里直呼 core/write 或 sqlite。",m:{"接入":"import · recall · maintain","债":"import.ts 绕过装配"}},
+  A_UI:{k:"对接口",t:"UI 口",d:"托管 src/app/ui/dist 构建产物与一次性首屏 token；页面自身不新增能力，数据全部走 REST 口。",m:{"接入":"browse · correct · annotate","文件":"app/http/server.ts · staticRoutes"}},
+  A_SERVE:{k:"装配",t:"服务装配 · 唯一收敛口",d:"所有入口在此收口：注入 caller、scope、budgetMs、trace，再由它决定这次请求能落到哪个能力。能力本身不认协议，协议知识只在上面的对接口。",m:{"注入":"caller · scope · budget · trace","约束":"不许绕过它直呼 core"}},
+  A_COLL:{k:"执行器",t:"collectRunner",d:"由 scheduler 按 collect.interval_ms 驱动，只跑 scanAllSources：解析、入队、预算都在 core/collect；它不是能力，也不做业务判断。",m:{"文件":"app/collectRunner.ts","驱动":"app/jobs/scheduler.ts"}},
+  A_RUN:{k:"执行器",t:"jobRunner",d:"按队列串行执行 maintain 类作业：取批、超时、重试、进度回调；不做语义判断，不许绕过能力直写仓储。",m:{"文件":"app/*Runner.ts","性质":"执行器"}},
+  U_COLLECT:{k:"能力",t:"collect",d:"扫描会话文件新块的唯一入口；不是人机调用，只由调度触发，落点仍是 WR0，所以它和 capture 共用同一条写链路。",m:{"触发":"scheduler → collectRunner","落点":"WR0"}},
+  PY:{k:"进程外",t:"Python sidecar",d:"模型运行时，不是存储：/encode 出 512 维向量，/score 跑 GAT；懒启、熔断，缺席整体降级为符号分。",m:{"接口":"/encode · /score","降级":"no_sidecar"}},
   X_PY:{k:"进程外",t:"Python sidecar",d:"模型运行时，不是存储：/encode 出 512 维向量，/score 跑 GAT；懒启、熔断、缺席则整体降级。",m:{"接口":"/encode · /score","降级":"no_sidecar"}},
 };
 
@@ -1119,6 +1361,9 @@ var NODE_INFO = {
     }, true);
   })();
 
+  document.querySelectorAll(".canvas[data-static]").forEach(function(c, i){
+    if(c.querySelector("svg")) postProcess(c, i + 1);
+  });
   var list = Array.prototype.slice.call(document.querySelectorAll(".mermaid"));
   (async function(){
     for(var i=0;i<list.length;i++){
