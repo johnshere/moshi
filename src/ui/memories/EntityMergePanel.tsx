@@ -81,7 +81,7 @@ const buttonStyle: CSSProperties = {
   background: 'var(--color-bg-hover)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
+  borderRadius: 8,
   fontSize: 11,
   padding: '3px 8px',
   cursor: 'pointer',
@@ -92,7 +92,7 @@ const inputStyle: CSSProperties = {
   background: 'var(--color-bg-base)',
   border: '1px solid var(--color-border-strong)',
   color: 'var(--color-text-primary)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '5px 8px',
   fontSize: 12,
 };
@@ -239,7 +239,7 @@ export function EntityMergePanel(): ReactElement {
       {rows.length === 0 ? (
         <div style={{ color: 'var(--color-text-muted)', padding: '8px 2px' }}>没有结果</div>
       ) : (
-        <div style={{ marginTop: 8, border: '1px solid var(--color-border-subtle)', borderRadius: 4 }}>
+        <div style={{ marginTop: 8, border: '1px solid var(--color-border-subtle)', borderRadius: 8 }}>
           {rows.map((row) => (
             <div key={row.entity_id} data-testid="entity-merge-row" style={rowStyle}>
               <span style={{ color: 'var(--color-text-primary)' }}>{row.canonical_name}</span>
@@ -304,7 +304,7 @@ export function EntityMergePanel(): ReactElement {
       </div>
 
       {preview === null ? null : (
-        <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: 'var(--color-bg-base)', padding: 8, borderRadius: 4 }}>
+        <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: 'var(--color-bg-base)', padding: 8, borderRadius: 8 }}>
           <div>
             可合并：{preview.can_merge ? '是' : `否（${preview.blocking_reason ?? '未知原因'}）`} · 将移动事实{' '}
             {preview.will_move.facts} · 边 {preview.will_move.edges} · 别名 {preview.will_move.aliases} · 冲突{' '}

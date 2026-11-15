@@ -1,66 +1,134 @@
 /**
- * P2-19-B 视觉地基：深空蓝紫底 + 青蓝霓虹强调（D-133）。
+ * 视觉地基（D-133 的改版稿）：夜/日两套令牌 + 一套克制的外壳。
  *
- * 所有颜色必须从这里以 `var(--color-*)` 消费；组件里禁止裸 hex/rgba。
- * token 名是契约：后续视觉卡按这里的名字取色，不要另造同义 token。
+ * 规矩不变：颜色只能从这里以 `var(--color-*)` 消费，组件里不写裸 hex/rgba。
+ * token 名是契约——组件里已经在用的名字保持原义，只换值；新增的只有
+ * `accent-ink`（贴在强调色底上的字）与 `radius-pill`。
+ *
+ * 主题由 `<html data-theme="light|dark">` 决定（见 src/ui/theme.ts）；
+ * 明暗两套都只改值不改名，所以任何组件都不需要知道当前是哪套。
  */
 @import "tailwindcss";
 
 @theme {
-  /* 背景：由深到浅三层。base=整页，raised=面板/卡片，overlay=浮层/HUD/输入框 */
-  --color-bg-base: #05070d;
-  --color-bg-raised: #0b1220;
-  --color-bg-overlay: #0f172a;
-  --color-bg-hover: #1e293b;
-  --color-bg-active: #16233a;
+  /* 背景：base=整页，raised=面板/卡片，overlay=浮层/HUD/输入框 */
+  --color-bg-base: #0b0c0e;
+  --color-bg-raised: #121316;
+  --color-bg-overlay: #16181d;
+  --color-bg-hover: #1b1e24;
+  --color-bg-active: #1e2229;
 
   /* 描边：subtle 分隔线，strong 控件/面板边界 */
-  --color-border-subtle: #1f2937;
-  --color-border-strong: #334155;
+  --color-border-subtle: rgb(255 255 255 / 0.08);
+  --color-border-strong: rgb(255 255 255 / 0.16);
 
   /* 文字：primary 标题，secondary 正文，muted 说明，faint 极弱提示 */
-  --color-text-primary: #f8fafc;
-  --color-text-secondary: #cbd5e1;
-  --color-text-muted: #64748b;
-  --color-text-faint: #475569;
+  --color-text-primary: #e9ebee;
+  --color-text-secondary: #c4c7cc;
+  --color-text-muted: #8d919a;
+  --color-text-faint: #5c6068;
 
-  /* 强调：accent=青蓝霓虹（主），accent-alt=蓝紫（辅），accent-soft=高亮文字 */
-  --color-accent: #22d3ee;
-  --color-accent-soft: #7dd3fc;
-  --color-accent-dim: #0e7490;
-  --color-accent-alt: #8b5cf6;
-  --color-glow: rgb(34 211 238 / 0.55);
+  /* 强调：accent 只给「你在哪」和「可以往下走」两处用 */
+  --color-accent: #0a84ff;
+  --color-accent-soft: #7cbdff;
+  --color-accent-dim: #1b4f82;
+  --color-accent-alt: #5e5ce6;
+  --color-accent-ink: #08111c;
+  --color-glow: rgb(10 132 255 / 0.4);
 
   /* 语义色：状态/提示；*-soft 文字、*-dim 描边、*-bg 底色 */
-  --color-success: #34d399;
-  --color-success-soft: #86efac;
-  --color-success-dim: #166534;
-  --color-success-bg: #052e1b;
+  --color-success: #32d74b;
+  --color-success-soft: #8be59a;
+  --color-success-dim: #1e6a2e;
+  --color-success-bg: rgb(50 215 75 / 0.12);
 
-  --color-warning: #f59e0b;
-  --color-warning-soft: #fbbf24;
-  --color-warning-dim: #a16207;
-  --color-warning-bg: #422006;
+  --color-warning: #ff9f0a;
+  --color-warning-soft: #ffc46b;
+  --color-warning-dim: #8a4a00;
+  --color-warning-bg: rgb(255 159 10 / 0.13);
 
-  --color-danger: #f87171;
-  --color-danger-soft: #fca5a5;
-  --color-danger-dim: #7f1d1d;
-  --color-danger-bg: #2a0f12;
+  --color-danger: #ff453a;
+  --color-danger-soft: #ff9a92;
+  --color-danger-dim: #7a1b14;
+  --color-danger-bg: rgb(255 69 58 / 0.13);
 
-  /* 链接/信息类蓝色（既有交互色，收敛为一组） */
-  --color-info: #60a5fa;
-  --color-info-strong: #3b82f6;
-  --color-info-soft: #93c5fd;
-  --color-info-dim: #1d4ed8;
-  --color-info-bg: #1e3a8a;
-  --color-info-text: #e0e7ff;
+  /* 链接/信息类蓝（既有交互色，收敛为一组） */
+  --color-info: #64a8ff;
+  --color-info-strong: #0a84ff;
+  --color-info-soft: #a9ceff;
+  --color-info-dim: #1c4c8a;
+  --color-info-bg: rgb(100 168 255 / 0.12);
+  --color-info-text: #e7f0ff;
 
-  /* 非颜色 token */
-  --radius-panel: 12px;
-  --radius-control: 4px;
-  --shadow-panel: 0 18px 50px rgb(0 0 0 / 0.5);
-  --shadow-float: 0 18px 60px rgb(0 0 0 / 0.55);
-  --shadow-menu: 0 8px 24px rgb(0 0 0 / 0.45);
+  /* 画布舞台：外壳可以是亮的，画布始终深场（加法混合的点和线在浅底会发白） */
+  --color-stage-base: #0b0c0e;
+  --color-stage-raised: #121316;
+  --color-stage-text: #e9ebee;
+  --color-stage-grid: rgb(255 255 255 / 0.08);
+
+  /* 非颜色 token：三个圆角角色 + 两层阴影（阴影带色，不用纯黑） */
+  --radius-panel: 20px;
+  --radius-control: 8px;
+  --radius-pill: 999px;
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 18px 44px -20px rgb(0 0 0 / 0.72);
+  --shadow-float: 0 1px 0 rgb(255 255 255 / 0.05) inset, 0 24px 60px -24px rgb(0 0 0 / 0.8);
+  --shadow-menu: 0 10px 28px -14px rgb(0 0 0 / 0.66);
+}
+
+/* 明亮主题：只换值，不改名。同一块面积里仍然只有一个强调色。 */
+html[data-theme='light'] {
+  --color-bg-base: #f1f2f4;
+  --color-bg-raised: #fcfcfd;
+  --color-bg-overlay: #fefefe;
+  --color-bg-hover: #edeef1;
+  --color-bg-active: #e4e6ea;
+
+  --color-border-subtle: rgb(13 15 19 / 0.1);
+  --color-border-strong: rgb(13 15 19 / 0.2);
+
+  --color-text-primary: #0d0f13;
+  --color-text-secondary: #3a3f45;
+  --color-text-muted: #6b7076;
+  --color-text-faint: #85888f;
+
+  --color-accent: #0071e3;
+  --color-accent-soft: #3f95f0;
+  --color-accent-dim: #9cc4ea;
+  --color-accent-alt: #4b48d6;
+  --color-accent-ink: #ffffff;
+  --color-glow: rgb(0 113 227 / 0.28);
+
+  --color-success: #1b7f38;
+  --color-success-soft: #2b9d4c;
+  --color-success-dim: #b7e3c1;
+  --color-success-bg: rgb(27 127 56 / 0.1);
+
+  --color-warning: #a85f00;
+  --color-warning-soft: #c97a12;
+  --color-warning-dim: #f0ce9b;
+  --color-warning-bg: rgb(255 159 10 / 0.14);
+
+  --color-danger: #c0271d;
+  --color-danger-soft: #e0503f;
+  --color-danger-dim: #f2b7b2;
+  --color-danger-bg: rgb(255 69 58 / 0.1);
+
+  --color-info: #0b63c5;
+  --color-info-strong: #0071e3;
+  --color-info-soft: #0a5dbd;
+  --color-info-dim: #a9c8e8;
+  --color-info-bg: rgb(0 113 227 / 0.1);
+  --color-info-text: #0a3e77;
+
+  /* 亮色外壳 + 深场画布：舞台比暗色主题略提一档，避免和外壳对比过硬 */
+  --color-stage-base: #141519;
+  --color-stage-raised: #1a1c22;
+  --color-stage-text: #e9ebee;
+  --color-stage-grid: rgb(255 255 255 / 0.1);
+
+  --shadow-panel: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 18px 40px -24px rgb(13 15 19 / 0.28);
+  --shadow-float: 0 1px 0 rgb(255 255 255 / 0.9) inset, 0 22px 54px -26px rgb(13 15 19 / 0.34);
+  --shadow-menu: 0 10px 26px -16px rgb(13 15 19 / 0.28);
 }
 
 html,
@@ -72,8 +140,13 @@ body,
 body {
   margin: 0;
   background: var(--color-bg-base);
-  color: var(--color-text-primary);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: var(--color-text-secondary);
+  font-family: 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Segoe UI Variable Text', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
 *,
@@ -82,49 +155,56 @@ body {
   box-sizing: border-box;
 }
 
+/* 细滚动条：系统默认的宽槽在暗场里像一条白缝 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
- * P2-19-B 外壳与 HUD 动效（D-133）
+ * 外壳：一块离纸面的板材 + 一条常驻顶栏。
  *
- * 只做 DOM 层：玻璃面板、指示条、呼吸灯、数值淡出、加载 spinner。
+ * 只做 DOM 层：面板、指示条、呼吸灯、数值淡出、加载 spinner。
  * 不触碰 graph 画布与 draw call；所有动画在 prefers-reduced-motion 下停用。
- * 颜色一律走 @theme token 或 color-mix，不写裸 hex/rgba。
  * ───────────────────────────────────────────────────────────────────────── */
 
 .moshi-glass {
-  background: color-mix(in srgb, var(--color-bg-raised) 68%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: color-mix(in srgb, var(--color-bg-raised) 86%, transparent);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
   border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
 }
 
 /* 左侧导航：整块玻璃面板；外层 aside 自身同时是定位容器 */
 .moshi-nav {
-  background: color-mix(in srgb, var(--color-bg-raised) 66%, transparent);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  background: color-mix(in srgb, var(--color-bg-raised) 74%, transparent);
+  backdrop-filter: blur(18px) saturate(120%);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
   border-right: 1px solid var(--color-border-subtle);
 }
 
+/* 选中项：左侧 2px 竖条 + 一层浅底；不再用霓虹发光 */
 .moshi-nav-item {
   position: relative;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition: background-color 140ms ease, color 140ms ease;
 }
 
 .moshi-nav-item::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 6px;
-  bottom: 6px;
+  top: 7px;
+  bottom: 7px;
   width: 2px;
   border-radius: 2px;
   background: transparent;
-  transition: background-color 120ms ease, box-shadow 120ms ease;
+  transition: background-color 140ms ease;
 }
 
 .moshi-nav-item[data-active='true']::before {
   background: var(--color-accent);
-  box-shadow: 0 0 8px var(--color-glow), 0 0 2px var(--color-accent);
 }
 
 .moshi-nav-item[data-active='true'] {
@@ -133,21 +213,26 @@ body {
 }
 
 .moshi-nav-item:hover {
-  background: color-mix(in srgb, var(--color-bg-hover) 70%, transparent);
+  background: color-mix(in srgb, var(--color-bg-hover) 80%, transparent);
 }
 
-/* 顶栏搜索：聚焦时 accent 边框 + glow 外发光（边框由组件内联给出，过渡在这里） */
+/* 二级子项：树线压到 1px 的 10% 墨，不参与选中态 */
+.moshi-nav-child::before {
+  display: none;
+}
+
+/* 顶栏搜索：聚焦时 accent 边框 + 一圈很浅的外发光（过渡在这里） */
 .moshi-search {
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
 }
 
-/* 待办角标：N>0 警告色调 + 微光；N=0 中性灰静默（不抖动、不发光） */
+/* 待办角标：N>0 用「浅底 + 深字」两级，N=0 静默 */
 .moshi-inbox-badge {
-  transition: border-color 120ms ease, box-shadow 120ms ease, color 120ms ease;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
 }
 
 .moshi-inbox-badge[data-count='active'] {
-  box-shadow: 0 0 10px color-mix(in srgb, var(--color-warning) 28%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 /* 三灯：ok 常亮；warn 2.4s 呼吸；off/failed 保持原样 */
@@ -170,38 +255,63 @@ body {
   }
   50% {
     opacity: 1;
-    box-shadow: 0 0 6px var(--color-warning-soft);
+    box-shadow: 0 0 5px color-mix(in srgb, var(--color-warning-soft) 70%, transparent);
   }
 }
 
 /* 首开提示：玻璃卡片 + 顶部一条细引导线（不抢 HUD） */
 .moshi-firstrun {
-  backdrop-filter: blur(12px) saturate(130%);
-  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
   box-shadow: var(--shadow-menu);
 }
 
 .moshi-firstrun::before {
   content: '';
   position: absolute;
-  left: 12px;
-  right: 12px;
+  left: 14px;
+  right: 14px;
   top: 0;
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-  opacity: 0.55;
+  opacity: 0.35;
 }
 
 /* HUD：玻璃面板，替代原来的纯渐变（表格态保持透明，避免盖住表格） */
 .moshi-hud {
-  backdrop-filter: blur(12px) saturate(130%);
-  -webkit-backdrop-filter: blur(12px) saturate(130%);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-bg-overlay) 58%, transparent),
+    color-mix(in srgb, var(--color-bg-base) 34%, transparent)
+  );
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+}
+
+.moshi-hud[data-plain='true'] {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 亮色外壳 + 深场画布：HUD 落在画布上，底要够实，否则深色字压在深底上读不清 */
+html[data-theme='light'] .moshi-hud {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-bg-base) 94%, transparent),
+    color-mix(in srgb, var(--color-bg-base) 84%, transparent)
+  );
+}
+
+html[data-theme='light'] .moshi-hud[data-plain='true'] {
+  background: transparent;
 }
 
 /* HUD 数值：等宽 + tabular-nums；变化时 150ms 高亮淡出 */
 .moshi-value {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
 }
 
 .moshi-value-flash {
@@ -211,20 +321,18 @@ body {
 @keyframes moshi-flash {
   from {
     color: var(--color-accent-soft);
-    text-shadow: 0 0 8px var(--color-glow);
   }
   to {
     color: var(--color-text-primary);
-    text-shadow: none;
   }
 }
 
 /* 证据链徽章：直击 / 1 跳 / 2+ 跳 */
 .moshi-trace-badge {
-  padding: 0 6px;
-  border: 1px solid color-mix(in srgb, currentColor 32%, transparent);
-  border-radius: 999px;
-  line-height: 1.5;
+  padding: 0 7px;
+  border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+  border-radius: var(--radius-pill);
+  line-height: 1.6;
 }
 
 /* HUD 右上加载 spinner（纯 CSS，完成即卸载） */
@@ -246,12 +354,25 @@ body {
   }
 }
 
+/* 键盘焦点：只在键盘走查时出现，鼠标点击不画 */
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* 主题切换的过渡：只给底色和文字，不给布局 */
+html[data-theme] {
+  transition: background-color 180ms ease;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .moshi-nav-item,
   .moshi-nav-item::before,
   .moshi-search,
   .moshi-inbox-badge,
-  .moshi-light-dot {
+  .moshi-light-dot,
+  body,
+  html[data-theme] {
     transition: none;
   }
   .moshi-light-dot[data-state='warn'],
@@ -259,4 +380,13 @@ body {
   .moshi-spinner {
     animation: none;
   }
+}
+
+/* 画布底部的操作提示：直接压在深场画布上，亮色主题下必须是浅字 */
+.moshi-stage-note {
+  color: var(--color-text-faint);
+}
+
+html[data-theme='light'] .moshi-stage-note {
+  color: rgb(255 255 255 / 0.62);
 }

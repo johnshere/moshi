@@ -96,7 +96,7 @@ async function downloadAllExport(): Promise<string> {
 const panelStyle: CSSProperties = {
   background: 'var(--color-bg-raised)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 6,
+  borderRadius: 8,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
@@ -109,7 +109,7 @@ const buttonStyle: CSSProperties = {
   background: 'var(--color-bg-hover)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '6px 12px',
   fontSize: 12,
   cursor: 'pointer',
@@ -126,7 +126,7 @@ const inputStyle: CSSProperties = {
   background: 'var(--color-bg-overlay)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '5px 8px',
   fontSize: 12,
 };
@@ -143,7 +143,7 @@ const noticeStyle: CSSProperties = {
   color: 'var(--color-success-soft)',
   background: 'var(--color-success-bg)',
   border: '1px solid var(--color-success-dim)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '6px 8px',
 };
 
@@ -151,7 +151,7 @@ const errorStyle: CSSProperties = {
   color: 'var(--color-danger-soft)',
   background: 'var(--color-danger-bg)',
   border: '1px solid var(--color-danger-dim)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '6px 8px',
 };
 
@@ -319,7 +319,7 @@ export function PrivacyPanel(): ReactElement {
           style={{
             background: 'var(--color-bg-overlay)',
             border: '1px solid var(--color-danger-dim)',
-            borderRadius: 6,
+            borderRadius: 8,
             padding: '10px 12px',
             display: 'flex',
             flexDirection: 'column',

@@ -111,7 +111,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
             zIndex: 9,
             background: 'var(--color-bg-overlay)',
             border: '1px solid var(--color-border-strong)',
-            borderRadius: 5,
+            borderRadius: 8,
             color: 'var(--color-text-secondary)',
             fontSize: 11,
             padding: '5px 9px',

@@ -63,7 +63,7 @@ async function postRebuild(target: string, dryRun: boolean): Promise<RebuildResu
 const panelStyle: CSSProperties = {
   background: 'var(--color-bg-raised)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 6,
+  borderRadius: 8,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
@@ -76,7 +76,7 @@ const buttonStyle: CSSProperties = {
   background: 'var(--color-bg-hover)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '6px 12px',
   fontSize: 12,
   cursor: 'pointer',
@@ -137,7 +137,7 @@ export function MaintenancePanel(): ReactElement {
       {error !== null && (
         <div
           data-testid="maintenance-error"
-          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 8, padding: '6px 8px' }}
         >
           {error}
         </div>
@@ -179,7 +179,7 @@ export function MaintenancePanel(): ReactElement {
                 fontSize: 11,
                 background: 'var(--color-bg-overlay)',
                 border: '1px solid var(--color-border-subtle)',
-                borderRadius: 4,
+                borderRadius: 8,
                 padding: '6px 8px',
                 overflow: 'auto',
               }}

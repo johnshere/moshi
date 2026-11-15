@@ -22,7 +22,12 @@ export type PaletteToken =
   | '--color-text-secondary'
   | '--color-text-muted'
   | '--color-danger'
-  | '--color-border-subtle';
+  | '--color-border-subtle'
+  // 画布舞台（深场）：外壳可以是亮的，但点线在浅底上会被加法混合冲成白色
+  | '--color-stage-base'
+  | '--color-stage-raised'
+  | '--color-stage-text'
+  | '--color-stage-grid';
 
 /** token 名固定（与 task-29 的 CSS 变量对齐）；fallback 是旧色板的值 */
 const TOKEN_FALLBACK: Record<PaletteToken, string> = {
@@ -36,6 +41,10 @@ const TOKEN_FALLBACK: Record<PaletteToken, string> = {
   '--color-text-muted': '#64748b',
   '--color-danger': '#ef4444',
   '--color-border-subtle': '#1e293b',
+  '--color-stage-base': '#05070d',
+  '--color-stage-raised': '#0b1020',
+  '--color-stage-text': '#e2e8f0',
+  '--color-stage-grid': '#1e293b',
 };
 
 /** 纯白：光晕贴图/高光的内核色（不属于 token 表，集中在这里） */
@@ -148,7 +157,8 @@ export function mixWith(hex: string, other: string, percent: number): string {
 // ── 具体用途的取色（graph 目录其他文件只调这些）─────────────────────
 
 export function bgBaseHex(): string {
-  return readToken('--color-bg-base');
+  // 舞台色：与外壳主题解耦，亮色外壳下画布仍是深场（见 app.css 的 --color-stage-*）
+  return readToken('--color-stage-base');
 }
 
 export function accentHex(): string {
@@ -166,7 +176,7 @@ export function dangerHex(): string {
 /** 3D 背景：深空蓝紫底 + 两团径向雾（DOM 层，不占 3D draw call） */
 export function sceneBackdropCss(): string {
   const base = bgBaseHex();
-  const raised = readToken('--color-bg-raised');
+  const raised = readToken('--color-stage-raised');
   const glow = glowHex();
   const accentAlt = readToken('--color-accent-alt');
   return [
@@ -184,7 +194,7 @@ export function sceneVignetteCss(): string {
 
 /** 2D 网格：双轴细线 + 中心向外淡出（网格雾），透明度由 Graph2D 按缩放调 */
 export function gridCss(): string {
-  const line = mixWithTransparent(readToken('--color-border-subtle'), 42);
+  const line = mixWithTransparent(readToken('--color-stage-grid'), 42);
   const cell = 44;
   return [
     `repeating-linear-gradient(0deg, ${line} 0, ${line} 1px, transparent 1px, transparent ${cell}px)`,
@@ -204,7 +214,7 @@ export function stageGlowCss(): string {
 
 /** 3D 标签：颜色 + 双层描边（替换原来的 hex 内联样式） */
 export function labelCss(): string {
-  const color = readToken('--color-text-primary');
+  const color = readToken('--color-stage-text');
   const base = bgBaseHex();
   return `color:${color};font:11px/1.2 ui-sans-serif,system-ui;text-shadow:0 0 4px ${base},0 0 8px ${base};white-space:nowrap;padding:1px 3px;border-radius:3px;`;
 }

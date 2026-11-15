@@ -1,21 +1,50 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
     <title>默识 · 记忆图谱</title>
     <style>
+      /* 首屏底色跟着主题走；真正的令牌在 app.css，这里只给一个不会闪的值 */
       html,
       body,
       #root {
         height: 100%;
         margin: 0;
-        background: #05070d;
-        color: #cbd5e1;
-        font: 13px/1.5 ui-sans-serif, system-ui, 'Segoe UI', sans-serif;
+        background: #0b0c0e;
+        color: #c4c7cc;
+        font: 13px/1.5 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC',
+          'Segoe UI Variable Text', 'Microsoft YaHei', system-ui, sans-serif;
         overflow: hidden;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      html[data-theme='light'],
+      html[data-theme='light'] body,
+      html[data-theme='light'] #root {
+        background: #f1f2f4;
+        color: #3a3f45;
       }
     </style>
+    <script>
+      /* 首屏渲染前定主题，避免先暗后亮；key 与 src/ui/theme.ts 一致 */
+      (function () {
+        try {
+          var saved = window.localStorage.getItem('moshi-theme');
+          var mode = saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
+          var dark =
+            mode === 'dark' ||
+            (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          var root = document.documentElement;
+          root.setAttribute('data-theme', dark ? 'dark' : 'light');
+          root.setAttribute('data-theme-mode', mode);
+          root.style.colorScheme = dark ? 'dark' : 'light';
+        } catch (e) {
+          /* 拿不到偏好就沿用暗色 */
+        }
+      })();
+    </script>
     <!-- 下面这行整句是 static.ts 的替换锚点，改它要同步改 src/app/http/static.ts -->
     <script>
       window.__MOSHI_TOKEN__ = window.__MOSHI_TOKEN__ || '';

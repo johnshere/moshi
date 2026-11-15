@@ -11,14 +11,15 @@ import { scopeOptions } from './scope-options.js';
 import { useFilter } from '../state/filter.js';
 
 const selectStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  color: 'var(--color-text-primary)',
+  background: 'var(--color-bg-overlay)',
+  color: 'var(--color-text-secondary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 4,
-  padding: '2px 6px',
+  borderRadius: 999,
+  padding: '3px 10px',
   font: 'inherit',
   fontSize: 12,
   maxWidth: 260,
+  cursor: 'pointer',
 };
 
 export function ScopeSwitcher(): ReactElement {

@@ -77,7 +77,7 @@ const panelStyle: CSSProperties = {
 const cardStyle: CSSProperties = {
   background: 'var(--color-bg-overlay)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 6,
+  borderRadius: 8,
   padding: '10px 12px',
   display: 'flex',
   flexDirection: 'column',
@@ -101,7 +101,7 @@ const rowStyle: CSSProperties = {
 const chipStyle: CSSProperties = {
   background: 'var(--color-bg-raised)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '2px 8px',
   fontFamily: 'monospace',
 };

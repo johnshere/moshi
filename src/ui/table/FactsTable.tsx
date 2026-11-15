@@ -48,11 +48,11 @@ const STATUS_COLOR: Record<string, string> = {
 
 function chip(active: boolean): CSSProperties {
   return {
-    background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-    border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
-    borderRadius: 4,
-    padding: '2px 10px',
+    background: active ? 'color-mix(in srgb, var(--color-accent) 14%, transparent)' : 'transparent',
+    color: active ? 'var(--color-accent-soft)' : 'var(--color-text-secondary)',
+    border: `1px solid ${active ? 'color-mix(in srgb, var(--color-accent) 38%, transparent)' : 'var(--color-border-subtle)'}`,
+    borderRadius: 999,
+    padding: '2px 11px',
     cursor: active ? 'default' : 'pointer',
     font: 'inherit',
   };
@@ -288,8 +288,8 @@ export function FactsTable(): JSX.Element {
         background: 'var(--color-bg-base)',
         color: 'var(--color-text-secondary)',
         fontSize: 12,
-        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + P2-05 筛选条）
-        paddingTop: 92,
+        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + 筛选条 + 统计行）
+        paddingTop: 148,
         boxSizing: 'border-box',
       }}
     >
@@ -324,11 +324,11 @@ export function FactsTable(): JSX.Element {
             }
           }}
           style={{
-            background: 'var(--color-bg-raised)',
+            background: 'var(--color-bg-overlay)',
             color: 'var(--color-text-primary)',
             border: '1px solid var(--color-border-subtle)',
-            borderRadius: 4,
-            padding: '3px 8px',
+            borderRadius: 999,
+            padding: '3px 11px',
             font: 'inherit',
             width: 260,
           }}
@@ -365,7 +365,7 @@ export function FactsTable(): JSX.Element {
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '4px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', background: 'var(--color-bg-raised)' }} role="row">
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', fontSize: 11, letterSpacing: '.03em', background: 'transparent' }} role="row">
         <span role="columnheader">时间</span>
         <span role="columnheader">类型</span>
         <span role="columnheader">内容</span>
@@ -418,8 +418,8 @@ export function FactsTable(): JSX.Element {
                   alignItems: 'center',
                   padding: '0 12px',
                   boxSizing: 'border-box',
-                  borderBottom: '1px solid var(--color-bg-overlay)',
-                  background: selected ? 'var(--color-bg-active)' : item.index % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--color-text-secondary) 3%, transparent)',
+                  borderBottom: '1px solid var(--color-border-subtle)',
+                  background: selected ? 'var(--color-bg-active)' : 'transparent',
                   boxShadow: selected ? 'inset 2px 0 0 var(--color-accent)' : 'none',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',

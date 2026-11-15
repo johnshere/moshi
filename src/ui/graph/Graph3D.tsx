@@ -101,14 +101,16 @@ interface LayerPlane {
   opacity: number;
 }
 
-const PLANE_HEX = layerPlaneHexes();
-
-const PLANES: readonly LayerPlane[] = [
-  { y: LAYER_TOP, color: PLANE_HEX[0], opacity: 0.2 },
-  { y: LAYER_MID, color: PLANE_HEX[1], opacity: 0.14 },
-  { y: LAYER_LOW, color: PLANE_HEX[2], opacity: 0.1 },
-  { y: LAYER_INVALID, color: PLANE_HEX[3], opacity: 0.08 },
-];
+/// 每次建场景时现取色：主题切换后重建的网格才是新色（模块级常量会锁死旧色）
+function layerPlanes(): readonly LayerPlane[] {
+  const hex = layerPlaneHexes();
+  return [
+    { y: LAYER_TOP, color: hex[0], opacity: 0.2 },
+    { y: LAYER_MID, color: hex[1], opacity: 0.14 },
+    { y: LAYER_LOW, color: hex[2], opacity: 0.1 },
+    { y: LAYER_INVALID, color: hex[3], opacity: 0.08 },
+  ];
+}
 
 /**
  * 边：顶点属性 `aType` 选色 + `aVis` 定透明度 + `uv.x` 流动 + `aConf` 调亮端；
@@ -399,7 +401,7 @@ class GraphScene {
     this.controls.maxDistance = 2600;
     this.controls.target.set(0, 0, 0);
 
-    for (const plane of PLANES) {
+    for (const plane of layerPlanes()) {
       const grid = new THREE.GridHelper(1600, 32, plane.color, plane.color);
       grid.position.y = plane.y;
       const material = grid.material as THREE.Material;

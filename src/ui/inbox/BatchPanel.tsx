@@ -51,7 +51,7 @@ function btn(primary = false): CSSProperties {
     background: primary ? 'var(--color-info-bg)' : 'var(--color-bg-overlay)',
     color: primary ? 'var(--color-info-text)' : 'var(--color-text-secondary)',
     border: `1px solid ${primary ? 'var(--color-info-strong)' : 'var(--color-border-subtle)'}`,
-    borderRadius: 4,
+    borderRadius: 8,
     padding: '4px 14px',
     cursor: 'pointer',
     font: 'inherit',

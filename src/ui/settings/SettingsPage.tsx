@@ -25,7 +25,7 @@ import { UpdatePanel } from './UpdatePanel.js';
 
 const tabStyle = (active: boolean): CSSProperties => ({
   padding: '6px 12px',
-  borderRadius: 6,
+  borderRadius: 8,
   border: '1px solid ' + (active ? 'var(--color-border-strong, #3a4a5a)' : 'transparent'),
   background: active ? 'var(--color-bg-raised)' : 'transparent',
   color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',

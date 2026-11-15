@@ -135,7 +135,7 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
 const panelStyle: CSSProperties = {
   background: 'var(--color-bg-raised)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 6,
+  borderRadius: 8,
   padding: '12px 14px',
   display: 'flex',
   flexDirection: 'column',
@@ -157,7 +157,7 @@ const inputStyle: CSSProperties = {
   background: 'var(--color-bg-overlay)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '4px 8px',
   fontSize: 12,
   width: '100%',
@@ -167,7 +167,7 @@ const buttonStyle: CSSProperties = {
   background: 'var(--color-info-dim)',
   color: 'var(--color-text-primary)',
   border: 'none',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '6px 14px',
   fontSize: 12,
   cursor: 'pointer',
@@ -269,7 +269,7 @@ export function ConfigForm(): ReactElement {
       {error !== null && (
         <div
           data-testid="config-error"
-          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 8, padding: '6px 8px' }}
         >
           {error}
         </div>
@@ -277,7 +277,7 @@ export function ConfigForm(): ReactElement {
       {toast !== null && (
         <div
           data-testid="config-toast"
-          style={{ color: 'var(--color-success-soft)', background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-success-soft)', background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', borderRadius: 8, padding: '6px 8px' }}
         >
           {toast}
         </div>
@@ -285,7 +285,7 @@ export function ConfigForm(): ReactElement {
       {restart.length > 0 && (
         <div
           data-testid="config-restart-hint"
-          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px' }}
+          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 8, padding: '6px 8px' }}
         >
           需重启 moshi daemon 后生效：{restart.join('、')}
         </div>
@@ -334,7 +334,7 @@ export function ConfigForm(): ReactElement {
       {changed['http.port'] !== undefined && (
         <div
           data-testid="config-port-hint"
-          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px', lineHeight: 1.6 }}
+          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 8, padding: '6px 8px', lineHeight: 1.6 }}
         >
           重启后 MCP 地址变为 <code>http://127.0.0.1:{String(draft['http.port'])}/mcp</code>；需在 Claude Code / Magpie 等宿主同步更新，旧地址会立即失效。
         </div>

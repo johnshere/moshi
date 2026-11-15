@@ -83,7 +83,7 @@ const overlayStyle: CSSProperties = {
 const modalStyle: CSSProperties = {
   background: 'var(--color-bg-raised)',
   border: '1px solid var(--color-border-strong, #3a4a5a)',
-  borderRadius: 10,
+  borderRadius: 14,
   padding: '20px 22px',
   width: 560,
   maxWidth: '86vw',
@@ -114,7 +114,7 @@ const groupStyle: CSSProperties = {
 function buttonStyle(primary = false, disabled = false): CSSProperties {
   return {
     padding: '7px 16px',
-    borderRadius: 6,
+    borderRadius: 8,
     border: primary ? '1px solid transparent' : '1px solid var(--color-border-subtle)',
     background: primary ? 'var(--color-accent, #4a9eff)' : 'transparent',
     color: primary ? '#fff' : disabled ? 'var(--color-text-faint)' : 'var(--color-text-primary)',

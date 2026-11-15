@@ -113,7 +113,7 @@ const chipStyle: CSSProperties = {
 
 const tabStyle = (active: boolean): CSSProperties => ({
   padding: '3px 10px',
-  borderRadius: 6,
+  borderRadius: 8,
   border: '1px solid ' + (active ? 'var(--color-border-strong, #3a4a5a)' : 'transparent'),
   background: active ? 'var(--color-bg-raised)' : 'transparent',
   color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
@@ -336,7 +336,7 @@ export function LogsPage(): ReactElement {
               data-testid="logs-row"
               style={{
                 border: '1px solid var(--color-border, #2a333d)',
-                borderRadius: 6,
+                borderRadius: 8,
                 background: 'var(--color-bg-raised)',
                 fontSize: 12,
               }}

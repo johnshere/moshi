@@ -176,7 +176,7 @@ const mutedStyle: CSSProperties = {
 function buttonStyle(disabled = false): CSSProperties {
   return {
     padding: '5px 12px',
-    borderRadius: 5,
+    borderRadius: 8,
     border: '1px solid var(--color-border-subtle)',
     background: disabled ? 'transparent' : 'var(--color-bg-overlay)',
     color: disabled ? 'var(--color-text-faint)' : 'var(--color-text-primary)',
@@ -680,7 +680,7 @@ const modalStyle: CSSProperties = {
 const preStyle: CSSProperties = {
   margin: '10px 0 0',
   padding: '10px 12px',
-  borderRadius: 6,
+  borderRadius: 8,
   background: 'var(--color-bg-base)',
   color: 'var(--color-text-secondary)',
   fontSize: 11,

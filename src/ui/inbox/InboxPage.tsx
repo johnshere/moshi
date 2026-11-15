@@ -63,7 +63,7 @@ const tabStyle = (active: boolean): CSSProperties => ({
   background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
   color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
   border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '4px 12px',
   cursor: active ? 'default' : 'pointer',
   font: 'inherit',
@@ -121,7 +121,7 @@ function RowButton(props: {
       style={{
         background: 'var(--color-bg-raised)',
         border: '1px solid var(--color-border-subtle)',
-        borderRadius: 3,
+        borderRadius: 6,
         color,
         padding: '1px 8px',
         font: 'inherit',

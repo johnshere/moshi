@@ -34,43 +34,45 @@ declare global {
 const containerStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 10,
+  gap: 5,
   flexWrap: 'wrap',
   fontSize: 12,
-  lineHeight: 1.7,
+  lineHeight: 1.6,
   pointerEvents: 'auto',
 };
 
 const labelStyle: CSSProperties = { color: 'var(--color-text-muted)', whiteSpace: 'nowrap' };
 
+/* 胶囊：只有可点的东西是圆的；标签保持方角，圆角不滥用 */
 const chipBase: CSSProperties = {
-  background: 'var(--color-bg-raised)',
+  background: 'transparent',
   color: 'var(--color-text-secondary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 3,
-  padding: '0 8px',
+  borderRadius: 999,
+  padding: '1px 8px',
   cursor: 'pointer',
   font: 'inherit',
+  transition: 'background-color 120ms ease, color 120ms ease, border-color 120ms ease',
 };
 
 const chipOn: CSSProperties = {
   ...chipBase,
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
+  background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
+  color: 'var(--color-accent-soft)',
+  border: '1px solid color-mix(in srgb, var(--color-accent) 38%, transparent)',
 };
 
 const textInputStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
+  background: 'var(--color-bg-overlay)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 3,
-  padding: '1px 6px',
+  borderRadius: 999,
+  padding: '1px 9px',
   font: 'inherit',
-  width: 150,
+  width: 112,
 };
 
-const dateInputStyle: CSSProperties = { ...textInputStyle, width: 118, colorScheme: 'dark' };
+const dateInputStyle: CSSProperties = { ...textInputStyle, width: 98, colorScheme: 'light dark' };
 
 /** 把 ISO 时间截成 date input 能吃的 `YYYY-MM-DD`（取日期部分，容忍含时间的完整 ISO） */
 function toDateValue(iso: string | null): string {
@@ -137,7 +139,7 @@ export function FilterBar(): JSX.Element {
     <div
       style={{
         ...containerStyle,
-        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 4, padding: '4px 8px' } : {}),
+        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 8, padding: '4px 8px' } : {}),
       }}
     >
       <span style={labelStyle}>
@@ -148,7 +150,7 @@ export function FilterBar(): JSX.Element {
       <input
         type="text"
         value={scopeInput}
-        placeholder="global / project:*（留空 = 不限）"
+        placeholder="global / project:*"
         onChange={(e) => setScopeInput(e.target.value)}
         onBlur={commitScope}
         onKeyDown={(e) => {
