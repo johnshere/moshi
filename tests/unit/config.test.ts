@@ -2,7 +2,13 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { dataPaths, expandHome, loadConfig, resolveSources } from '../../src/app/config.js';
+import {
+  collectSourcesOf,
+  dataPaths,
+  expandHome,
+  loadConfig,
+  resolveSources,
+} from '../../src/app/config.js';
 import { EMBED_DIM, EMBED_MODEL } from '../../src/domain/embedding.js';
 import { isMoshiError } from '../../src/domain/errors.js';
 
@@ -33,7 +39,7 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.server.port).toBe(9836);
     expect(cfg.model.gat_mode).toBe('off');
     expect(cfg.retrieval.rrf_k).toBe(60);
-    expect(cfg.ingest.sources).toEqual(['claude-code', 'dsh']);
+    expect(cfg.collect.sources).toEqual(['claude-code', 'dsh']);
   });
 
   it('拼错的键启动失败，且错误信息指出键名', () => {
@@ -176,7 +182,7 @@ describe('resolveSources（P3-A8 source 实例）', () => {
   });
 
   it('旧字符串里的 generic-jsonl 根 = <data_dir>/inbox', () => {
-    const file = withYaml('storage:\n  data_dir: "/data-legacy"\ningest:\n  sources: ["claude-code", "generic-jsonl"]\n');
+    const file = withYaml('storage:\n  data_dir: "/data-legacy"\ncollect:\n  sources: ["claude-code", "generic-jsonl"]\n');
     const cfg = loadConfig({ file, home: HOME });
     const list = resolveSources(cfg, HOME);
     expect(list.map((s) => s.id)).toEqual(['claude-code', 'generic-jsonl']);
@@ -184,13 +190,13 @@ describe('resolveSources（P3-A8 source 实例）', () => {
     expect(list[1]!.root).toBe(path.join(path.resolve('/data-legacy'), 'inbox'));
   });
 
-  it('ingest.sources 实例：自定义 id/root，enabled=false 被过滤', () => {
+  it('collect.sources 实例：自定义 id/root，enabled=false 被过滤', () => {
     const file = withYaml(
       [
         'storage:',
         '  data_dir: "/data-x"',
         '',
-        'ingest:',
+        'collect:',
         '  sources:',
         '    - id: "work"',
         '      adapter: "claude-code"',
@@ -216,7 +222,7 @@ describe('resolveSources（P3-A8 source 实例）', () => {
   it('重复 id 在加载期报 E_CONFIG', () => {
     const file = withYaml(
       [
-        'ingest:',
+        'collect:',
         '  sources:',
         '    - id: "same"',
         '      adapter: "claude-code"',
@@ -228,14 +234,79 @@ describe('resolveSources（P3-A8 source 实例）', () => {
       ].join('\n'),
     );
     const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
-    expect(msg).toContain('ingest.sources');
+    expect(msg).toContain('collect.sources');
     expect(msg).toContain('same');
   });
 
   it('未知 adapter 在加载期报 E_CONFIG（不静默跳过）', () => {
-    const file = withYaml('ingest:\n  sources: ["cursor"]\n');
+    const file = withYaml('collect:\n  sources: ["cursor"]\n');
+    const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
+    expect(msg).toContain('collect.sources');
+    expect(msg).toContain('cursor');
+  });
+
+  it('旧键 ingest.sources 被 strict 拒绝（不做兼容，用户 m00882）', () => {
+    const file = withYaml('ingest:\n  sources: ["claude-code"]\n');
     const msg = expectConfigError(() => loadConfig({ file, home: HOME }));
     expect(msg).toContain('ingest.sources');
-    expect(msg).toContain('cursor');
+    expect(msg).toContain('未知配置键');
+  });
+});
+
+describe('collectSourcesOf（采集源单一判定）', () => {
+  it('没配置源：configured=false、available=false、sources 空', () => {
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'c.yaml'), home: HOME });
+    cfg.collect.sources = [];
+    expect(collectSourcesOf(cfg, HOME)).toEqual({
+      configured: false,
+      available: false,
+      sources: [],
+    });
+  });
+
+  it('配置了但目录都不存在：configured=true、available=false，逐源标不可用', () => {
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'c.yaml'), home: HOME });
+    // 默认 HOME 下没有 .claude / .dsh 目录
+    const state = collectSourcesOf(cfg, path.join(tmpdir(), 'moshi-cfg-no-such-home'));
+    expect(state.configured).toBe(true);
+    expect(state.available).toBe(false);
+    expect(state.sources.map((s) => s.id)).toEqual(['claude-code', 'dsh']);
+    expect(state.sources.every((s) => !s.available)).toBe(true);
+  });
+
+  it('至少一个源目录存在：available=true，只有那个源可用', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'moshi-cfg-inbox-'));
+    const file = withYaml(`collect:\n  sources:\n    - adapter: "generic-jsonl"\n      root: "${root.replace(/\\/g, '/')}"\n`);
+    const cfg = loadConfig({ file, home: HOME });
+    const state = collectSourcesOf(cfg, HOME);
+    expect(state.configured).toBe(true);
+    expect(state.available).toBe(true);
+    expect(state.sources).toEqual([
+      {
+        id: 'generic-jsonl',
+        adapter: 'generic-jsonl',
+        root: path.resolve(root),
+        available: true,
+      },
+    ]);
+  });
+
+  it('enabled=false 的源不进列表，也不参与 available', () => {
+    const file = withYaml(
+      [
+        'collect:',
+        '  sources:',
+        '    - id: "off"',
+        '      adapter: "claude-code"',
+        `      root: "${tmpdir().replace(/\\/g, '/')}"`,
+        '      enabled: false',
+        '',
+      ].join('\n'),
+    );
+    const cfg = loadConfig({ file, home: HOME });
+    const state = collectSourcesOf(cfg, HOME);
+    expect(state.configured).toBe(true);
+    expect(state.available).toBe(false);
+    expect(state.sources).toEqual([]);
   });
 });

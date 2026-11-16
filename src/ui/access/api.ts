@@ -67,8 +67,18 @@ export interface LogQuery {
   q?: string | null;
 }
 
+interface ErrorBody {
+  message?: string;
+  error?: string;
+  detail?: { reason?: string };
+}
+
+async function errorBody(res: Response): Promise<ErrorBody> {
+  return (await res.json().catch(() => ({}))) as ErrorBody;
+}
+
 async function errorMessage(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+  const body = await errorBody(res);
   return body.message ?? body.error ?? `HTTP ${String(res.status)}`;
 }
 
@@ -164,7 +174,7 @@ export interface ImportStarted {
   started_at: string;
 }
 
-/** 触发一次导入；409 已由后端判定「已有导入在执行」，这里统一成人话，其余错误用响应体 message。 */
+/** 触发一次导入；409 已由后端判定「已有导入在执行」，其余错误用响应体 message。 */
 export async function postImport(since: string): Promise<ImportStarted> {
   const res = await fetch('/api/import', {
     method: 'POST',
@@ -175,10 +185,43 @@ export async function postImport(since: string): Promise<ImportStarted> {
     body: JSON.stringify({ since }),
   });
   if (res.status === 409) throw new Error('已有导入在执行');
-  if (!res.ok) throw new Error(await errorMessage(res));
+  if (!res.ok) {
+    const body = await errorBody(res);
+    // 用户 m00882：没有任何可用采集源时后端是 400 + detail.reason=no_source；
+    // 直接说人话，不要落到 409 的「已有导入在执行」文案上。
+    if (res.status === 400 && body.detail?.reason === 'no_source') {
+      throw new Error('没有可用的采集来源，请先配置 collect.sources');
+    }
+    throw new Error(body.message ?? body.error ?? `HTTP ${String(res.status)}`);
+  }
   return (await res.json()) as ImportStarted;
 }
 
 export async function fetchImportStatus(signal?: AbortSignal): Promise<ImportStatus> {
   return getJson<ImportStatus>('/api/import/status', signal);
+}
+
+/**
+ * 采集源状态（`GET /api/collect/sources`；task-6 归一后的单一判定点）。
+ *
+ * `sources` 只列 enabled 实例；`available=false` = 一个能用的目录都没有，
+ * 导入/采集跑不起来——导入按钮据此前置置灰（用户 m00882）。
+ */
+export interface CollectSourceStatus {
+  id: string;
+  adapter: string;
+  root: string;
+  available: boolean;
+}
+
+export interface CollectSourcesState {
+  /** 配置里写了几个源（含 enabled=false 的）；false = 从没配置过 */
+  configured: boolean;
+  /** 至少一个 enabled 源的目录真实存在 */
+  available: boolean;
+  sources: CollectSourceStatus[];
+}
+
+export async function fetchCollectSources(signal?: AbortSignal): Promise<CollectSourcesState> {
+  return getJson<CollectSourcesState>('/api/collect/sources', signal);
 }

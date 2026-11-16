@@ -9,9 +9,11 @@
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { AccessPage } from './AccessPage.js';
 import {
+  fetchCollectSources,
   fetchImportStatus,
   fetchLogsSummary,
   postImport,
+  type CollectSourcesState,
   type ImportStatus,
   type LogsSummaryGroup,
 } from './api.js';
@@ -103,8 +105,12 @@ export function EndpointsPage(): ReactElement {
   const [importPollError, setImportPollError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [now, setNow] = useState(() => Date.now());
+  /** 采集源状态（`GET /api/collect/sources`）：没有可用源时导入按钮置灰（用户 m00882） */
+  const [sources, setSources] = useState<CollectSourcesState | null>(null);
+  const [sourcesError, setSourcesError] = useState<string | null>(null);
 
   const importRunning = (importStatus?.running ?? false) || starting;
+  const noSource = sources !== null && !sources.available;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -114,6 +120,12 @@ export function EndpointsPage(): ReactElement {
         setError(null);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
+    fetchCollectSources(controller.signal)
+      .then((value) => {
+        setSources(value);
+        setSourcesError(null);
+      })
+      .catch((err: unknown) => setSourcesError(err instanceof Error ? err.message : String(err)));
     return () => controller.abort();
   }, []);
 
@@ -194,7 +206,7 @@ export function EndpointsPage(): ReactElement {
         接入点
       </div>
       <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '4px 18px 10px' }}>
-        四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在设置 →「接入与日志」。
+        四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在接入 →「日志与保留」。
       </div>
       {error !== null ? (
         <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px 8px' }}>
@@ -238,6 +250,45 @@ export function EndpointsPage(): ReactElement {
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
             把已有会话记录扫描进记忆库（Claude Code / DSh）；后台执行，导入期间界面仍可用。
           </div>
+          <div
+            data-testid="import-sources"
+            data-available={sources === null ? 'unknown' : String(sources.available)}
+            style={{
+              fontSize: 11,
+              marginTop: 6,
+              color: noSource ? 'var(--color-warning)' : 'var(--color-text-secondary)',
+            }}
+          >
+            {sources === null
+              ? '来源状态读取中…'
+              : sources.available
+                ? `可用来源：${sources.sources
+                    .filter((source) => source.available)
+                    .map((source) => source.id)
+                    .join('、')}`
+                : '没有可用的采集来源'}
+          </div>
+          {sourcesError !== null ? (
+            <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-danger, #f85149)' }}>
+              来源状态读取失败：{sourcesError}
+            </div>
+          ) : null}
+          {sources !== null && !sources.available ? (
+            <div data-testid="import-source-list" style={{ fontSize: 11, marginTop: 4 }}>
+              {sources.sources.length === 0 ? (
+                <div style={{ color: 'var(--color-text-muted)' }}>未配置任何采集来源</div>
+              ) : (
+                sources.sources.map((source) => (
+                  <div key={source.id} style={{ color: 'var(--color-text-secondary)' }}>
+                    {source.id} · {source.adapter} ·{' '}
+                    <span style={{ color: source.available ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
+                      {source.available ? '可用' : '不可用'}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          ) : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
               范围
@@ -257,8 +308,9 @@ export function EndpointsPage(): ReactElement {
             <button
               type="button"
               data-testid="import-run"
-              style={{ ...importButtonStyle, opacity: importRunning ? 0.5 : 1 }}
-              disabled={importRunning}
+              style={{ ...importButtonStyle, opacity: importRunning || noSource ? 0.5 : 1 }}
+              disabled={importRunning || noSource}
+              title={noSource ? '没有可用的采集来源' : undefined}
               onClick={() => {
                 void startImport();
               }}

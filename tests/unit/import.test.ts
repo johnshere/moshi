@@ -237,7 +237,7 @@ describe('moshi import（§5.11 验收）', () => {
     // 合法的 adapter 但缺省根目录不存在：源可用性按"扫不扫得到"判断，而不是按名字
     writeFileSync(
       path.join(dataDir, 'config.yaml'),
-      `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\ningest:\n  sources: ["generic-jsonl"]\n`,
+      `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\ncollect:\n  sources: ["generic-jsonl"]\n`,
       'utf8',
     );
     const r = await runImport(home, ['--rate', '0']);
@@ -284,7 +284,7 @@ describe('moshi import（§5.11 验收）', () => {
         'storage:',
         `  data_dir: "${dataDir.replace(/\\/g, '/')}"`,
         '',
-        'ingest:',
+        'collect:',
         '  sources:',
         '    - id: "alpha"',
         '      adapter: "generic-jsonl"',

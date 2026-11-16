@@ -9,7 +9,7 @@
  * 键名保持配置里的 snake_case，不做 camelCase 映射：文档、配置、代码三处同名，
  * 少一层翻译就少一类"改了一处忘了另一处"的 bug。
  */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import os from 'node:os';
 import { EMBED_DIM, EMBED_MODEL } from '../domain/embedding.js';
 import { SIDECAR_PIPE_NAME } from '../infra/sidecar/spawn.js';
@@ -54,7 +54,7 @@ const StorageSchema = z
   .strict();
 
 /**
- * 会话源实例（P3-A8）：`[[ingest.sources]]` 写法。
+ * 会话源实例（P3-A8）：`[[collect.sources]]` 写法。
  *
  * 旧写法 `sources = ["claude-code"]` 仍然支持——字符串归一成"只有一个默认实例"，
  * 等价于 `{id: adapter, adapter: adapter, root: 默认根}`。两种写法可以混用。
@@ -76,9 +76,6 @@ const SourceSpecSchema = z.union([z.string().min(1), SourceInstanceSchema]);
 
 const IngestSchema = z
   .object({
-    // 默认扫两个本机会话源：Claude Code 与 DSh（`~/.dsh/sessions`）。
-    // 新装或配置里没写 ingest 段时两者都采集，任一目录不存在只是标记不可用。
-    sources: z.array(SourceSpecSchema).default(['claude-code', 'dsh']),
     harvest_cron: z.string().default('0 3 * * *'),
     harvest_batch: positiveInt.default(200),
     import_batch: positiveInt.default(500),
@@ -94,6 +91,10 @@ const IngestSchema = z
 
 const CollectSchema = z
   .object({
+    // 默认扫两个本机会话源：Claude Code 与 DSh（`~/.dsh/sessions`）。
+    // 新装或配置里没写 collect 段时两者都采集，任一目录不存在只是标记不可用。
+    // 采集源只此一处（原 `ingest.sources` 已并入；导入与采集共用，不做旧键兼容）。
+    sources: z.array(SourceSpecSchema).default(['claude-code', 'dsh']),
     enabled: z.boolean().default(true),
     /** 后台扫描周期；0 表示不自动跑（测试用） */
     interval_ms: z.number().int().min(0).default(60_000),
@@ -412,7 +413,7 @@ export type { ResolvedSource, SourceName };
 
 /** 配置里一条 source 声明的归一形态（新写法；旧字符串由 `resolveSourceSpecs` 补齐默认值） */
 function resolveSourceSpecs(
-  specs: Config['ingest']['sources'],
+  specs: Config['collect']['sources'],
   dataDir: string,
   home: string,
 ): ResolvedSource[] {
@@ -425,14 +426,14 @@ function resolveSourceSpecs(
       // 静默跳过只会让"采集不到"更难发现：配置错误就是配置错误
       throw new MoshiError(
         'E_CONFIG',
-        `ingest.sources[${String(index)}]：未知适配器 ${adapterRaw}（可用：${SOURCE_NAMES.join(' / ')}）`,
+        `collect.sources[${String(index)}]：未知适配器 ${adapterRaw}（可用：${SOURCE_NAMES.join(' / ')}）`,
         { index, adapter: adapterRaw },
       );
     }
     const adapter = adapterRaw as SourceName;
     const id = legacy ? adapter : (spec.id ?? adapter);
     if (seen.has(id)) {
-      throw new MoshiError('E_CONFIG', `ingest.sources 中 id 重复：${id}（每个实例的 id 必须唯一）`, {
+      throw new MoshiError('E_CONFIG', `collect.sources 中 id 重复：${id}（每个实例的 id 必须唯一）`, {
         id,
       });
     }
@@ -463,12 +464,66 @@ function resolveSourceSpecs(
  * 把配置里的 source 声明解析成"可用的会话源实例"（P3-A8）。
  *
  * - 旧写法字符串 → `{id: adapter, enabled: true}`，根目录用适配器默认值；
- * - `[[ingest.sources]]` 可自定义 id / root / enabled / field_map；
+ * - `[[collect.sources]]` 可自定义 id / root / enabled / field_map；
  * - 未知 adapter、重复 id 抛 `E_CONFIG`（在 `loadConfig` 阶段就炸，不在扫描时静默跳过）；
  * - `enabled = false` 的实例被过滤掉（解析结果即"要扫的源"）。
  */
 export function resolveSources(cfg: Config, home: string = os.homedir()): ResolvedSource[] {
-  return resolveSourceSpecs(cfg.ingest.sources, cfg.storage.data_dir, home).filter((s) => s.enabled);
+  return resolveSourceSpecs(cfg.collect.sources, cfg.storage.data_dir, home).filter((s) => s.enabled);
+}
+
+/** 一条 source 的可用性视图（UI 与导入前置判定共用） */
+export interface CollectSourceStatus {
+  id: string;
+  adapter: SourceName;
+  root: string;
+  available: boolean;
+}
+
+/** `collect.sources` 的整体状态（`GET /api/collect/sources` 的响应体） */
+export interface CollectSourcesState {
+  /** 配置里写了几个源（含 enabled=false 的）；0 = 从没配置过 */
+  configured: boolean;
+  /** 至少一个 enabled 源的目录真实存在——导入/采集能不能跑起来 */
+  available: boolean;
+  /** 只列 enabled 实例（`resolveSources` 的结果），禁用源不参与判定 */
+  sources: CollectSourceStatus[];
+}
+
+/** 目录存在且是目录；与三个适配器的 `detect()` 同口径（都在 stat 各自的 root） */
+function rootIsUsable(root: string): boolean {
+  try {
+    return statSync(root).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 采集源的**单一判定点**（用户 m00882）：`configured` / `available` 只在这里算，
+ * 路由与界面共用，避免"配置了源但横幅说没配置"这类两套口径的分裂。
+ *
+ * `available` 不抛错：适配器不可用时 `resolveSourceSpecs` 已经在加载期拦住，
+ * 这里只判目录在不在——目录缺失是常态（换机器、没装某个 Agent），不是配置错误。
+ */
+export function collectSourcesOf(
+  cfg: Config,
+  home: string = os.homedir(),
+): CollectSourcesState {
+  const resolved = resolveSourceSpecs(cfg.collect.sources, cfg.storage.data_dir, home).filter(
+    (s) => s.enabled,
+  );
+  const sources: CollectSourceStatus[] = resolved.map((s) => ({
+    id: s.id,
+    adapter: s.adapter,
+    root: s.root,
+    available: rootIsUsable(s.root),
+  }));
+  return {
+    configured: cfg.collect.sources.length > 0,
+    available: sources.some((s) => s.available),
+    sources,
+  };
 }
 
 /** 需要展开 `~` 并转为绝对路径的键（其余字符串是模型名、cron 表达式，不碰） */
@@ -564,7 +619,7 @@ export function loadConfig(opts: LoadOptions = {}): Config {
 
   // P3-A8：source 实例在加载期校验（未知 adapter / 重复 id 直接报 E_CONFIG），
   // 而不是等到扫描时静默跳过。
-  resolveSourceSpecs(cfg.ingest.sources, cfg.storage.data_dir, home);
+  resolveSourceSpecs(cfg.collect.sources, cfg.storage.data_dir, home);
 
   // P3-A8：golden set 没显式配置时跟随 data_dir——换库后 golden 不应还留在真实 home。
   // 默认 data_dir = ~/.moshi 时，解析结果与旧默认 `~/.moshi/golden/golden.jsonl` 一致。

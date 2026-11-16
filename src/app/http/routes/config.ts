@@ -2,6 +2,7 @@
  * 设置页后端（P2-19A-06）：配置读写 + 维护重建。
  *
  * - `GET  /api/config`：当前生效配置的**安全子集**（绝不返回 token / MCP 闸门等）
+ * - `GET  /api/collect/sources`：采集源状态（`configured` / `available` / 逐源可用性）
  * - `PUT  /api/config`：body `{patch:{...}}`，白名单键 + 深层合并 + 类型/范围校验，
  *   原子写回 YAML 配置文件；启动期键（port/data_dir/archive_dir）返回 restart_required
  * - `POST /api/maintenance/rebuild`：`{target:'fts'|'vec'|'degree'|'all', dry_run?}`
@@ -22,6 +23,7 @@ import { rebuildDegree, rebuildFts } from '../../../infra/sqlite/maintenance.js'
 import { syncFactVectors, vectorDisabled } from '../../../infra/vec/index.js';
 import {
   checkConfigDocument,
+  collectSourcesOf,
   dataPaths,
   defaultConfigPath,
   EDITABLE_CONFIG_ENTRIES,
@@ -178,6 +180,14 @@ export async function configRoutes(
     }
     reply.header('cache-control', 'no-store');
     return publicConfig(cfg, configPath);
+  });
+
+  // 采集源状态（用户 m00882）：界面横幅的唯一数据源，避免「配置在 A 段、
+  // 判定读 B 段」的两套口径。用启动期 cfg 而不是重读文件——扫描器用的就是这份，
+  // 手工改 YAML 要重启 daemon 才生效，这里照实报告"现在真会扫什么"。
+  app.get('/collect/sources', async (_req, reply) => {
+    reply.header('cache-control', 'no-store');
+    return collectSourcesOf(initialCfg, opts.home);
   });
 
   app.put('/config', async (req, reply) => {

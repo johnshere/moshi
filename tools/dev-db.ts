@@ -6,7 +6,7 @@
  * - `<repo>/temp/moshi-dev.yaml`：生成物，不提交；
  * - `storage.data_dir` = `<repo>/temp/moshi-dev/data`（绝对路径）；
  * - `eval.golden_set` = `<repo>/temp/moshi-dev/golden/golden.jsonl`；
- * - `ingest.sources` 一个 `claude-code` 实例，root=`<home>/.claude/projects`。
+ * - `collect.sources` 一个 `claude-code` 实例，root=`<home>/.claude/projects`。
  *
  * 流程（每次都从同一源重建，幂等）：
  * 1. 删除并重建 `temp/moshi-dev`；
@@ -112,7 +112,7 @@ export function buildDevYaml(paths: DevPaths): string {
     'eval:',
     `  golden_set: "${yamlPath(paths.goldenSet)}"`,
     '',
-    'ingest:',
+    'collect:',
     '  sources:',
     `    - id: "${SOURCE_SESSION_ID}"`,
     `      adapter: "${SOURCE_SESSION_ADAPTER}"`,

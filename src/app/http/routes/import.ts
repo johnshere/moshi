@@ -19,6 +19,9 @@
  *
  * 幂等与并发：同一 app 实例内同一时刻只允许一次导入，重复触发 → 409。
  * 游标文件复用 `dataPaths().importCursors`（与 CLI 同一份），不新建。
+ *
+ * 前置拦截：`collect.sources` 一个可用的源都没有时直接 400（`detail.reason=no_source`），
+ * 不起子进程——退出码 4 那条路径保留作 CLI / 子进程侧的兜底。
  */
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -27,7 +30,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { Db } from '../../../infra/sqlite/db.js';
 import { isMoshiError, MoshiError } from '../../../domain/errors.js';
 import { nowIso } from '../../../domain/time.js';
-import { dataPaths, resolveSources, type Config } from '../../config.js';
+import { collectSourcesOf, dataPaths, resolveSources, type Config } from '../../config.js';
 import {
   importExitCode,
   normalizeSince,
@@ -314,6 +317,14 @@ export function importRoutes(app: FastifyInstance, opts: ImportRoutesOpts): void
         throw new MoshiError('E_INPUT', '请求体必须是 JSON 对象', { reason: 'body_invalid' });
       }
       const since = normalizeImportSince((body as { since?: unknown }).since);
+      // 前置拦截（用户 m00882）：没有任何可用的采集来源时不进子进程——
+      // 否则用户看到 202 + 「导入完成」，实际一条都没扫（只有 CLI 退出码 4 兜底，
+      // 界面层很难把 4 翻译成「去配置 collect.sources」）。
+      if (!collectSourcesOf(opts.cfg, opts.home).available) {
+        throw new MoshiError('E_INPUT', '没有可用的采集来源，请先配置 collect.sources', {
+          reason: 'no_source',
+        });
+      }
       startRun(since);
       return reply.code(202).send({ ok: true, since, started_at: state.started_at });
     } catch (err) {

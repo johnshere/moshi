@@ -315,7 +315,7 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
         ) : (
           <>
             <h3 style={titleStyle}>确认安装</h3>
-            <div style={{ ...mutedStyle, marginTop: 6 }}>下面这些文件会被写入。装错了可以在「设置 → 接入」里一键卸载。</div>
+            <div style={{ ...mutedStyle, marginTop: 6 }}>下面这些文件会被写入。装错了可以在「接入 → 接入点」里一键卸载。</div>
             {confirmPlans.map((plan) => (
               <div key={`${plan.host}:${plan.kind}`} style={groupStyle}>
                 <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 4 }}>

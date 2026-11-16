@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildHttpApp } from '../../src/app/http/server.js';
-import { loadConfig } from '../../src/app/config.js';
+import { loadConfig, type Config } from '../../src/app/config.js';
 import { createDefaultSpawn, type ImportChild, type ImportSpawn } from '../../src/app/http/routes/import.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
@@ -77,12 +77,21 @@ function fakeSpawn(): { spawn: ImportSpawn; last: () => Spawned } {
 }
 
 async function makeApp(
-  opts: { spawn?: ImportSpawn | null; configFile?: string } = {},
+  opts: {
+    spawn?: ImportSpawn | null;
+    configFile?: string;
+    /** 覆盖采集源；缺省给一个真实存在的空 inbox（确定性：不扫本机真实会话目录） */
+    sources?: Config['collect']['sources'];
+  } = {},
 ): Promise<void> {
   const home = tempDir();
   const cfg = loadConfig({ home });
   // 降级路径要确定性：不扫这台机器上真实的会话目录
-  cfg.ingest.sources = [];
+  const inbox = path.join(home, 'inbox');
+  mkdirSync(inbox, { recursive: true });
+  cfg.collect.sources = opts.sources ?? [
+    { adapter: 'generic-jsonl', root: inbox, enabled: true },
+  ];
   const { app } = await buildHttpApp({
     db: freshDb(),
     cfg,
@@ -299,6 +308,35 @@ describe('POST /api/import', () => {
     expect(() => fake.last()).toThrow();
   });
 
+  it('一个采集源都没配 → 400 no_source，不进子进程（用户 m00882 前置拦截）', async () => {
+    const fake = fakeSpawn();
+    await makeApp({ spawn: fake.spawn, sources: [] });
+    const res = await call('POST', '/api/import', { since: 'all' });
+    expect(res.statusCode).toBe(400);
+    const body = res.json();
+    expect(body.error).toBe('E_INPUT');
+    expect(body.detail.reason).toBe('no_source');
+    expect(body.message).toContain('没有可用的采集来源');
+    expect(body.message).toContain('collect.sources');
+    // 前置拦截的要点：一个子进程都不许起
+    expect(() => fake.last()).toThrow();
+    expect((await status())['running']).toBe(false);
+  });
+
+  it('源配了但目录都不存在 → 同样 400 no_source', async () => {
+    const fake = fakeSpawn();
+    await makeApp({
+      spawn: fake.spawn,
+      sources: [
+        { adapter: 'generic-jsonl', root: path.join(tempDir(), 'missing-inbox'), enabled: true },
+      ],
+    });
+    const res = await call('POST', '/api/import', { since: 'all' });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().detail.reason).toBe('no_source');
+    expect(() => fake.last()).toThrow();
+  });
+
   it('已有导入在跑 → 409，且不会起第二个子进程', async () => {
     const fake = fakeSpawn();
     await makeApp({ spawn: fake.spawn });
@@ -322,6 +360,39 @@ describe('POST /api/import', () => {
     expect(res.statusCode).toBe(401);
     const st = await app().inject({ method: 'GET', url: '/api/import/status' });
     expect(st.statusCode).toBe(401);
+  });
+});
+
+describe('GET /api/collect/sources', () => {
+  it('有源且目录存在：configured/available 都为 true，逐源带 root', async () => {
+    await makeApp();
+    const res = await call('GET', '/api/collect/sources');
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      configured: boolean;
+      available: boolean;
+      sources: { id: string; adapter: string; root: string; available: boolean }[];
+    };
+    expect(body.configured).toBe(true);
+    expect(body.available).toBe(true);
+    expect(body.sources).toHaveLength(1);
+    expect(body.sources[0]!.id).toBe('generic-jsonl');
+    expect(body.sources[0]!.adapter).toBe('generic-jsonl');
+    expect(body.sources[0]!.available).toBe(true);
+    expect(path.isAbsolute(body.sources[0]!.root)).toBe(true);
+  });
+
+  it('无源：configured/available 都为 false，sources 空（横幅据此报「未配置」）', async () => {
+    await makeApp({ sources: [] });
+    const res = await call('GET', '/api/collect/sources');
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ configured: false, available: false, sources: [] });
+  });
+
+  it('没有 token → 401', async () => {
+    await makeApp();
+    const res = await app().inject({ method: 'GET', url: '/api/collect/sources' });
+    expect(res.statusCode).toBe(401);
   });
 });
 

@@ -216,7 +216,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   // home 与配置同源（`os.homedir()`）——配置读一个 home、会话扫另一个，是 P0 踩过的坑。
   try {
     const paths = dataPaths(cfg);
-    // P3-A8：source 实例由配置解析（`[[ingest.sources]]` 的 id/root/enabled 都生效）
+    // P3-A8：source 实例由配置解析（`[[collect.sources]]` 的 id/root/enabled 都生效）
     collectRunner = startCollectRunner({
       db: instance.db,
       cfg,

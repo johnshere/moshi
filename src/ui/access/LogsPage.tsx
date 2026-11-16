@@ -4,11 +4,11 @@
  * 三段：①顶部状态条（只读 chip + 时间窗 + 设置跳转）②按接入点统计卡片
  * ③统一日志流（两源合并、可搜索、瀑布流加载）。
  *
- * **本页没有任何写入控件**：配置唯一写入口在设置 →「接入与日志」，这里的
- * 开关位只是跳转快捷入口（用户 m02743）。
+ * **本页没有任何写入控件**：配置唯一写入口在接入 →「日志与保留」，这里的
+ * 开关位只是跳转快捷入口（用户 m02743；用户 m00882 把它从设置挪进接入）。
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
-import { hrefForPath } from '../shell/pure.js';
+import { ACCESS_LOG_CONFIG_PATH, hrefForPath } from '../shell/pure.js';
 import { navigate } from '../shell/navigate.js';
 import {
   fetchLogs,
@@ -191,8 +191,9 @@ export function LogsPage(): ReactElement {
   const totals = summary?.totals;
   const updatedAt = summary?.generated_at ?? null;
 
-  const openSettings = (hash: string): void => {
-    const target = `${hrefForPath('/ui/settings/access-logs', window.location.search)}#${hash}`;
+  // 用户 m00882：日志配置并入「接入」，跳同级的「日志与保留」
+  const openLogConfig = (hash: string): void => {
+    const target = `${hrefForPath(ACCESS_LOG_CONFIG_PATH, window.location.search)}#${hash}`;
     navigate(target);
   };
 
@@ -231,8 +232,8 @@ export function LogsPage(): ReactElement {
               {key}
             </button>
           ))}
-          <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => openSettings('query-log')}>
-            去设置 ↗
+          <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => openLogConfig('query-log')}>
+            日志与保留 ↗
           </button>
         </div>
       </div>

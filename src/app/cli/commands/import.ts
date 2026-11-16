@@ -295,7 +295,7 @@ export const importCommand: Command = {
           '用法：moshi import [--since 2025-01-01] [--source claude-code] [--batch 500] [--rate 20] [--json]',
           '',
           '  --since   起始时间（缺省 1970-01-01，即全部历史）',
-          '  --source  按 source id 过滤（也接受 adapter 名），可重复；缺省取配置 [ingest] sources',
+          '  --source  按 source id 过滤（也接受 adapter 名），可重复；缺省取配置 [collect] sources',
           '  --batch   每批 annotation 数（默认取 [ingest] import_batch）',
           '  --rate    每秒最多写入多少条事实（默认 20，0 表示不限速）',
           '  --json    进度走 stderr，stdout 只输出一行 JSON 结果（机器调用用）',
