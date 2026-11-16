@@ -346,7 +346,15 @@ export function ArchivePage(): ReactElement {
           {listState === 'empty' ? (
             <div style={{ padding: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }} data-testid="archive-empty">
               <div style={{ marginBottom: 6 }}>{emptyTopicsHint(t)}</div>
-              <div style={{ color: 'var(--color-text-muted)' }}>
+              <div
+                style={{
+                  color: 'var(--color-text-muted)',
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 4,
+                  flexWrap: 'wrap',
+                }}
+              >
                 {emptyArchiveDirHint(t)}
                 <a
                   href={pageHref('settings', window.location.search)}
