@@ -34,6 +34,7 @@ import {
   settingsHref,
   statusLights,
 } from '../../src/ui/shell/pure.js';
+import { translate } from '../../src/ui/i18n/index.js';
 
 describe('路由解析', () => {
   it('/ui 与 /ui/ 默认到 graph', () => {
@@ -187,14 +188,14 @@ describe('三灯', () => {
 });
 
 describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
-  it('五个二级页签，第一项是默认（接入与日志）', () => {
-    expect(SETTINGS_SECTIONS.map((s) => s.key)).toEqual(['access-logs', 'config', 'maintain', 'privacy', 'diagnose']);
+  it('设置四个二级，第一项是默认（配置）；接入与日志已并入接入（用户 m00882）', () => {
+    expect(SETTINGS_SECTIONS.map((s) => s.key)).toEqual(['config', 'maintain', 'privacy', 'diagnose']);
     expect(SETTINGS_SECTIONS[0]?.key).toBe(DEFAULT_SETTINGS_SECTION);
-    expect(DEFAULT_SETTINGS_SECTION).toBe('access-logs');
+    expect(DEFAULT_SETTINGS_SECTION).toBe('config');
   });
 
   it('/ui/settings/<x> 仍是设置页，未知二级归默认', () => {
-    expect(pageFromPath('/ui/settings/access-logs')).toBe('settings');
+    expect(pageFromPath('/ui/settings/config')).toBe('settings');
     expect(pageFromPath('/ui/settings/privacy')).toBe('settings');
     expect(sectionFromPath('/ui/settings/privacy')).toBe('privacy');
     expect(sectionFromPath('/ui/settings/whatever')).toBe(DEFAULT_SETTINGS_SECTION);
@@ -202,11 +203,18 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(sectionFromPath('/ui/settings')).toBeNull();
     expect(parseRoute('/ui/settings', '').section).toBe(DEFAULT_SETTINGS_SECTION);
     expect(sectionFromPath('/ui/graph')).toBeNull();
+    // 旧「设置 › 接入与日志」已删（AGENTS.md：未发布过，不为旧方案做兼容）：
+    // /ui/settings/access-logs 就是普通未知二级，归默认「配置」，不进接入页
+    expect(sectionFromPath('/ui/settings/access-logs')).toBe(DEFAULT_SETTINGS_SECTION);
+    const stale = parseRoute('/ui/settings/access-logs', '');
+    expect(stale.page).toBe('settings');
+    expect(stale.section).toBe(DEFAULT_SETTINGS_SECTION);
+    expect(stale.accessSection).toBeNull();
   });
 
   it('settingsHref 只带 token，不带别的筛选串', () => {
     expect(settingsHref('privacy', '?token=t&q=x')).toBe('/ui/settings/privacy?token=t');
-    expect(settingsHref('access-logs', '')).toBe('/ui/settings/access-logs');
+    expect(settingsHref('config', '')).toBe('/ui/settings/config');
   });
 
   it('/ui/hook 是接入页的独立整页（外部契约不能断）', () => {
@@ -214,7 +222,7 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(pageFromPath('/ui/hook')).toBe('access');
     expect(isStandaloneHook('/ui/hook')).toBe(true);
     expect(isStandaloneHook('/ui/hook/')).toBe(true);
-    expect(isStandaloneHook('/ui/settings/access-logs')).toBe(false);
+    expect(isStandaloneHook('/ui/settings/config')).toBe(false);
     // parseRoute：独立打开时 standalone 有值，二级归接入点（P4：原接入页迁到「接入 → 接入点」）
     const standalone = parseRoute('/ui/hook', '?from=magpie&token=t');
     expect(standalone.standalone).toBe('hook');
@@ -226,7 +234,8 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(embedded.section).toBe('diagnose');
   });
 
-  it('接入页两个二级与默认项（P4）', () => {
+  it('接入页两个二级与默认项（日志 / 接入点）', () => {
+    // 用户 m01083：「日志与保留」不再是二级，改成日志页弹框
     expect(ACCESS_SECTIONS.map((s) => s.key)).toEqual(['logs', 'endpoints']);
     expect(DEFAULT_ACCESS_SECTION).toBe('logs');
     expect(pageFromPath('/ui/access')).toBe('access');
@@ -234,9 +243,12 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(accessSectionFromPath('/ui/access/logs')).toBe('logs');
     expect(accessSectionFromPath('/ui/access/endpoints')).toBe('endpoints');
     expect(accessSectionFromPath('/ui/access/whatever')).toBe(DEFAULT_ACCESS_SECTION);
+    // 已删掉的旧二级当成未知二级，落到默认「日志」
+    expect(accessSectionFromPath('/ui/access/log-config')).toBe(DEFAULT_ACCESS_SECTION);
     expect(accessSectionFromPath('/ui/access')).toBeNull();
     expect(parseRoute('/ui/access', '').accessSection).toBe('logs');
     expect(parseRoute('/ui/access/endpoints', '').accessSection).toBe('endpoints');
+    expect(parseRoute('/ui/access/log-config', '').accessSection).toBe('logs');
     // 非接入页不挂二级
     expect(parseRoute('/ui/graph', '').accessSection).toBeNull();
     expect(parseRoute('/ui/settings/config', '').section).toBe('config');
@@ -246,15 +258,10 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
   it('菜单树：设置与接入各挂自己的二级，其余节点没有子项', () => {
     expect(NAV.map((node) => node.key)).toEqual(PAGES.map((page) => page.key));
     const settings = NAV.find((node) => node.key === 'settings');
-    expect(settings?.children?.map((child) => child.key)).toEqual([
-      'access-logs',
-      'config',
-      'maintain',
-      'privacy',
-      'diagnose',
-    ]);
+    expect(settings?.children?.map((child) => child.key)).toEqual(['config', 'maintain', 'privacy', 'diagnose']);
     const access = NAV.find((node) => node.key === 'access');
     expect(access?.children?.map((child) => child.key)).toEqual(['logs', 'endpoints']);
+    expect(access?.children?.map((child) => translate('zh', child.labelKey))).toEqual(['日志', '接入点']);
     for (const node of NAV) {
       if (node.key !== 'settings' && node.key !== 'access') expect(node.children).toBeUndefined();
     }

@@ -8,6 +8,8 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactElement } fr
 import { factHref, isSearchShortcut, isTypingTarget, memoriesHref } from './pure.js';
 import { navigate } from './navigate.js';
 import { fetchSuggestions, type FactSuggestion } from './api.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
 
 const boxStyle: CSSProperties = {
   position: 'relative',
@@ -60,6 +62,7 @@ const itemStyle: CSSProperties = {
 };
 
 export function SearchBox(): ReactElement {
+  const t = useT();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<readonly FactSuggestion[]>([]);
@@ -116,10 +119,10 @@ export function SearchBox(): ReactElement {
       <input
         ref={inputRef}
         data-testid="global-search"
-        aria-label="全局搜索"
+        aria-label={t('search.global')}
         data-focus={focusWithin ? 'true' : 'false'}
         className="moshi-search"
-        placeholder="搜索事实（/）"
+        placeholder={t('search.placeholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onFocus={() => {
@@ -167,7 +170,7 @@ export function SearchBox(): ReactElement {
               }}
               title={item.id}
             >
-              <span style={{ color: 'var(--color-text-muted)', marginRight: 6 }}>{item.ftype}</span>
+              <span style={{ color: 'var(--color-text-muted)', marginRight: 6 }}>{enumLabel('ftype', item.ftype)}</span>
               {item.content}
             </button>
           ))}

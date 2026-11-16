@@ -24,8 +24,17 @@ function tempDir(): string {
   return d;
 }
 
-/** 造一个假 home：`.claude/projects/<proj>/<session>.jsonl` + 指向它的 config.yaml */
-function fakeHome(opts: { sessions: number; turnsPerSession: number; pkgBase?: number }): {
+/**
+ * 造一个假 home：`.claude/projects/<proj>/<session>.jsonl` + 指向它的 config.yaml。
+ * 默认还会建空的 `~/.dsh/sessions`，让默认源 `claude-code + dsh` 两个都可用；
+ * `dshRoot: false` 用来模拟"这台机器没装 DSh"。
+ */
+function fakeHome(opts: {
+  sessions: number;
+  turnsPerSession: number;
+  pkgBase?: number;
+  dshRoot?: boolean;
+}): {
   home: string;
   dataDir: string;
 } {
@@ -37,6 +46,8 @@ function fakeHome(opts: { sessions: number; turnsPerSession: number; pkgBase?: n
     `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\n`,
     'utf8',
   );
+
+  if (opts.dshRoot !== false) mkdirSync(path.join(home, '.dsh', 'sessions'), { recursive: true });
 
   const proj = path.join(home, '.claude', 'projects', '-home-u-proj');
   mkdirSync(proj, { recursive: true });
@@ -226,13 +237,37 @@ describe('moshi import（§5.11 验收）', () => {
     // 合法的 adapter 但缺省根目录不存在：源可用性按"扫不扫得到"判断，而不是按名字
     writeFileSync(
       path.join(dataDir, 'config.yaml'),
-      `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\ningest:\n  sources: ["generic-jsonl"]\n`,
+      `storage:\n  data_dir: "${dataDir.replace(/\\/g, '/')}"\ncollect:\n  sources: ["generic-jsonl"]\n`,
       'utf8',
     );
     const r = await runImport(home, ['--rate', '0']);
     expect(r.code).toBe(4);
     expect(r.err).toContain('未找到可导入的会话源');
     expect(r.err).toContain('generic-jsonl');
+  });
+
+  it('默认双源：缺 ~/.dsh 时只跳过 dsh，退出码仍为 0', async () => {
+    const { home, dataDir } = fakeHome({ sessions: 1, turnsPerSession: 12, dshRoot: false });
+    const r = await runImport(home, ['--since', '1970-01-01', '--rate', '0']);
+    expect(r.code).toBe(0);
+    expect(r.err).toContain('跳过不可用的会话源');
+    expect(r.err).toContain('dsh');
+    expect(r.err).not.toContain('未找到可导入的会话源');
+    expect(r.out).toContain('导入完成');
+    expect(factCount(dataDir)).toBeGreaterThan(0);
+  });
+
+  it('--json：stdout 只有一行 JSON，部分源缺失也 ok:true、退出码 0', async () => {
+    const { home } = fakeHome({ sessions: 1, turnsPerSession: 12, dshRoot: false });
+    const r = await runImport(home, ['--since', '1970-01-01', '--rate', '0', '--json']);
+    expect(r.code).toBe(0);
+    // daemon 的 /api/import 子进程按 stdout 最后一行解析：这里必须正好一行
+    expect(r.out.trim().split('\n')).toHaveLength(1);
+    const json = JSON.parse(r.out.trim()) as { ok: boolean; unavailable: string[] };
+    expect(json.ok).toBe(true);
+    expect(json.unavailable).toEqual(['dsh']);
+    // 进度与"跳过"警告都走 stderr
+    expect(r.err).toContain('跳过不可用的会话源');
   });
 
   it('两个 generic-jsonl 实例各导各的，游标 key 是 source id（P3-A8）', async () => {
@@ -249,7 +284,7 @@ describe('moshi import（§5.11 验收）', () => {
         'storage:',
         `  data_dir: "${dataDir.replace(/\\/g, '/')}"`,
         '',
-        'ingest:',
+        'collect:',
         '  sources:',
         '    - id: "alpha"',
         '      adapter: "generic-jsonl"',

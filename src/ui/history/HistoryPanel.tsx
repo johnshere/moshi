@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { fetchTraceList, type TraceListEntry } from '../api.js';
 import { backToLiveTrace, replayTrace, useTrace } from '../state/trace.js';
 import { HISTORY_LIMIT, historyEmptyText, historyRows, selectedIdOf } from './pure.js';
+import { useT } from '../i18n/index.js';
 
 const panelStyle: CSSProperties = {
   position: 'absolute',
@@ -59,6 +60,7 @@ const smallButtonStyle: CSSProperties = {
 const MISS_STYLE: CSSProperties = { padding: '6px 8px', color: 'var(--color-warning)' };
 
 export function HistoryPanel(): JSX.Element {
+  const t = useT();
   const [entries, setEntries] = useState<TraceListEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const mode = useTrace((s) => s.mode);
@@ -93,25 +95,25 @@ export function HistoryPanel(): JSX.Element {
   const rows = historyRows(entries);
 
   return (
-    <section style={panelStyle} aria-label="历史查询">
+    <section style={panelStyle} aria-label={t('history.title')}>
       <div style={headStyle}>
-        <span style={{ color: 'var(--color-text-secondary)' }}>历史查询</span>
-        <span style={{ color: 'var(--color-text-faint)' }}>最近 {HISTORY_LIMIT} 次</span>
+        <span style={{ color: 'var(--color-text-secondary)' }}>{t('history.title')}</span>
+        <span style={{ color: 'var(--color-text-faint)' }}>{t('history.recent', { limit: HISTORY_LIMIT })}</span>
         {mode === 'replay' && (
           <button type="button" onClick={() => void backToLiveTrace()} style={smallButtonStyle}>
-            回到实时
+            {t('history.backLive')}
           </button>
         )}
       </div>
       {mode === 'replay' && (
         <div style={MISS_STYLE}>
-          回放中{selected === null ? '' : ` · ${selected.slice(-8)}`}
+          {t('history.replaying', { tail: selected === null ? '' : ` · ${selected.slice(-8)}` })}
           {missMessage === null ? '' : ` · ${missMessage}`}
         </div>
       )}
       <div style={{ overflowY: 'auto', padding: '3px 6px 6px' }}>
         {rows.length === 0 ? (
-          <div style={{ padding: '3px 2px', color: 'var(--color-text-faint)' }}>{historyEmptyText(rows, error)}</div>
+          <div style={{ padding: '3px 2px', color: 'var(--color-text-faint)' }}>{historyEmptyText(rows, error, t)}</div>
         ) : (
           <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
             {rows.map((row) => {
@@ -149,7 +151,7 @@ export function HistoryPanel(): JSX.Element {
         )}
       </div>
       <div style={{ padding: '0 8px 5px', color: 'var(--color-text-faint)' }}>
-        {mode === 'live' ? '实时：跟随最近一次查询 · 点一条回放' : '回放：显示选中的历史 trace'}
+        {mode === 'live' ? t('history.mode.live') : t('history.mode.replay')}
       </div>
     </section>
   );

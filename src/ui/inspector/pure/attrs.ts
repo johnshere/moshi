@@ -4,6 +4,9 @@
  * 只做"呈现类型判定"——ext 是未定字段的扩展槽（概设 §8.2），字段语义没定之前
  * 不做自定义表单。猜得出类型的用对应控件渲染，猜不出的退回 KV 表格原样展示。
  */
+
+import { t as translateNow, type Translator } from '../../i18n/index.js';
+
 export type ExtGuess =
   | { kind: 'number' }
   | { kind: 'boolean' }
@@ -34,8 +37,8 @@ export function guessExtControl(value: unknown): ExtGuess {
 }
 
 /** 只读展示时按类型格式化值（开关显示 开/关，时间显示原始串即可） */
-export function formatExtValue(value: unknown): string {
-  if (typeof value === 'boolean') return value ? '开' : '关';
+export function formatExtValue(value: unknown, t: Translator = translateNow): string {
+  if (typeof value === 'boolean') return value ? t('inspector.attr.on') : t('inspector.attr.off');
   if (typeof value === 'object' && value !== null) return JSON.stringify(value);
   return String(value);
 }

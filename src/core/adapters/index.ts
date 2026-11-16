@@ -1,7 +1,7 @@
 /**
  * 适配器注册表（详设 §5.2）。
  *
- * `[ingest] sources = ["claude-code"]` 里的名字到这里查。查不到**不抛错**，
+ * `[collect] sources = ["claude-code"]` 里的名字到这里查。查不到**不抛错**，
  * 返回 null 并让调用方记一条 warn——配置里写错一个名字不该让 daemon 起不来，
  * 但也不能静默变成"什么都没采集"。
  */
@@ -26,7 +26,7 @@ export type SourceName = (typeof SOURCE_NAMES)[number];
  * 配置解析后的会话源实例（P3-A8）。
  *
  * 旧配置 `sources = ["claude-code"]` 归一成 `{id:'claude-code', root:<home>/.claude/projects}`；
- * `[[ingest.sources]]` 允许自定义 id/root/enabled/field_map。游标 key 用 `id`，
+ * `[[collect.sources]]` 允许自定义 id/root/enabled/field_map。游标 key 用 `id`，
  * 不再用适配器名——两个 claude-code 实例扫不同目录时必须互不踩游标。
  */
 export interface ResolvedSource {

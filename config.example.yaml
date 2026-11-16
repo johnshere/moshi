@@ -14,7 +14,6 @@ storage:
   query_log_keep_days: 3     # 检索日志保留天数（P2；0=永久；启动+每日按批清理）
 
 ingest:
-  sources: ["claude-code"]   # 适配器名，或 `- id/adapter/root` 实例列表
   harvest_cron: "0 3 * * *"
   harvest_batch: 200
   import_batch: 500
@@ -34,6 +33,7 @@ hook:
   capture_tool_output: false # 入库是否带工具输出正文
 
 collect:
+  sources: ["claude-code", "dsh"]   # 采集/导入共用的会话源；缺 ~/.dsh 的机器会自动跳过 dsh 源。也可写成 `- id/adapter/root` 实例列表
   enabled: true              # 是否启用后台块扫描
   interval_ms: 60000         # 后台扫描周期（0 = 不自动跑）
   llm_scan: true             # 阶段 2：对无块 turn 启用 LLM 归纳兜底

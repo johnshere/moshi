@@ -7,7 +7,7 @@ import { buildLogger, pruneLogs } from '../infra/log/logger.js';
 import { SidecarClient } from '../infra/sidecar/client.js';
 import { runCli, extractConfigArgv } from './cli/index.js';
 import { DETACHED_ENV, detachDaemon, waitDaemonUp, wantsDetach } from './detach.js';
-import { dataPaths, loadConfig, resolveSources } from './config.js';
+import { dataPaths, defaultConfigPath, loadConfig, resolveSources } from './config.js';
 import { startCollectRunner, type CollectRunner } from './collectRunner.js';
 import { AlreadyRunningError, boot } from './lifecycle.js';
 import { inspectLock, removeLock } from './lock.js';
@@ -164,6 +164,8 @@ export async function main(argv: readonly string[]): Promise<number> {
           db,
           cfg: booted,
           token,
+          // 子进程（历史导入）要读同一份配置：客户不该知道 daemon 启动时加了 --config。
+          configFile: global.file ?? defaultConfigPath(),
           sidecar,
           breaker,
           onEnqueued: () => runner?.wake(),
@@ -214,7 +216,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   // home 与配置同源（`os.homedir()`）——配置读一个 home、会话扫另一个，是 P0 踩过的坑。
   try {
     const paths = dataPaths(cfg);
-    // P3-A8：source 实例由配置解析（`[[ingest.sources]]` 的 id/root/enabled 都生效）
+    // P3-A8：source 实例由配置解析（`[[collect.sources]]` 的 id/root/enabled 都生效）
     collectRunner = startCollectRunner({
       db: instance.db,
       cfg,

@@ -38,13 +38,15 @@ import { BatchPanel } from './BatchPanel.js';
 import { useNav } from '../state/nav.js';
 import { useSelection } from '../state/selection.js';
 import { useToast, type ToastInput } from '../state/toast.js';
+import { useT, type Translator } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 type Tab = 'resolve' | 'lowconf' | 'prune';
 
-const TABS: readonly { key: Tab; label: string; hint: string }[] = [
-  { key: 'resolve', label: '消解确认', hint: 'alias 相似度 0.60–0.92 · 每条可并入/保留/拒绝' },
-  { key: 'lowconf', label: '低置信', hint: 'confidence < 0.45 · 每条可抬升/失效，也可勾选批量失效' },
-  { key: 'prune', label: '淘汰候选', hint: 'strength < 0.15 且 60 天未访问 · 可勾选剪枝' },
+const TABS: readonly { key: Tab; labelKey: DictKey; hintKey: DictKey }[] = [
+  { key: 'resolve', labelKey: 'inbox.tab.resolve', hintKey: 'inbox.tab.resolveHint' },
+  { key: 'lowconf', labelKey: 'inbox.tab.lowconf', hintKey: 'inbox.tab.lowconfHint' },
+  { key: 'prune', labelKey: 'inbox.tab.prune', hintKey: 'inbox.tab.pruneHint' },
 ];
 
 /** 每页取多少条：与服务端默认 limit 一致 */
@@ -88,19 +90,20 @@ function decideNotice(
   action: DecideAction,
   before: Record<string, unknown>,
   after: Record<string, unknown>,
+  t: Translator,
 ): string {
   const val = (v: unknown): string => (typeof v === 'string' ? v : JSON.stringify(v));
   switch (action) {
     case 'merge':
-      return `已并入：${val(before['alias'])} → ${val(before['entity_id'])}（可撤销）`;
+      return t('inbox.notice.merged', { alias: val(before['alias']), entity: val(before['entity_id']) });
     case 'keep':
-      return '已保留 alias 映射（来源标为人工确认）';
+      return t('inbox.notice.kept');
     case 'reject':
-      return '已拒绝 alias 映射（置信度归 0，行保留）';
+      return t('inbox.notice.rejected');
     case 'promote':
-      return `已抬升置信度 → ${val(after['confidence'])}`;
+      return t('inbox.notice.promoted', { value: val(after['confidence']) });
     default:
-      return '已失效该事实（可撤销）';
+      return t('inbox.notice.invalidated');
   }
 }
 
@@ -140,18 +143,20 @@ function FactCheckbox(props: {
   checked: boolean;
   onToggle: (id: string) => void;
 }): JSX.Element {
+  const t = useT();
   return (
     <input
       type="checkbox"
       checked={props.checked}
       onChange={() => props.onToggle(props.id)}
-      aria-label={`选择 ${props.id}`}
+      aria-label={t('inbox.selectRow', { id: props.id })}
       style={{ marginTop: 3, accentColor: 'var(--color-info-strong)' }}
     />
   );
 }
 
 export function InboxPage(): JSX.Element {
+  const t = useT();
   const [tab, setTab] = useState<Tab>('resolve');
   const [resolveRows, setResolveRows] = useState<ResolveRow[]>([]);
   const [lowConfRows, setLowConfRows] = useState<LowConfRow[]>([]);
@@ -232,11 +237,11 @@ export function InboxPage(): JSX.Element {
     try {
       setPreview(await previewBatch(action, [...selected]));
     } catch (e) {
-      setError(`预览失败：${errorText(e)}`);
+      setError(t('inbox.preview.failed', { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
-  }, [action, selected]);
+  }, [action, selected, t]);
 
   /** 撤销一次 op：toast 按钮触发；410 = 撤销窗口已过，只刷新队列 */
   const runUndo = useCallback(
@@ -245,15 +250,15 @@ export function InboxPage(): JSX.Element {
       setError(null);
       try {
         const result = await undoBatch(opId);
-        pushToast({ kind: 'success', text: `已撤销，恢复 ${result.restored} 条事实` });
+        pushToast({ kind: 'success', text: t('inbox.undo.done', { count: result.restored }) });
         await loadAll();
       } catch (e) {
         if (e instanceof InboxApiError && e.status === 410) {
-          pushToast({ kind: 'info', text: '撤销已过期，已刷新队列' });
+          pushToast({ kind: 'info', text: t('inbox.undo.expired') });
           await loadAll();
         } else {
-          setError(`撤销失败：${errorText(e)}`);
-          pushToast({ kind: 'error', text: `撤销失败：${errorText(e)}` });
+          setError(t('inbox.undo.failed', { error: errorText(e) }));
+          pushToast({ kind: 'error', text: t('inbox.undo.failed', { error: errorText(e) }) });
         }
       } finally {
         setBusy(false);
@@ -273,9 +278,12 @@ export function InboxPage(): JSX.Element {
         kind: 'undo',
         text:
           action === 'prune'
-            ? `已剪枝 ${result.facts} 条事实（软删）`
-            : `已失效 ${result.facts} 条事实（连带失效 ${result.invalidated_by_cascade} 条）`,
-        actionLabel: '撤销',
+            ? t('inbox.confirm.pruned', { count: result.facts })
+            : t('inbox.confirm.invalidated', {
+                count: result.facts,
+                cascade: result.invalidated_by_cascade,
+              }),
+        actionLabel: t('inbox.undo'),
         deadline: Date.parse(result.undo_deadline),
         onAction: () => {
           void runUndo(result.op_id);
@@ -283,11 +291,11 @@ export function InboxPage(): JSX.Element {
       });
       await loadAll();
     } catch (e) {
-      setError(`执行失败：${errorText(e)}`);
+      setError(t('inbox.exec.failed', { error: errorText(e) }));
     } finally {
       setBusy(false);
     }
-  }, [action, selected, loadAll, pushToast, runUndo]);
+  }, [action, selected, loadAll, pushToast, runUndo, t]);
 
   /** 单条决策（P2-19-A）：merge / invalidate 会拿到 op_id → 生成同款撤销 toast */
   const onDecide = useCallback(
@@ -296,13 +304,13 @@ export function InboxPage(): JSX.Element {
       setError(null);
       try {
         const result = await decideQueue(kind, id, decideAction);
-        const text = decideNotice(decideAction, result.before, result.after);
+        const text = decideNotice(decideAction, result.before, result.after, t);
         if (result.op_id !== undefined && result.undo_deadline !== undefined) {
           const opId = result.op_id;
           pushToast({
             kind: 'undo',
             text,
-            actionLabel: '撤销',
+            actionLabel: t('inbox.undo'),
             deadline: Date.parse(result.undo_deadline),
             onAction: () => {
               void runUndo(opId);
@@ -313,7 +321,7 @@ export function InboxPage(): JSX.Element {
         }
         await loadAll();
       } catch (e) {
-        setError(`处理失败：${errorText(e)}`);
+        setError(t('inbox.decideFailed', { error: errorText(e) }));
       } finally {
         setRowBusy(null);
       }
@@ -340,18 +348,18 @@ export function InboxPage(): JSX.Element {
             </span>
             <span style={{ display: 'inline-flex', gap: 6 }}>
               <RowButton
-                label="并入"
+                label={t('inbox.row.merge')}
                 tone="primary"
                 disabled={rowBusy !== null}
                 onClick={() => void onDecide('resolve', row.id, 'merge')}
               />
               <RowButton
-                label="保留"
+                label={t('inbox.row.keep')}
                 disabled={rowBusy !== null}
                 onClick={() => void onDecide('resolve', row.id, 'keep')}
               />
               <RowButton
-                label="拒绝"
+                label={t('inbox.row.reject')}
                 tone="danger"
                 disabled={rowBusy !== null}
                 onClick={() => void onDecide('resolve', row.id, 'reject')}
@@ -374,13 +382,13 @@ export function InboxPage(): JSX.Element {
               </span>
               <span style={{ display: 'inline-flex', gap: 6 }}>
                 <RowButton
-                  label="抬升"
+                  label={t('inbox.row.promote')}
                   tone="primary"
                   disabled={rowBusy !== null}
                   onClick={() => void onDecide('lowconf', row.id, 'promote')}
                 />
                 <RowButton
-                  label="失效"
+                  label={t('inbox.row.invalidate')}
                   tone="danger"
                   disabled={rowBusy !== null}
                   onClick={() => void onDecide('lowconf', row.id, 'invalidate')}
@@ -400,7 +408,7 @@ export function InboxPage(): JSX.Element {
                 str {row.strength.toFixed(2)}
               </span>
               <span style={{ ...muted, width: 170, textAlign: 'right' }}>
-                {row.last_access_at ?? '从未访问'}
+                {row.last_access_at ?? t('inbox.neverAccessed')}
               </span>
             </div>
           ));
@@ -416,7 +424,7 @@ export function InboxPage(): JSX.Element {
     <div style={pageStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
         <div style={{ fontSize: 15, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
-          默识 · 待办 <span style={{ ...muted, fontSize: 12 }}>三队列 / §10.6</span>
+          {t('inbox.title')} <span style={{ ...muted, fontSize: 12 }}>{t('inbox.subtitle')}</span>
         </div>
         <span style={{ display: 'inline-flex', gap: 6 }}>
           {TABS.map((item) => (
@@ -426,10 +434,10 @@ export function InboxPage(): JSX.Element {
               onClick={() => setTab(item.key)}
               disabled={item.key === tab}
               aria-pressed={item.key === tab}
-              title={item.hint}
+              title={t(item.hintKey)}
               style={tabStyle(item.key === tab)}
             >
-              {item.label}（{counts[item.key]}）
+              {t('inbox.tabCount', { label: t(item.labelKey), count: counts[item.key] })}
             </button>
           ))}
         </span>
@@ -439,23 +447,26 @@ export function InboxPage(): JSX.Element {
           style={{ ...tabStyle(false), marginLeft: 'auto' }}
           disabled={loading}
         >
-          {loading ? '加载中…' : '刷新'}
+          {loading ? t('common.loading') : t('inbox.refresh')}
         </button>
       </div>
 
       <div style={{ ...muted, marginTop: 6 }}>
-        {activeTab?.hint ?? ''} · 队列取前 {QUEUE_LIMIT} 条 · 低置信/淘汰候选可跨 tab 累加勾选
+        {(activeTab === undefined ? '' : t(activeTab.hintKey)) + t('inbox.hint.tail', { limit: QUEUE_LIMIT })}
         {tab === 'prune' && pruneThresholds !== null
-          ? ` · 判据来自服务端：strength < ${pruneThresholds.strength.toFixed(2)} 且 ${String(pruneThresholds.idle_days)} 天未访问`
+          ? t('inbox.hint.prune', {
+              strength: pruneThresholds.strength.toFixed(2),
+              days: pruneThresholds.idle_days,
+            })
           : ''}
-        {tab === 'resolve' && ' · 单条确认/合并属 P2-19-A，本页先只展示候选'}
+        {tab === 'resolve' && t('inbox.hint.resolve')}
       </div>
 
-      {error !== null && <div style={{ color: 'var(--color-danger)', marginTop: 8 }}>出错了：{error}</div>}
+      {error !== null && <div style={{ color: 'var(--color-danger)', marginTop: 8 }}>{t('inbox.errorGeneric', { error })}</div>}
 
       <div style={{ marginTop: 10, overflowY: 'auto', flex: 1 }}>
         {rows.length === 0 ? (
-          <div style={{ ...muted, padding: '24px 4px' }}>没有待处理项</div>
+          <div style={{ ...muted, padding: '24px 4px' }}>{t('inbox.empty')}</div>
         ) : (
           rows
         )}

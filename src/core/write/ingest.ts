@@ -18,6 +18,7 @@
  */
 import { canonicalJson, sha256Hex } from '../../domain/hash.js';
 import type { Db } from '../../infra/sqlite/db.js';
+import { retryBusySync } from '../../infra/sqlite/db.js';
 import * as annotationRepo from '../../infra/sqlite/annotationRepo.js';
 import * as episodeRepo from '../../infra/sqlite/episodeRepo.js';
 import type { Cursor, SessionRef, SessionSource, RawEvent } from '../adapters/session-source.js';
@@ -74,6 +75,13 @@ export function summaryOf(event: RawEvent): string | null {
 }
 
 export function ingestEvent(db: Db, event: RawEvent): IngestResult {
+  // 单条事件里的几条 INSERT 各自自动提交（没有外层事务）。撞锁时整条重放：
+  // episode 按 (raw_hash, session) 查重、annotation 按 dedup_key ON CONFLICT DO NOTHING，
+  // 所以重放不会产生重复行——这也是这里能安全整体重试的前提。
+  return retryBusySync(() => writeEvent(db, event));
+}
+
+function writeEvent(db: Db, event: RawEvent): IngestResult {
   const episode = episodeRepo.insertIfAbsent(db, {
     ts: event.ts,
     rawHash: event.rawHash,

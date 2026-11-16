@@ -13,7 +13,7 @@ import type { SidecarStatus } from '../../src/infra/sidecar/client.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { setMeta } from '../../src/infra/sqlite/metaRepo.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
-import { firstRunState, MCP_IDLE_MS, type FirstRunStatus } from '../../src/ui/shell/first-run.js';
+import { BANNERS, firstRunState, MCP_IDLE_MS, type FirstRunStatus } from '../../src/ui/shell/first-run.js';
 
 const opened: Db[] = [];
 const dirs: string[] = [];
@@ -121,6 +121,15 @@ describe('firstRunState 五态与优先级', () => {
   it('collectEnabled 未知（null/undefined）不据此判态，其余条件满足即 ready', () => {
     expect(firstRunState(statusWith(), true, { now: NOW, collectEnabled: null })).toBe('ready');
     expect(firstRunState(statusWith(), true, { now: NOW })).toBe('ready');
+  });
+
+  it('collect_off 不出横幅（用户 m00882：三态暂不提示，判定仍保留）', () => {
+    // 判定还在：状态机照旧给出 collect_off
+    expect(firstRunState(statusWith(), true, { now: NOW, collectEnabled: false })).toBe('collect_off');
+    // 文案没了：组件取不到 banner 就不渲染（不改其它三态）
+    expect(Object.keys(BANNERS).sort()).toEqual(['daemon_off', 'no_data', 'sidecar_off']);
+    expect(BANNERS.collect_off).toBeUndefined();
+    expect(BANNERS.daemon_off?.textKey).toBe('firstRun.daemonOff.text');
   });
 });
 

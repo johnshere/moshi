@@ -103,21 +103,42 @@ declare global {
   }
 }
 
+/**
+ * `resolveToken` 用到的最小浏览器表面。根 `tsconfig.json` 是 node 环境（lib 无 DOM），
+ * 而单测会 import 本模块，所以这里**不写 `window` 字面量**，改从 `globalThis` 上取。
+ */
+interface TokenWindowLike {
+  location?: { search?: string };
+  localStorage?: {
+    getItem(key: string): string | null;
+    setItem(key: string, value: string): void;
+  };
+  __MOSHI_TOKEN__?: unknown;
+}
+
+/** 非浏览器环境（node 单测、服务端）没有 `window` → 按「无 token」处理。 */
+function tokenWindow(): TokenWindowLike | null {
+  const w = (globalThis as { window?: TokenWindowLike }).window;
+  return w === undefined ? null : w;
+}
+
 export function resolveToken(): string {
-  const fromQuery = new URLSearchParams(window.location.search).get('token');
+  const w = tokenWindow();
+  if (w === null) return '';
+  const fromQuery = new URLSearchParams(w.location?.search ?? '').get('token');
   if (fromQuery !== null && fromQuery !== '') {
     try {
-      window.localStorage.setItem('moshi-token', fromQuery);
+      w.localStorage?.setItem('moshi-token', fromQuery);
     } catch {
       /* 隐私模式禁写 localStorage 时忽略 */
     }
     return fromQuery;
   }
-  if (typeof window.__MOSHI_TOKEN__ === 'string' && window.__MOSHI_TOKEN__ !== '') {
-    return window.__MOSHI_TOKEN__;
+  if (typeof w.__MOSHI_TOKEN__ === 'string' && w.__MOSHI_TOKEN__ !== '') {
+    return w.__MOSHI_TOKEN__;
   }
   try {
-    return window.localStorage.getItem('moshi-token') ?? '';
+    return w.localStorage?.getItem('moshi-token') ?? '';
   } catch {
     return '';
   }

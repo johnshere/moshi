@@ -213,7 +213,7 @@ describe('seedDevDb --config（P3-A8 统一配置）', () => {
         'storage:',
         `  data_dir: "${dataDir.replace(/\\/g, '/')}"`,
         '',
-        'ingest:',
+        'collect:',
         '  sources:',
         '    - id: "dev"',
         '      adapter: "claude-code"',

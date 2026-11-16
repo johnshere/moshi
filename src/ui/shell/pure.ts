@@ -7,27 +7,29 @@
  * 路由仍是「按 pathname 前缀分派」，不引路由库（概设 §8.9：不加没必要的依赖）。
  * URL 是唯一真相源：页面、筛选、深链都从 pathname + search 解析，不回写 store。
  */
+import type { DictKey } from '../i18n/dict.js';
 
 /** 六个一级页面（概设 §8.1；P4 新增「接入」）。顺序即左侧导航顺序。 */
 export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'access' | 'settings';
 
 export interface PageDef {
   key: PageKey;
-  label: string;
+  /** 菜单文案（D-184：只存 key，渲染时经 `t()` 取当前语言） */
+  labelKey: DictKey;
   /** 概设 §8.1 的页面路径；`/ui` 默认重定向到 graph。 */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const PAGES: readonly PageDef[] = [
-  { key: 'graph', label: '图谱', path: '/ui/graph', title: '3D/2D/表格三视图 + 证据链' },
-  { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
-  { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
-  { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
-  // 接入是**树节点**：日志与接入点两个二级（P4；开发方案 §7）
-  { key: 'access', label: '接入', path: '/ui/access', title: '接入点状态与统一日志' },
+  { key: 'graph', labelKey: 'nav.graph', path: '/ui/graph', titleKey: 'nav.graph.title' },
+  { key: 'memories', labelKey: 'nav.memories', path: '/ui/memories', titleKey: 'nav.memories.title' },
+  { key: 'inbox', labelKey: 'nav.inbox', path: '/ui/inbox', titleKey: 'nav.inbox.title' },
+  { key: 'archive', labelKey: 'nav.archive', path: '/ui/archive', titleKey: 'nav.archive.title' },
+  // 接入是**树节点**：日志 / 接入点两个二级（P4；用户 m00882 并入接入相关全部；用户 m01083 把「日志与保留」改成日志页弹框）
+  { key: 'access', labelKey: 'nav.access', path: '/ui/access', titleKey: 'nav.access.title' },
   // 设置是**树节点**：二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
-  { key: 'settings', label: '设置', path: '/ui/settings', title: '接入与日志 / 配置 / 维护 / 隐私 / 诊断' },
+  { key: 'settings', labelKey: 'nav.settings', path: '/ui/settings', titleKey: 'nav.settings.title' },
 ];
 
 export const DEFAULT_PAGE: PageKey = 'graph';
@@ -35,50 +37,44 @@ export const DEFAULT_PAGE: PageKey = 'graph';
 const PAGE_KEYS: readonly string[] = PAGES.map((p) => p.key);
 
 /**
- * 设置的五个二级（P4 起「接入与日志」在最前；设计 §16.5.3，用户 m01506/m02743 裁决）。
+ * 设置的四个二级（设计 §16.5.3，用户 m01506/m02743 裁决）。
  *
- * **顺序即菜单顺序，第一项也是 `/ui/settings` 的默认落地页**：先调接入日志，
- * 再调参数，然后维护/隐私/诊断。Hook 接入页已迁到「接入 → 接入点」。
+ * **顺序即菜单顺序，第一项也是 `/ui/settings` 的默认落地页**：先调参数，
+ * 然后维护/隐私/诊断。原「接入与日志」已按用户 m00882 并入一级「接入」。
  */
-export type SettingsSection = 'access-logs' | 'config' | 'maintain' | 'privacy' | 'diagnose';
+export type SettingsSection = 'config' | 'maintain' | 'privacy' | 'diagnose';
 
 export interface SettingsSectionDef {
   key: SettingsSection;
-  label: string;
+  labelKey: DictKey;
   /** `/ui/settings/<key>` */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
-  {
-    key: 'access-logs',
-    label: '接入与日志',
-    path: '/ui/settings/access-logs',
-    title: '查询日志保留与清空、插件运行日志档位（唯一写入口）',
-  },
-  { key: 'config', label: '配置', path: '/ui/settings/config', title: '配置白名单键' },
-  { key: 'maintain', label: '维护', path: '/ui/settings/maintain', title: '索引重建、备份恢复、自动更新' },
-  { key: 'privacy', label: '隐私', path: '/ui/settings/privacy', title: '采集与导出、脱敏、清理' },
-  { key: 'diagnose', label: '诊断', path: '/ui/settings/diagnose', title: '自检、图质量、模型归档' },
+  { key: 'config', labelKey: 'settings.section.config', path: '/ui/settings/config', titleKey: 'settings.section.config.title' },
+  { key: 'maintain', labelKey: 'settings.section.maintain', path: '/ui/settings/maintain', titleKey: 'settings.section.maintain.title' },
+  { key: 'privacy', labelKey: 'settings.section.privacy', path: '/ui/settings/privacy', titleKey: 'settings.section.privacy.title' },
+  { key: 'diagnose', labelKey: 'settings.section.diagnose', path: '/ui/settings/diagnose', titleKey: 'settings.section.diagnose.title' },
 ];
 
-export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'access-logs';
+export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'config';
 
-/** 接入页的两个二级（P4；开发方案 §7） */
+/** 接入页的两个二级（P4；开发方案 §7）。「日志与保留」按用户 m01083 改成日志页弹框，不再是二级。 */
 export type AccessSection = 'logs' | 'endpoints';
 
 export interface AccessSectionDef {
   key: AccessSection;
-  label: string;
+  labelKey: DictKey;
   /** `/ui/access/<key>` */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const ACCESS_SECTIONS: readonly AccessSectionDef[] = [
-  { key: 'logs', label: '日志', path: '/ui/access/logs', title: '统一日志流 + 按接入点统计（只读）' },
-  { key: 'endpoints', label: '接入点', path: '/ui/access/endpoints', title: 'Magpie 插件 / MCP / CLI / 界面 的状态与安装' },
+  { key: 'logs', labelKey: 'access.section.logs', path: '/ui/access/logs', titleKey: 'access.section.logs.title' },
+  { key: 'endpoints', labelKey: 'access.section.endpoints', path: '/ui/access/endpoints', titleKey: 'access.section.endpoints.title' },
 ];
 
 export const DEFAULT_ACCESS_SECTION: AccessSection = 'logs';
@@ -87,15 +83,16 @@ const SECTION_KEYS: readonly string[] = SETTINGS_SECTIONS.map((s) => s.key);
 const ACCESS_KEYS: readonly string[] = ACCESS_SECTIONS.map((s) => s.key);
 
 /**
- * 接入页的**独立整页**路径（设计 §16.5.5）。与设置的 `/ui/settings/access` 是
- * 同一个组件、两个外壳；这个地址是外部契约（`magpie.cmd` 用它拉起界面）。
+ * 接入页的**独立整页**路径（设计 §16.5.5）。与接入二级 `/ui/access/endpoints`
+ * （`EndpointsPage` 内嵌同一个 `AccessPage`）是同一个组件、两个外壳；这个地址是
+ * 外部契约（`magpie.cmd` 用它拉起界面）。
  */
 export const HOOK_UI_PATH = '/ui/hook';
 
 /** 解析后的路由态：页面 + 深链参数（全部已 trim，空串归一为 null）。 */
 export interface RouteInfo {
   page: PageKey;
-  /** 设置二级；非设置页恒为 null（`/ui/settings` 无二级 → 默认 access-logs） */
+  /** 设置二级；非设置页恒为 null（`/ui/settings` 无二级 → 默认 config） */
   section: SettingsSection | null;
   /** 接入二级；非接入页恒为 null（`/ui/access` → 默认 logs，`/ui/hook` → endpoints） */
   accessSection: AccessSection | null;
@@ -127,7 +124,7 @@ function normalizePath(pathname: string): string {
  *
  * 两处**不是**五页但归到 settings 的路径（设计 §16.5.1 / §16.5.5）：
  * - `/ui/settings/<section>`：二级深链，归 settings 且由 `sectionFromPath` 决定哪个二级；
- * - `/ui/hook`：接入页独立整页，导航高亮跟着「设置 → 接入」走。
+ * - `/ui/hook`：接入页独立整页，导航高亮跟着一级「接入」走。
  */
 export function pageFromPath(pathname: string): PageKey {
   const normalized = normalizePath(pathname);
@@ -153,8 +150,10 @@ export function accessSectionFromPath(pathname: string): AccessSection | null {
 /**
  * `/ui/settings/<section>` → 二级。三种情况：
  * - 命中枚举 → 该二级；
- * - **未知 section → access**（设计 §16.5.1：跳去图谱会让人以为自己点错了）；
- * - 不是设置二级路径（含 `/ui/settings` 本身）→ null，由调用方按默认 access 处理。
+ * - **未知 section → 默认二级**（设计 §16.5.1：跳去图谱会让人以为自己点错了）；
+ * - 不是设置二级路径（含 `/ui/settings` 本身）→ null，由调用方按默认二级处理。
+ *
+ * 已删掉的 `access-logs` 不在枚举里，按未知 section 归 `config`（不为旧方案做兼容）。
  */
 export function sectionFromPath(pathname: string): SettingsSection | null {
   const normalized = normalizePath(pathname);
@@ -232,16 +231,16 @@ export function hrefForPath(path: string, currentSearch = ''): string {
 /** 左侧菜单树的一个子节点（设置二级 / 接入二级） */
 export interface NavChild {
   key: string;
-  label: string;
+  labelKey: DictKey;
   path: string;
 }
 
 /** 左侧菜单树的一个节点：有 children 的节点可展开（设置） */
 export interface NavNode {
   key: PageKey;
-  label: string;
+  labelKey: DictKey;
   path: string;
-  title: string;
+  titleKey: DictKey;
   children?: readonly NavChild[];
 }
 
@@ -255,12 +254,12 @@ export const NAV: readonly NavNode[] = PAGES.map((page) => {
   if (page.key === 'settings') {
     return {
       key: page.key,
-      label: page.label,
+      labelKey: page.labelKey,
       path: page.path,
-      title: page.title,
+      titleKey: page.titleKey,
       children: SETTINGS_SECTIONS.map((section) => ({
         key: section.key,
-        label: section.label,
+        labelKey: section.labelKey,
         path: section.path,
       })),
     };
@@ -268,17 +267,17 @@ export const NAV: readonly NavNode[] = PAGES.map((page) => {
   if (page.key === 'access') {
     return {
       key: page.key,
-      label: page.label,
+      labelKey: page.labelKey,
       path: page.path,
-      title: page.title,
+      titleKey: page.titleKey,
       children: ACCESS_SECTIONS.map((section) => ({
         key: section.key,
-        label: section.label,
+        labelKey: section.labelKey,
         path: section.path,
       })),
     };
   }
-  return { key: page.key, label: page.label, path: page.path, title: page.title };
+  return { key: page.key, labelKey: page.labelKey, path: page.path, titleKey: page.titleKey };
 });
 
 /** 顶部搜索回车目标：`/ui/memories?q=<输入>`。 */
@@ -366,10 +365,11 @@ export type LightState = 'ok' | 'warn' | 'off' | 'error';
 
 export interface StatusLight {
   key: 'daemon' | 'sidecar' | 'vector';
-  label: string;
+  labelKey: DictKey;
   state: LightState;
-  /** 灯旁的一句话；hover title 与无障碍文本都用它 */
-  text: string;
+  /** 灯旁的一句话（key + 变量）；hover title 与无障碍文本都用它 */
+  textKey: DictKey;
+  textVars?: Readonly<Record<string, string | number>>;
 }
 
 /** `GET /api/status` 的最小读取契约（server.ts 内联路由，字段全可选）。 */
@@ -404,33 +404,51 @@ export function statusLights(status: DaemonStatus | null): StatusLight[] {
 
   const daemonLight: StatusLight =
     daemon === 'ok'
-      ? { key: 'daemon', label: 'daemon', state: 'ok', text: 'daemon 运行中' }
-      : { key: 'daemon', label: 'daemon', state: 'error', text: status === null ? '未连接（/api/status 取数失败）' : `异常：${daemon ?? '未知'}` };
+      ? { key: 'daemon', labelKey: 'light.daemon.label', state: 'ok', textKey: 'light.daemon.ok' }
+      : {
+          key: 'daemon',
+          labelKey: 'light.daemon.label',
+          state: 'error',
+          textKey: status === null ? 'light.daemon.error' : 'light.daemon.abnormal',
+          ...(status === null ? {} : { textVars: { state: daemon ?? 'unknown' } }),
+        };
 
   let sidecarLight: StatusLight;
   if (sidecarState === null) {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '未配置（无 sidecar 依赖）' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'off', textKey: 'light.sidecar.unset' };
   } else if (sidecarMode === 'off') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '已关闭（mode=off）' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'off', textKey: 'light.sidecar.off' };
   } else if (sidecarState === 'ready') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'ok', text: 'ready' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'ok', textKey: 'light.sidecar.ready' };
   } else if (sidecarState === 'starting') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'warn', text: '启动中' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'warn', textKey: 'light.sidecar.starting' };
   } else if (sidecarState === 'failed') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'error', text: 'failed' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'error', textKey: 'light.sidecar.failed' };
   } else {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: sidecarState };
+    // 后端给了没登记的 state：原样透出（不翻译），标 off 而不是假装正常
+    sidecarLight = {
+      key: 'sidecar',
+      labelKey: 'light.sidecar.label',
+      state: 'off',
+      textKey: 'light.sidecar.other',
+      textVars: { state: sidecarState },
+    };
   }
 
   let vectorLight: StatusLight;
   if (vectorState === 'on') {
-    const progress =
-      indexed === null || total === null ? '已启用' : `已索引 ${String(indexed)} / ${String(total)}`;
-    vectorLight = { key: 'vector', label: '向量', state: total !== null && total > 0 && indexed === 0 ? 'warn' : 'ok', text: progress };
+    const hasCounts = indexed !== null && total !== null;
+    vectorLight = {
+      key: 'vector',
+      labelKey: 'light.vector.label',
+      state: total !== null && total > 0 && indexed === 0 ? 'warn' : 'ok',
+      textKey: hasCounts ? 'light.vector.indexed' : 'light.vector.enabled',
+      ...(hasCounts ? { textVars: { indexed: indexed ?? 0, total: total ?? 0 } } : {}),
+    };
   } else if (vectorState === 'off') {
-    vectorLight = { key: 'vector', label: '向量', state: 'off', text: '已关闭（vector_disabled）' };
+    vectorLight = { key: 'vector', labelKey: 'light.vector.label', state: 'off', textKey: 'light.vector.off' };
   } else {
-    vectorLight = { key: 'vector', label: '向量', state: 'warn', text: '未知（状态缺失）' };
+    vectorLight = { key: 'vector', labelKey: 'light.vector.label', state: 'warn', textKey: 'light.vector.unknown' };
   }
 
   return [daemonLight, sidecarLight, vectorLight];

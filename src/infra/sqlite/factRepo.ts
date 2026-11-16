@@ -15,6 +15,7 @@ import { appendAudit } from './auditRepo.js';
 import type { Db } from './db.js';
 import { syncFtsRow } from './ftsRepo.js';
 import { rowToFact } from './mappers.js';
+import { withTransaction } from './tx.js';
 
 export interface ConfidenceChange {
   value: number;
@@ -144,7 +145,8 @@ export function insertFact(db: Db, fact: Fact): void {
  * 内容（content / attrs.frozen）改不了，能改的只有认知状态量，而认知状态量必须留痕。
  */
 export function setConfidence(db: Db, id: string, change: ConfidenceChange): void {
-  const tx = db.transaction(() => {
+  // 整笔事务交给 withTransaction：撞锁时重试的是这一整笔（含审计行），而不是某条 UPDATE
+  withTransaction(db, () => {
     const before = db.prepare('SELECT confidence, confidence_source FROM fact WHERE id = ?').get(id) as
       | { confidence: number; confidence_source: string }
       | undefined;
@@ -166,7 +168,6 @@ export function setConfidence(db: Db, id: string, change: ConfidenceChange): voi
       ts,
     });
   });
-  tx();
 }
 
 /** 生命周期：强度。只允许衰减/重算调用，不对外暴露批量更新 */
@@ -234,10 +235,10 @@ export function decayFacts(db: Db, facts: readonly Fact[], now: number): Fact[] 
 
   if (writes.length > 0) {
     const ts = new Date(now).toISOString();
-    const tx = db.transaction(() => {
+    // 一笔批量回写；撞锁时整笔重来（快照冲突不能只重试某一行）
+    withTransaction(db, () => {
       for (const w of writes) setStrength(db, w.id, w.strength, ts);
     });
-    tx();
   }
   return out;
 }
@@ -260,10 +261,10 @@ export function touchAccess(db: Db, ids: readonly string[], ts: string = nowIso(
   const stmt = db.prepare(
     'UPDATE fact SET access_count = access_count + 1, last_access_at = ? WHERE id = ?',
   );
-  const tx = db.transaction(() => {
+  // 访问计数是"加一"语义，重试不会把计数写错（整笔重来）
+  withTransaction(db, () => {
     for (const id of ids) stmt.run(ts, id);
   });
-  tx();
 }
 
 /** 追加式失效：只收口，不删、不复活 */

@@ -80,33 +80,40 @@ export function firstRunState(
   return 'ready';
 }
 
+import type { DictKey } from '../i18n/dict.js';
+
 export interface BannerSpec {
-  text: string;
-  hint: string;
+  textKey: DictKey;
+  hintKey: DictKey;
   tone: 'error' | 'info' | 'muted' | 'warn';
 }
 
-/** 非 ready 四态的文案；组件按 tone 上色。 */
-export const BANNERS: Record<Exclude<FirstRunState, 'ready'>, BannerSpec> = {
+/**
+ * 非 ready 四态的文案；组件按 tone 上色。
+ *
+ * 缺口是刻意的：`collect_off` 不再挂横幅（Partial），见下方注释。
+ */
+export const BANNERS: Partial<Record<Exclude<FirstRunState, 'ready'>, BannerSpec>> = {
   daemon_off: {
-    text: '默识 daemon 未运行',
-    hint: '运行 `moshi daemon` 后重试',
+    textKey: 'firstRun.daemonOff.text',
+    hintKey: 'firstRun.daemonOff.hint',
     tone: 'error',
   },
   no_data: {
-    text: '还没有记忆',
-    hint: '运行 `moshi harvest`，或把会话文件放进采集目录',
+    textKey: 'firstRun.noData.text',
+    hintKey: 'firstRun.noData.hint',
     tone: 'info',
   },
   sidecar_off: {
-    text: '语义检索未启用（可选）',
-    hint: '不影响使用；需要向量召回时重新运行默识安装包，勾选「Python 组件」',
+    textKey: 'firstRun.sidecarOff.text',
+    hintKey: 'firstRun.sidecarOff.hint',
     tone: 'muted',
   },
-  collect_off: {
-    text: '未配置采集来源',
-    // 用户 m01482：MCP 提示语不要了——接入引导已由首启弹窗 + 设置 › 接入 承担
-    hint: '在 设置 › 接入 里连接 Agent，或检查 collect.enabled',
-    tone: 'warn',
-  },
+  // 用户 m00882：采集提醒三态暂不提示，等正式接入逻辑定稿
+  // collect_off: {
+  //   text: '未配置采集来源',
+  //   // 用户 m01482：MCP 提示语不要了——接入引导已由首启弹窗 + 设置 › 接入 承担
+  //   hint: '在 设置 › 接入 里连接 Agent，或检查 collect.enabled',
+  //   tone: 'warn',
+  // },
 };

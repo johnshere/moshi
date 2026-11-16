@@ -35,6 +35,7 @@ import {
 } from '../../../core/hook/index.js';
 import { redactText } from '../../../core/write/redact.js';
 import type { HookTraceStore } from '../../../core/hook/trace.js';
+import { retryBusyAsync } from '../../../infra/sqlite/db.js';
 import type { Config } from '../../config.js';
 import { mergeConfigDocument, readConfigDocument, writeConfigDocument } from '../../config.js';
 import type { HookDeps } from '../../hook/service.js';
@@ -193,7 +194,9 @@ export async function hookRoutes(app: FastifyInstance, opts: HookRoutesOpts): Pr
     }
     const envelope = body as HookEnvelope;
     const started = Date.now();
-    const result = signalForHook(deps, envelope);
+    // 落 episode 会写库；导入子进程可能正持着写锁。这里用异步重试：等锁期间
+    // daemon 还能接别的请求（同步重试会把事件循环整块停住）。
+    const result = await retryBusyAsync(() => signalForHook(deps, envelope));
     const replyText = envelope.payload.reply;
     const item: HookTraceItem = redactTrace(
       {

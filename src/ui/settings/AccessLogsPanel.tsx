@@ -1,13 +1,18 @@
 /**
- * 设置 →「接入与日志」（P4；开发方案 §4 P4 / §7）。
+ * 「日志与保留」面板（P4；开发方案 §4 P4 / §7）。
+ *
+ * 组件放在 `settings/` 只是因为历史位置；用户 m00882 起它归一级「接入」，用户 m01083
+ * 起由日志页的弹框 `src/ui/access/LogConfigModal.tsx` 挂载（原 设置 › 接入与日志 已删，
+ * 曾经短暂作为接入二级独立页也不再有菜单项）。
  *
  * **唯一写入口**：查询日志保留天数、插件运行日志档位/上限/保留，都经
  * `PUT /api/config`（白名单键，原子写回 YAML，daemon 收到后热应用档位）。
- * 日志页右上角的开关只是跳回这里的快捷入口（用户 m02743）。
+ * 日志页右上角的按钮只是打开这个弹框的快捷入口（用户 m02743）。
  */
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { purgeQueryLogs, purgeTraceLogs } from '../access/api.js';
+import { useT } from '../i18n/index.js';
 
 type TraceLevel = 'off' | 'summary' | 'full';
 
@@ -44,6 +49,7 @@ async function errorMessage(res: Response): Promise<string> {
 }
 
 export function AccessLogsPanel(): ReactElement {
+  const t = useT();
   const [loaded, setLoaded] = useState<ConfigView['config'] | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -97,7 +103,7 @@ export function AccessLogsPanel(): ReactElement {
         body: JSON.stringify({ patch }),
       });
       if (!res.ok) throw new Error(await errorMessage(res));
-      setToast('已保存（写入 config.yaml，档位热应用）');
+      setToast(t('access.logRetention.saved'));
       const next = (await fetch('/api/config', {
         headers: { 'X-Moshi-Token': resolveToken() },
       }).then((r) => r.json())) as ConfigView;
@@ -117,7 +123,7 @@ export function AccessLogsPanel(): ReactElement {
     setConfirmQuery(false);
     try {
       const result = await purgeQueryLogs();
-      setToast(`已清空检索日志：${String(result.removed)} 行（含证据 ${String(result.evidence_removed)} 行）`);
+      setToast(t('access.logRetention.purged.query', { removed: result.removed, evidence: result.evidence_removed }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -131,7 +137,7 @@ export function AccessLogsPanel(): ReactElement {
     setConfirmTrace(false);
     try {
       const result = await purgeTraceLogs();
-      setToast(`已清空插件运行日志：磁盘 ${String(result.disk_removed)} 个文件、内存 ${String(result.memory_removed)} 条`);
+      setToast(t('access.logRetention.purged.trace', { disk: result.disk_removed, memory: result.memory_removed }));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -140,12 +146,12 @@ export function AccessLogsPanel(): ReactElement {
   return (
     <div data-testid="access-logs-panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <section id="query-log" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>查询日志（检索日志）</div>
+        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('access.logRetention.query.title')}</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-          正式功能：记录每次检索的入参、路线、候选与打包结果。保留期由这里决定，到期由 daemon 每日分批清理。
+          {t('access.logRetention.query.desc')}
         </div>
         <div style={rowStyle}>
-          <span style={labelStyle}>保留天数（0 = 永久）</span>
+          <span style={labelStyle}>{t('access.logRetention.keepDays')}</span>
           <input
             style={inputStyle}
             data-testid="keep-days"
@@ -155,19 +161,19 @@ export function AccessLogsPanel(): ReactElement {
         </div>
         <div style={rowStyle}>
           <button type="button" style={buttonStyle} onClick={() => { void purgeQuery(); }} data-testid="purge-query">
-            {confirmQuery ? '再点一次确认清空' : '清空检索日志'}
+            {confirmQuery ? t('access.logRetention.purgeQuery.confirm') : t('access.logRetention.purgeQuery')}
           </button>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>不可逆；会先删证据子行，再删主表，并落 audit。</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{t('access.logRetention.purgeQuery.hint')}</span>
         </div>
       </section>
 
       <section id="plugin-trace" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>插件运行日志</div>
+        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('access.logRetention.trace.title')}</div>
         <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-          排查用：默认关闭，正式发版不保留该功能。summary 只记计数与哈希，full 才带查询/注入/回复正文（落盘前脱敏）。
+          {t('access.logRetention.trace.desc')}
         </div>
         <div style={rowStyle}>
-          <span style={labelStyle}>档位</span>
+          <span style={labelStyle}>{t('access.logRetention.trace.level')}</span>
           <select
             style={inputStyle}
             data-testid="trace-level"
@@ -176,13 +182,13 @@ export function AccessLogsPanel(): ReactElement {
               setDraft(draft === null ? draft : { ...draft, level: event.target.value as TraceLevel })
             }
           >
-            <option value="off">off（默认）</option>
-            <option value="summary">summary（计数 + 哈希）</option>
-            <option value="full">full（含正文）</option>
+            <option value="off">{t('access.logRetention.trace.level.off')}</option>
+            <option value="summary">{t('access.logRetention.trace.level.summary')}</option>
+            <option value="full">{t('access.logRetention.trace.level.full')}</option>
           </select>
         </div>
         <div style={rowStyle}>
-          <span style={labelStyle}>单文件上限（字节）</span>
+          <span style={labelStyle}>{t('access.logRetention.trace.maxBytes')}</span>
           <input
             style={inputStyle}
             data-testid="trace-max-bytes"
@@ -191,7 +197,7 @@ export function AccessLogsPanel(): ReactElement {
           />
         </div>
         <div style={rowStyle}>
-          <span style={labelStyle}>保留天数</span>
+          <span style={labelStyle}>{t('access.logRetention.trace.keepDays')}</span>
           <input
             style={inputStyle}
             data-testid="trace-keep-days"
@@ -201,9 +207,9 @@ export function AccessLogsPanel(): ReactElement {
         </div>
         <div style={rowStyle}>
           <button type="button" style={buttonStyle} onClick={() => { void purgeTrace(); }} data-testid="purge-trace">
-            {confirmTrace ? '再点一次确认清空' : '清空插件运行日志'}
+            {confirmTrace ? t('access.logRetention.purgeTrace.confirm') : t('access.logRetention.purgeTrace')}
           </button>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>同时清内存 ring 与磁盘文件，并落 audit。</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{t('access.logRetention.purgeTrace.hint')}</span>
         </div>
       </section>
 
@@ -215,7 +221,7 @@ export function AccessLogsPanel(): ReactElement {
           onClick={() => { void save(); }}
           data-testid="access-logs-save"
         >
-          {saving ? '保存中…' : '保存'}
+          {saving ? t('access.logRetention.saving') : t('access.logRetention.save')}
         </button>
         {toast === null ? null : (
           <span style={{ fontSize: 12, color: 'var(--color-success, #3fb950)' }} data-testid="access-logs-toast">

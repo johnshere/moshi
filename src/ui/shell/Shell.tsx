@@ -1,16 +1,16 @@
 /**
- * 应用外壳（P2-19-A，概设 §8.1）：左侧一级导航 + 顶栏全局搜索/三灯/待办角标。
+ * 应用外壳（P2-19-A，概设 §8.1）：左侧一级导航 + 顶栏语言/三灯/待办角标。
  *
  * 外壳只负责「常驻」和「取全局状态」，不接管页面内容：页面仍是 absolute inset:0
  * 填满 <main>。三灯与角标 30s 轮询一次，取数失败显式降级，不静默装正常。
+ * 顶栏只留 语言 + 三灯 + 角标；全局搜索与作用域下拉在记忆页工具条上（V-10，用户 m01201）。
  */
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
 import { NAV, hrefForPath, lightColor, pageHref, queueBadge, statusLights, type AccessSection, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
-import { SearchBox } from './SearchBox.js';
-import { ScopeSwitcher } from './ScopeSwitcher.js';
-import { ThemeSwitch } from './ThemeSwitch.js';
+import { LocaleSwitch } from './LocaleSwitch.js';
+import { useT } from '../i18n/index.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
 import { FirstRun } from './FirstRun.js';
 import { OnboardModal } from './OnboardModal.js';
@@ -27,59 +27,34 @@ const shellStyle: CSSProperties = {
   overflow: 'hidden',
   background: 'var(--color-bg-base)',
   color: 'var(--color-text-secondary)',
-  fontFamily:
-    "'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
+  fontFamily: 'ui-sans-serif, system-ui, "Segoe UI", sans-serif',
 };
 
 const navStyle: CSSProperties = {
-  width: 208,
-  flex: '0 0 208px',
+  width: 172,
+  flex: '0 0 172px',
   display: 'flex',
   flexDirection: 'column',
   boxSizing: 'border-box',
-  padding: '14px 12px',
-  gap: 4,
+  padding: '10px 8px',
+  gap: 2,
 };
 
 const brandStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
   color: 'var(--color-text-primary)',
-  fontSize: 14,
+  fontSize: 15,
   fontWeight: 600,
-  letterSpacing: '.02em',
-  padding: '4px 10px 14px',
-};
-
-/** 品牌标记：一个小方块 + 一个强调色圆点，成本极低但让左栏有「头」 */
-const brandMarkStyle: CSSProperties = {
-  width: 22,
-  height: 22,
-  borderRadius: 7,
-  border: '1px solid var(--color-border-subtle)',
-  background: 'var(--color-bg-overlay)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  position: 'relative',
-  flex: 'none',
-};
-
-const brandDotStyle: CSSProperties = {
-  width: 6,
-  height: 6,
-  borderRadius: '50%',
-  background: 'var(--color-accent)',
+  letterSpacing: 1,
+  padding: '4px 10px 12px',
 };
 
 const topbarStyle: CSSProperties = {
-  height: 56,
-  flex: '0 0 56px',
+  height: 46,
+  flex: '0 0 46px',
   display: 'flex',
   alignItems: 'center',
-  gap: 14,
-  padding: '0 16px',
+  gap: 12,
+  padding: '0 12px',
   background: 'var(--color-bg-raised)',
   borderBottom: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
@@ -90,12 +65,11 @@ function navItemStyle(active: boolean): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '8px 10px',
-    borderRadius: 8,
+    padding: '7px 10px',
+    borderRadius: 5,
     color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
     textDecoration: 'none',
     fontSize: 13,
-    fontWeight: active ? 600 : 400,
     cursor: 'pointer',
   };
 }
@@ -106,8 +80,8 @@ function navChildStyle(active: boolean): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     padding: '5px 10px 5px 24px',
-    borderRadius: 7,
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+    borderRadius: 5,
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
     textDecoration: 'none',
     fontSize: 12,
     cursor: 'pointer',
@@ -129,6 +103,27 @@ function isPlainLeftClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
+/**
+ * `/` 的落点：全局搜索框挂在记忆页工具条上（V-10，用户 m01201 把顶栏收成 语言+三灯+角标）。
+ * 当前页没有搜索框（图谱 / 待办 / 归档 / 设置）就先跳到记忆页，再等 DOM 挂上后聚焦。
+ */
+function focusGlobalSearch(): void {
+  const take = (): boolean => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="global-search"]');
+    if (input === null) return false;
+    input.focus();
+    input.select();
+    return true;
+  };
+  if (take()) return;
+  navigatePage('memories');
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    if (take() || attempts >= 20) window.clearInterval(timer);
+  }, 50);
+}
+
 export interface ShellProps {
   route: PageKey;
   /** 设置二级；非设置页传 null（设计 §16.5.2：菜单树展开态由 URL 决定） */
@@ -139,6 +134,7 @@ export interface ShellProps {
 }
 
 export function Shell({ route, section, accessSection, children }: ShellProps): ReactElement {
+  const t = useT();
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
   /** 首启弹窗开着时压掉首屏提示条：弹窗讲的正是同一件事，两条并排太吵 */
@@ -168,9 +164,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
         case 'focus-search': {
           event.preventDefault();
           pendingGRef.current = null;
-          const input = document.querySelector<HTMLInputElement>('[data-testid="global-search"]');
-          input?.focus();
-          input?.select();
+          focusGlobalSearch();
           return;
         }
         case 'nav':
@@ -232,12 +226,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
       {onboardOpen ? null : <FirstRun />}
       <OnboardModal onOpenChange={setOnboardOpen} />
       <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
-        <div style={brandStyle}>
-          <span style={brandMarkStyle} aria-hidden="true">
-            <span style={brandDotStyle} />
-          </span>
-          默识
-        </div>
+        <div style={brandStyle}>{t('app.brand')}</div>
         {NAV.map((node) => {
           const active = node.key === route;
           return (
@@ -255,9 +244,9 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                   event.preventDefault();
                   navigate(pageHref(node.key, window.location.search));
                 }}
-                title={node.title}
+                title={t(node.titleKey)}
               >
-                {node.label}
+                {t(node.labelKey)}
               </a>
               {node.children !== undefined && active
                 ? node.children.map((child) => {
@@ -279,7 +268,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                         }}
                       >
                         <span style={navTreeLineStyle} aria-hidden="true" />
-                        {child.label}
+                        {t(child.labelKey)}
                       </a>
                     );
                   })
@@ -288,22 +277,20 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
           );
         })}
         <div style={{ flex: 1 }} />
-        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>本地知识图谱</div>
+        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>{t('app.tagline')}</div>
       </aside>
 
       <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
         <header style={topbarStyle}>
-          <SearchBox />
           <div style={{ flex: 1 }} />
-          <ThemeSwitch />
-          <ScopeSwitcher />
+          <LocaleSwitch />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
             {lights.map((light) => (
               <span
                 key={light.key}
                 data-testid={`light-${light.key}`}
                 data-state={light.state}
-                title={light.text}
+                title={t(light.textKey, light.textVars)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-text-secondary)' }}
               >
                 <span
@@ -317,7 +304,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                     display: 'inline-block',
                   }}
                 />
-                {light.label}
+                {t(light.labelKey)}
               </span>
             ))}
           </div>
@@ -326,7 +313,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
             data-testid="inbox-badge"
             data-count={badgeCount > 0 ? 'active' : 'zero'}
             className="moshi-inbox-badge"
-            title="待办：消解确认 / 低置信 / 淘汰候选（按单页 200 条估算）"
+            title={t('topbar.inbox.title')}
             style={{
               color: badgeCount > 0 ? 'var(--color-warning-soft)' : 'var(--color-text-muted)',
               textDecoration: 'none',
@@ -342,7 +329,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
               navigatePage('inbox');
             }}
           >
-            待办 {badge === null ? '—' : badge.label}
+            {t('topbar.inbox.badge', { count: badge === null ? '—' : badge.label })}
           </a>
         </header>
         <main style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0 }}>{children}</main>

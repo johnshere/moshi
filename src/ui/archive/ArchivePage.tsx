@@ -19,12 +19,14 @@ import {
 } from '../api.js';
 import { navigate } from '../shell/navigate.js';
 import { pageHref } from '../shell/pure.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 import { ProposedDialog } from './ProposedDialog.js';
 import {
   archiveHref,
   detailStateFor,
-  EMPTY_ARCHIVE_DIR_HINT,
-  EMPTY_TOPICS_HINT,
+  emptyArchiveDirHint,
+  emptyTopicsHint,
   emptyStateFor,
   exportToast,
   formatProposalError,
@@ -32,7 +34,7 @@ import {
   initialSelectedSlug,
   lastExportedAt,
   previewLines,
-  PROPOSAL_ACTIONS,
+  proposalActions,
   proposedBadge,
   rebuildDisabled,
   rebuildLabel,
@@ -46,10 +48,10 @@ import {
   type HumanEdited,
 } from './pure.js';
 
-const STATUS_LABEL: Record<ArchiveStatus, string> = {
-  active: '活跃',
-  merged: '已合并',
-  split: '已拆分',
+const STATUS_KEY: Record<ArchiveStatus, DictKey> = {
+  active: 'archive.status.active',
+  merged: 'archive.status.merged',
+  split: 'archive.status.split',
 };
 
 const STATUS_COLOR: Record<ArchiveStatus, string> = {
@@ -58,10 +60,10 @@ const STATUS_COLOR: Record<ArchiveStatus, string> = {
   split: 'var(--color-accent-alt)',
 };
 
-const HUMAN_LABEL: Record<HumanEdited, string> = {
-  0: '自动',
-  1: '待三选一',
-  2: '永久人工',
+const HUMAN_KEY: Record<HumanEdited, DictKey> = {
+  0: 'archive.human.auto',
+  1: 'archive.human.pending',
+  2: 'archive.human.locked',
 };
 
 const rootStyle: CSSProperties = {
@@ -117,6 +119,7 @@ interface ToastState {
 }
 
 export function ArchivePage(): ReactElement {
+  const t = useT();
   const [topics, setTopics] = useState<readonly ArchiveTopicSummary[]>([]);
   const [selected, setSelected] = useState<string | null>(() => slugFromSearch(window.location.search));
   const [loading, setLoading] = useState(true);
@@ -235,7 +238,7 @@ export function ArchivePage(): ReactElement {
       await reloadTopics();
       setDetailNonce((n) => n + 1);
     } catch (err: unknown) {
-      setToast({ kind: 'error', text: `重建失败：${err instanceof Error ? err.message : String(err)}` });
+      setToast({ kind: 'error', text: t('archive.rebuild.failed', { error: err instanceof Error ? err.message : String(err) }) });
     } finally {
       setExporting(false);
     }
@@ -243,14 +246,18 @@ export function ArchivePage(): ReactElement {
 
   const handleDialogAction = async (action: ArchiveProposalAction): Promise<void> => {
     if (dialogSlug === null) return;
-    const meta = PROPOSAL_ACTIONS.find((a) => a.action === action);
+    const meta = proposalActions(t).find((a) => a.action === action);
     setDialogBusy(true);
     setDialogError(null);
     try {
       const result = await applyArchiveProposal(dialogSlug, action);
       setToast({
         kind: 'ok',
-        text: `已${meta?.label ?? action}（revision ${String(result.revision)}，human_edited=${String(result.human_edited)}）`,
+        text: t('archive.rebuild.done', {
+            action: meta?.label ?? action,
+            revision: result.revision,
+            edited: result.human_edited,
+          }),
       });
       setDialogSlug(null);
       await reloadTopics();
@@ -261,10 +268,13 @@ export function ArchivePage(): ReactElement {
           ? (err.detail as { reason?: unknown }).reason
           : null;
       setDialogError(
-        formatProposalError({
-          error: err instanceof Error ? err.message : String(err),
-          reason: typeof reason === 'string' ? reason : null,
-        }),
+        formatProposalError(
+          {
+            error: err instanceof Error ? err.message : String(err),
+            reason: typeof reason === 'string' ? reason : null,
+          },
+          t,
+        ),
       );
     } finally {
       setDialogBusy(false);
@@ -323,21 +333,29 @@ export function ArchivePage(): ReactElement {
             gap: 6,
           }}
         >
-          <span style={{ flex: 1 }}>归档主题</span>
+          <span style={{ flex: 1 }}>{t('archive.title')}</span>
           <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>{topics.length}</span>
         </div>
         <div style={{ overflow: 'auto', flex: 1 }} data-testid="archive-topic-list">
-          {listState === 'loading' ? <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>加载中…</div> : null}
+          {listState === 'loading' ? <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('common.loading')}</div> : null}
           {listState === 'error' ? (
             <div style={{ padding: 12, color: 'var(--color-danger)' }} data-testid="archive-topics-error">
-              读取归档列表失败：{listError}
+              {t('archive.list.loadFailed', { error: listError ?? '' })}
             </div>
           ) : null}
           {listState === 'empty' ? (
             <div style={{ padding: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }} data-testid="archive-empty">
-              <div style={{ marginBottom: 6 }}>{EMPTY_TOPICS_HINT}</div>
-              <div style={{ color: 'var(--color-text-muted)' }}>
-                {EMPTY_ARCHIVE_DIR_HINT}？
+              <div style={{ marginBottom: 6 }}>{emptyTopicsHint(t)}</div>
+              <div
+                style={{
+                  color: 'var(--color-text-muted)',
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 4,
+                  flexWrap: 'wrap',
+                }}
+              >
+                {emptyArchiveDirHint(t)}
                 <a
                   href={pageHref('settings', window.location.search)}
                   style={linkStyle}
@@ -347,13 +365,13 @@ export function ArchivePage(): ReactElement {
                     navigate(pageHref('settings', window.location.search));
                   }}
                 >
-                  去设置
+                  {t('archive.empty.goSettings')}
                 </a>
               </div>
             </div>
           ) : null}
           {topics.map((topic) => {
-            const badge = proposedBadge(topic);
+            const badge = proposedBadge(topic, t);
             return (
               <button
                 key={topic.slug}
@@ -382,12 +400,12 @@ export function ArchivePage(): ReactElement {
                       {badge.label}
                     </span>
                   ) : null}
-                  <span style={{ color: STATUS_COLOR[topic.status], fontSize: 11 }}>{STATUS_LABEL[topic.status]}</span>
+                  <span style={{ color: STATUS_COLOR[topic.status], fontSize: 11 }}>{t(STATUS_KEY[topic.status])}</span>
                 </div>
                 <div style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 2, display: 'flex', gap: 6 }}>
                   <span style={{ flex: 1 }}>
                     {topic.slug} · rev {topic.revision}
-                    {topic.human_edited === 0 ? '' : ` · ${HUMAN_LABEL[topic.human_edited]}`}
+                    {topic.human_edited === 0 ? '' : ` · ${t(HUMAN_KEY[topic.human_edited])}`}
                   </span>
                   {badge.canHandle ? (
                     <span
@@ -408,7 +426,7 @@ export function ArchivePage(): ReactElement {
                         setDialogSlug(topic.slug);
                       }}
                     >
-                      处理
+                      {t('archive.handle')}
                     </span>
                   ) : null}
                 </div>
@@ -421,7 +439,7 @@ export function ArchivePage(): ReactElement {
       <section style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '12px 18px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
           <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
-            上次导出：{formatTimestamp(lastExport)}
+            {t('archive.lastExport', { value: formatTimestamp(lastExport, t) })}
           </span>
           <span style={{ flex: 1 }} />
           <button
@@ -436,12 +454,12 @@ export function ArchivePage(): ReactElement {
         </div>
 
         {shown === null ? (
-          <div style={{ color: 'var(--color-text-muted)' }}>选择左侧任一主题查看正文。</div>
+          <div style={{ color: 'var(--color-text-muted)' }}>{t('archive.pick')}</div>
         ) : (
           <div>
             <h2 style={{ margin: '0 0 4px', color: 'var(--color-text-primary)', fontSize: 16 }}>{shown.title ?? shown.slug}</h2>
             <div style={{ color: 'var(--color-text-muted)', marginBottom: 10 }}>
-              {shown.slug} · rev {shown.revision} · {STATUS_LABEL[shown.status]} · hash{' '}
+              {shown.slug} · rev {shown.revision} · {t(STATUS_KEY[shown.status])} · hash{' '}
               {shortHash(shown.content_hash)} · derived_at {shown.derived_at ?? '—'}
             </div>
             {current !== null ? (
@@ -461,7 +479,7 @@ export function ArchivePage(): ReactElement {
                 <dd style={{ margin: 0 }}>{current.last_exported_at ?? '—'}</dd>
                 <dt style={metaLabelStyle}>human_edited</dt>
                 <dd style={{ margin: 0 }}>
-                  {String(current.human_edited)}（{HUMAN_LABEL[current.human_edited]}）
+                  {t('archive.humanEditedValue', { edited: current.human_edited, label: t(HUMAN_KEY[current.human_edited]) })}
                 </dd>
                 <dt style={metaLabelStyle}>proposed_path</dt>
                 <dd style={{ margin: 0 }}>{current.proposed_path ?? '—'}</dd>
@@ -469,10 +487,10 @@ export function ArchivePage(): ReactElement {
             ) : null}
 
             <div data-testid="archive-preview-state" data-state={detailState}>
-              {detailState === 'loading' ? <div style={noticeStyle}>读取正文…</div> : null}
+              {detailState === 'loading' ? <div style={noticeStyle}>{t('archive.body.loading')}</div> : null}
               {detailState === 'not_found' ? (
                 <div style={noticeStyle} data-testid="archive-preview-not-found">
-                  主题不存在，列表可能已过期（404 archive_slug_not_found）。
+                  {t('archive.notFound')}
                   <span
                     role="button"
                     tabIndex={0}
@@ -482,7 +500,7 @@ export function ArchivePage(): ReactElement {
                       void reloadTopics();
                     }}
                   >
-                    刷新列表
+                    {t('archive.refresh')}
                   </span>
                 </div>
               ) : null}
@@ -491,15 +509,15 @@ export function ArchivePage(): ReactElement {
                   style={{ ...noticeStyle, borderColor: 'var(--color-warning-dim)', color: 'var(--color-warning-soft)' }}
                   data-testid="archive-file-missing"
                 >
-                  正文文件缺失（可能在归档目录外被移动）。
+                  {t('archive.fileMissing')}
                   <div style={{ color: 'var(--color-warning)', fontSize: 12, marginTop: 4 }}>
-                    期望路径：{detail?.path ?? current?.path ?? '—'}
+                    {t('archive.expectedPath', { path: detail?.path ?? current?.path ?? '—' })}
                   </div>
                 </div>
               ) : null}
               {detailState === 'error' ? (
                 <div style={{ ...noticeStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger)' }}>
-                  读取正文失败：{detailError}
+                  {t('archive.body.loadFailed', { error: detailError ?? '' })}
                 </div>
               ) : null}
               {detailState === 'ok' && detail?.markdown != null ? (

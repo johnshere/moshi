@@ -4,7 +4,7 @@
  * 覆盖验收点（AC-2 配置面 / AC-3 快照 / AC-7 源只读）：
  * - 固定落点 `<repo>/temp/moshi-dev` 与 `<repo>/temp/moshi-dev.yaml`；
  * - YAML 里 `storage.data_dir` / `eval.golden_set` 都是绝对路径，且不含 `~`；
- * - `[[ingest.sources]]` 是 claude-code 实例（id + adapter + 只读 root）；
+ * - `[[collect.sources]]` 是 claude-code 实例（id + adapter + 只读 root）；
  * - WAL 安全快照：dev 库 fact 与源库一致、golden 两文件逐字节一致；
  * - 源（库 / golden / 会话目录）内容与 mtime 不变。
  */

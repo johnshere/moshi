@@ -17,6 +17,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSelection } from '../state/selection.js';
 import { useFilter } from '../state/filter.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
 import { fetchFacts, type TableRequestLog } from './api.js';
 import { debounce } from './pure/debounce.js';
 import {
@@ -48,17 +50,18 @@ const STATUS_COLOR: Record<string, string> = {
 
 function chip(active: boolean): CSSProperties {
   return {
-    background: active ? 'color-mix(in srgb, var(--color-accent) 14%, transparent)' : 'transparent',
-    color: active ? 'var(--color-accent-soft)' : 'var(--color-text-secondary)',
-    border: `1px solid ${active ? 'color-mix(in srgb, var(--color-accent) 38%, transparent)' : 'var(--color-border-subtle)'}`,
-    borderRadius: 999,
-    padding: '2px 11px',
+    background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
+    borderRadius: 4,
+    padding: '2px 10px',
     cursor: active ? 'default' : 'pointer',
     font: 'inherit',
   };
 }
 
 export function FactsTable(): JSX.Element {
+  const t = useT();
   // 深链 `?view=table&q=...&sort=importance` 首屏即按 URL 取数（URL 是唯一真相源）
   const initial = useMemo<TableViewState>(() => parseTableView(window.location.search), []);
   const [q, setQ] = useState(initial.q);
@@ -288,8 +291,8 @@ export function FactsTable(): JSX.Element {
         background: 'var(--color-bg-base)',
         color: 'var(--color-text-secondary)',
         fontSize: 12,
-        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + 筛选条 + 统计行）
-        paddingTop: 148,
+        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + P2-05 筛选条）
+        paddingTop: 92,
         boxSizing: 'border-box',
       }}
     >
@@ -306,8 +309,8 @@ export function FactsTable(): JSX.Element {
         <input
           type="search"
           value={qInput}
-          aria-label="搜索事实（回车立即生效，走后端 q）"
-          placeholder="搜索内容（回车生效 · 后端 q）"
+          aria-label={t('table.search.aria')}
+          placeholder={t('table.search.placeholder')}
           onChange={(e) => {
             setQInput(e.target.value);
             debouncedApply(e.target.value);
@@ -324,11 +327,11 @@ export function FactsTable(): JSX.Element {
             }
           }}
           style={{
-            background: 'var(--color-bg-overlay)',
+            background: 'var(--color-bg-raised)',
             color: 'var(--color-text-primary)',
             border: '1px solid var(--color-border-subtle)',
-            borderRadius: 999,
-            padding: '3px 11px',
+            borderRadius: 4,
+            padding: '3px 8px',
             font: 'inherit',
             width: 260,
           }}
@@ -343,10 +346,10 @@ export function FactsTable(): JSX.Element {
             }}
             style={chip(false)}
           >
-            清除
+            {t('common.clear')}
           </button>
         )}
-        <span style={{ color: 'var(--color-text-faint)', marginLeft: 4 }}>排序</span>
+        <span style={{ color: 'var(--color-text-faint)', marginLeft: 4 }}>{t('table.sort.label')}</span>
         {(['time', 'importance'] as const).map((k) => (
           <button
             key={k}
@@ -354,43 +357,43 @@ export function FactsTable(): JSX.Element {
             onClick={() => changeSort(k)}
             disabled={sort === k}
             aria-pressed={sort === k}
-            title={k === 'time' ? '按 valid_at 倒序（新→旧）' : '按 importance 倒序（同分按 id 升序，稳定键）'}
+            title={t(k === 'time' ? 'table.sort.byTime' : 'table.sort.byImportance')}
             style={chip(sort === k)}
           >
-            {k === 'time' ? '时间' : '重要性'}
+            {t(k === 'time' ? 'table.sort.time' : 'table.sort.importance')}
           </button>
         ))}
         <span style={{ marginLeft: 'auto', color: 'var(--color-text-faint)' }}>
-          {sort === 'time' ? 'valid_at DESC' : 'importance DESC'} · keyset 游标（SQL 层分页）
+          {t('table.sort.cursor', { order: sort === 'time' ? 'valid_at DESC' : 'importance DESC' })}
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', fontSize: 11, letterSpacing: '.03em', background: 'transparent' }} role="row">
-        <span role="columnheader">时间</span>
-        <span role="columnheader">类型</span>
-        <span role="columnheader">内容</span>
-        <span role="columnheader" title="置信度（0..1）">置信</span>
-        <span role="columnheader" title="强度（0..1，检索加强会衰减）">强度</span>
-        <span role="columnheader">状态</span>
-        <span role="columnheader" title="重要性（0..1）">重要</span>
+      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '4px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', background: 'var(--color-bg-raised)' }} role="row">
+        <span role="columnheader">{t('table.col.time')}</span>
+        <span role="columnheader">{t('table.col.ftype')}</span>
+        <span role="columnheader">{t('table.col.content')}</span>
+        <span role="columnheader" title={t('table.col.confidence.title')}>{t('table.col.confidence')}</span>
+        <span role="columnheader" title={t('table.col.strength.title')}>{t('table.col.strength')}</span>
+        <span role="columnheader">{t('table.col.status')}</span>
+        <span role="columnheader" title={t('table.col.importance.title')}>{t('table.col.importance')}</span>
       </div>
 
       <div
         ref={scrollRef}
         role="grid"
         aria-rowcount={total}
-        aria-label="事实表格"
+        aria-label={t('table.aria')}
         style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}
       >
         {rows.length === 0 && (
           <div style={{ padding: '20px 16px', color: 'var(--color-text-muted)' }}>
             {loading
-              ? '正在取第一页…'
+              ? t('table.empty.loading')
               : error !== null
                 ? ''
                 : q === ''
-                  ? '尚未观测到任何活跃事实（先跑 collect，或用 tools/seed-graph.ts 造数）'
-                  : `尚未观测到匹配「${q}」的事实`}
+                  ? t('table.empty.none')
+                  : t('table.empty.noMatch', { q })}
           </div>
         )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
@@ -418,8 +421,8 @@ export function FactsTable(): JSX.Element {
                   alignItems: 'center',
                   padding: '0 12px',
                   boxSizing: 'border-box',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  background: selected ? 'var(--color-bg-active)' : 'transparent',
+                  borderBottom: '1px solid var(--color-bg-overlay)',
+                  background: selected ? 'var(--color-bg-active)' : item.index % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--color-text-secondary) 3%, transparent)',
                   boxShadow: selected ? 'inset 2px 0 0 var(--color-accent)' : 'none',
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
@@ -430,7 +433,7 @@ export function FactsTable(): JSX.Element {
                   {formatLocalMinute(row.valid_at)}
                 </span>
                 <span role="gridcell" style={{ color: 'var(--color-accent-soft)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {row.ftype}
+                  {enumLabel('ftype', row.ftype)}
                 </span>
                 <span role="gridcell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-primary)' }}>
                   {oneLine(row.content)}
@@ -442,7 +445,7 @@ export function FactsTable(): JSX.Element {
                   {formatScore(row.strength)}
                 </span>
                 <span role="gridcell" style={{ color: STATUS_COLOR[row.epistemic_status] ?? 'var(--color-text-secondary)' }}>
-                  {row.epistemic_status}
+                  {enumLabel('epistemic', row.epistemic_status)}
                 </span>
                 <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                   {formatScore(row.importance)}
@@ -464,14 +467,14 @@ export function FactsTable(): JSX.Element {
         }}
       >
         <span>
-          已加载 {rows.length} / {total} 行
+          {t('table.footer.loaded', { rows: rows.length, total })}
         </span>
         <span>
-          请求 {requests.length} 次 · 单次 limit ≤ {PAGE_LIMIT}
+          {t('table.footer.requests', { n: requests.length, limit: PAGE_LIMIT })}
         </span>
-        <span>{done ? '已到底（next_cursor=null）' : loading ? '加载中…' : '滚动到底部前 20 行自动续拉'}</span>
-        {error !== null && <span style={{ color: 'var(--color-danger)' }}>取数失败：{error}</span>}
-        <span style={{ marginLeft: 'auto' }}>点行 = 选中（与 2D/3D 共用 useSelection）</span>
+        <span>{done ? t('table.footer.done') : loading ? t('table.footer.loading') : t('table.footer.more')}</span>
+        {error !== null && <span style={{ color: 'var(--color-danger)' }}>{t('table.footer.error', { error })}</span>}
+        <span style={{ marginLeft: 'auto' }}>{t('table.footer.hint')}</span>
       </div>
     </div>
   );

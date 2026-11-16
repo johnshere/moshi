@@ -12,8 +12,11 @@ import { FilterBar } from '../filter/FilterBar.js';
 import { Inspector } from '../inspector/Inspector.js';
 import { useNav } from '../state/nav.js';
 import { useSelection } from '../state/selection.js';
+import { useT } from '../i18n/index.js';
 import type { RouteInfo } from '../shell/pure.js';
 import { EntityMergePanel } from './EntityMergePanel.js';
+import { SearchBox } from '../shell/SearchBox.js';
+import { ScopeSwitcher } from '../shell/ScopeSwitcher.js';
 
 const overlayStyle: CSSProperties = {
   position: 'absolute',
@@ -53,6 +56,7 @@ export interface MemoriesPageProps {
 }
 
 export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
+  const t = useT();
   const factId = route.factId;
 
   useEffect(() => {
@@ -96,8 +100,11 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
       <Inspector />
       <div style={overlayStyle}>
         <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, padding: '4px 2px', whiteSpace: 'nowrap' }}>
-          记忆
+          {t('memories.title')}
         </div>
+        {/* 全局搜索与作用域下拉从顶栏下移到这里（V-10，用户 m01201）：顶栏只留 语言+三灯+角标 */}
+        <SearchBox />
+        <ScopeSwitcher />
         <div style={{ flex: 1, minWidth: 0 }}>
           <FilterBar />
         </div>
@@ -118,7 +125,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
             maxWidth: '50vw',
           }}
         >
-          canonical_key={route.canonicalKey} · 后端 /api/facts 无该筛选参数，已按 q 近似检索
+          {t('memories.canonicalApprox', { key: route.canonicalKey })}
         </div>
       )}
       <EntityMergePanel />

@@ -2,22 +2,22 @@
 
 状态：**WIP**（m2）——本体 a..f 遗留未做；子节点 **Z-01C-g / Z-01C-h / Z-01C-i 已 `DONE.m2`**（2026-11-10）
 开始：2026-11-10
-设计：`docs/设计-Hook台账节点与Magpie适配器.md`（§16 = 客户端入驻与界面 IA）
+设计：`docs/详设.md` §14（原专题 §16 已删）
 决策：D-173（协议自持 / budget / Magpie 2-7 时机）、D-174（身份哈希口径）、D-175（项目三步识别）
-测试：`docs/测试-Hook台账节点-2026-11-10.md`（第一轮 = 协议/注入/signal；第二轮 = 入驻/安装/界面 IA）
+测试：git 历史（原测试文档已删）；第一轮 = 协议/注入/signal，第二轮 = 入驻/安装/界面 IA
 
 ## 步骤
 
 | # | 步骤 | 状态 | 备注 |
 | --- | --- | --- | --- |
-| 1 | 设计文档落盘 | 完成 | `docs/设计-Hook台账节点与Magpie适配器.md` |
+| 1 | 设计文档落盘 | 完成 | `docs/详设.md` §14 |
 | 2 | 台账加节点 Z-01C | 完成 | §1 / §1.1 / §3 / §4 卡片 / §9.2 / 决策 / 日志 |
 | 3 | 首次 commit + push（文档 + 台账） | 完成 | `0ecdaa9`（当时 push 失败，后随网络恢复补推成功） |
 | 4 | 实现 Magpie 侧 | 完成 | domain/identity → core/hook → http routes → cli hook → packages/magpie-moshi |
 | 5 | 实现完 commit + push（不测） | 完成 | `ae4f81b` |
 | 6 | 本机测试（第一轮） | 完成 | 真端口 + 真插件 + 真 SQLite，见测试文档第一轮 |
 | 7 | 有网则再 commit + push | 完成 | 网络恢复后 `bb4ab5f` → `3657a67` → `0426c7c` 全部推上 |
-| 8 | §16 设计（入驻 + 界面 IA）落盘 | 完成 | `docs/设计-Hook台账节点与Magpie适配器.md` §16（16.1~16.10）；台账 `bb4ab5f` |
+| 8 | §16 设计（入驻 + 界面 IA）落盘 | 完成 | 原专题 §16（16.1~16.10，文档已删）；台账 `bb4ab5f` |
 | 9 | Z-01C-g U-IA 实现 | `DONE.m2` | 见下节 |
 | 10 | Z-01C-h ONBOARD 实现 | `DONE.m2` | 见下节 |
 | 11 | Z-01C-i INSTALL 实现 | `DONE.m2` | 见下节 |
@@ -28,7 +28,7 @@
 
 ### 2026-11-10 00:47 设计与台账
 
-- 新增 `docs/设计-Hook台账节点与Magpie适配器.md`。
+- 新增 Hook 专题设计文档（已删）。
 - 决策记录追加 D-173 / D-174 / D-175。
 - 台账 §3 v1.1 加 Z-01C 行（2.5 人日），Z-01A 标注「由 Z-01C 收编」；§1.1 v1.1 计数 8→9、合计 113→114；§1 快照当前任务与下一步改写；§9.2 加 Z-01C 行、机器相关节点数 11→12。
 - `docs/任务台账/任务详述.md` 写入 Z-01C 卡片（目标/依据/产出/验收 AC-1..AC-8/坑）。
@@ -41,7 +41,7 @@
 - **ONBOARD（h）**：`src/app/onboard/{state,detect,routes}.ts`（新建）、`src/infra/proc/processes.ts`（新建）、`src/ui/shell/OnboardModal.tsx`（新建）、`src/app/http/server.ts`（注册 `/hook/api` onboard 路由 + `?from=magpie` 服务端置连接态）、`src/ui/shell/first-run.ts`（删掉 MCP 旧提示语）。
 - **INSTALL（i）**：`src/app/onboard/install.ts`（新建：plan/apply/uninstall + 白名单例外通道只加目标目录）、`tools/copy-assets.mjs`（复制 `packages/magpie-moshi` → `dist/magpie-moshi`）、`src/ui/tsconfig.json`（include 显式化）。
 
-验收证据（详见 `docs/测试-Hook台账节点-2026-11-10.md` 第二轮）：
+验收证据（详见 git 历史（原测试文档已删） 第二轮）：
 
 - `pnpm verify` 145 files / 1695 tests / 163.32s 全绿；`pnpm build` 通过（`dist/magpie-moshi` 4 文件已复制）。
 - 新增测试：`tests/unit/onboard.test.ts`(17)、`tests/integration/onboard-api.test.ts`(9)、`tests/unit/shell.test.ts` +5、`tests/integration/hook-api.test.ts` 改 2 例。

@@ -6,14 +6,22 @@
  * `POST /api/eval/run`（`src/app/http/routes/privacy.ts`、`routes/eval.ts`）。
  */
 
+import { t as translateNow, type Translator } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
+
 export type PurgeScope = 'all' | 'facts' | 'sessions' | 'archive';
 
-export const PURGE_SCOPES: readonly { value: PurgeScope; label: string }[] = [
-  { value: 'all', label: '全部数据（facts/edges/entities/annotations/sessions）' },
-  { value: 'facts', label: '仅事实（facts/edges/fts/vec，保留实体与会话）' },
-  { value: 'sessions', label: '仅会话与轨迹（sessions/episodes/annotations）' },
-  { value: 'archive', label: '仅归档台账与归档文件' },
+const PURGE_SCOPE_KEYS: readonly { value: PurgeScope; labelKey: DictKey }[] = [
+  { value: 'all', labelKey: 'privacy.scope.all' },
+  { value: 'facts', labelKey: 'privacy.scope.facts' },
+  { value: 'sessions', labelKey: 'privacy.scope.sessions' },
+  { value: 'archive', labelKey: 'privacy.scope.archive' },
 ];
+
+/** 清理范围选项：调用期取当前语言（不要缓存成模块常量）。 */
+export function purgeScopes(t: Translator = translateNow): readonly { value: PurgeScope; label: string }[] {
+  return PURGE_SCOPE_KEYS.map((s) => ({ value: s.value, label: t(s.labelKey) }));
+}
 
 export interface PrivacyOverview {
   schema: string;
@@ -70,7 +78,7 @@ export interface EvalRunView {
 
 /** 手输确认：必须逐字 PURGE（去首尾空白不算宽容，只是防键盘尾随空格）。 */
 export function canSubmitPurge(confirmText: string, scope: PurgeScope): boolean {
-  return PURGE_SCOPES.some((s) => s.value === scope) && confirmText.trim() === 'PURGE';
+  return PURGE_SCOPE_KEYS.some((s) => s.value === scope) && confirmText.trim() === 'PURGE';
 }
 
 export function formatBytes(bytes: number): string {
@@ -88,12 +96,15 @@ export function formatBytes(bytes: number): string {
 }
 
 /** 「先预览」读数的单行摘要；组件与测试共用同一口径。 */
-export function purgeSummary(wouldDelete: WouldDelete): string {
-  return (
-    `事实 ${String(wouldDelete.facts)} · 边 ${String(wouldDelete.edges)}` +
-    ` · 实体 ${String(wouldDelete.entities)} · 注解 ${String(wouldDelete.annotations)}` +
-    ` · 会话 ${String(wouldDelete.sessions)} · 归档文件 ${String(wouldDelete.archive_files)}`
-  );
+export function purgeSummary(wouldDelete: WouldDelete, t: Translator = translateNow): string {
+  return t('privacy.summary', {
+    facts: wouldDelete.facts,
+    edges: wouldDelete.edges,
+    entities: wouldDelete.entities,
+    annotations: wouldDelete.annotations,
+    sessions: wouldDelete.sessions,
+    files: wouldDelete.archive_files,
+  });
 }
 
 /** 实跑删除总条数（用于「已清理 N 条」提示；不含归档文件）。 */
@@ -113,36 +124,51 @@ function mb(value: number): string {
 }
 
 /** 隐私总览 → (label, value) 行；面板按此渲染，测试钉口径。 */
-export function overviewRows(overview: PrivacyOverview): OverviewRow[] {
+export function overviewRows(overview: PrivacyOverview, t: Translator = translateNow): OverviewRow[] {
   const c = overview.counts;
   return [
     {
-      label: '数据库',
-      value: `${overview.db.path} · ${mb(overview.db.size_mb)} · WAL ${mb(overview.db.wal_mb)}`,
+      label: t('privacy.row.db'),
+      value: t('privacy.row.dbValue', {
+        path: overview.db.path,
+        size: mb(overview.db.size_mb),
+        wal: mb(overview.db.wal_mb),
+      }),
     },
     {
-      label: '事实 / 边 / 实体',
-      value: `${String(c.facts)} 条事实 · ${String(c.edges)} 条边 · ${String(c.entities)} 个实体`,
+      label: t('privacy.row.facts'),
+      value: t('privacy.row.factsValue', { facts: c.facts, edges: c.edges, entities: c.entities }),
     },
     {
-      label: '注解 / 会话',
-      value: `${String(c.annotations)} 条注解 · ${String(c.sessions)} 个会话`,
+      label: t('privacy.row.annotations'),
+      value: t('privacy.row.annotationsValue', { annotations: c.annotations, sessions: c.sessions }),
     },
     {
-      label: '软删 / 失效',
-      value: `${String(c.facts_pruned)} 条 pruned · ${String(c.facts_invalidated)} 条 invalidated`,
+      label: t('privacy.row.softDelete'),
+      value: t('privacy.row.softDeleteValue', {
+        pruned: c.facts_pruned,
+        invalidated: c.facts_invalidated,
+      }),
     },
     {
-      label: '归档',
-      value: `${overview.archive.dir} · ${String(overview.archive.topics)} 个主题（DB 台账 ${String(c.archive_topics)}） · ${formatBytes(overview.archive.bytes)}`,
+      label: t('privacy.row.archive'),
+      value: t('privacy.row.archiveValue', {
+        dir: overview.archive.dir,
+        topics: overview.archive.topics,
+        ledger: c.archive_topics,
+        bytes: formatBytes(overview.archive.bytes),
+      }),
     },
     {
-      label: '保留策略',
-      value: `闲置 ${String(overview.retention.prune_idle_days)} 天 · 半衰期 ${String(overview.retention.half_life_days)} 天`,
+      label: t('privacy.row.retention'),
+      value: t('privacy.row.retentionValue', {
+        idle: overview.retention.prune_idle_days,
+        half: overview.retention.half_life_days,
+      }),
     },
     {
-      label: '最近清理',
-      value: overview.last_purge_at ?? '从未',
+      label: t('privacy.row.lastPurge'),
+      value: overview.last_purge_at ?? t('privacy.never'),
     },
   ];
 }
@@ -151,13 +177,18 @@ export function overviewRows(overview: PrivacyOverview): OverviewRow[] {
  * golden set 按钮结果文案：`POST /api/eval/run` 的三种出口 + 409 并发。
  * `httpStatus` 由组件传入（409 时 body 为错误结构）。
  */
-export function evalRunText(result: EvalRunView, httpStatus = 200): string {
-  if (httpStatus === 409) return '已有评测在跑';
-  if (result.ok === false && result.reason === 'no_golden_set') return '未配置 golden set';
-  if (result.ok === false) return '评测未通过门禁';
-  const passed = result.passed ?? 0;
-  const total = result.total ?? 0;
-  const blocking = result.blocking_failures ?? 0;
-  const elapsed = result.elapsed_ms === undefined ? '' : ` · ${String(result.elapsed_ms)}ms`;
-  return `评测完成：${String(passed)}/${String(total)} 通过 · 阻断 ${String(blocking)} 次${elapsed}`;
+export function evalRunText(
+  result: EvalRunView,
+  httpStatus = 200,
+  t: Translator = translateNow,
+): string {
+  if (httpStatus === 409) return t('privacy.eval.running');
+  if (result.ok === false && result.reason === 'no_golden_set') return t('privacy.eval.noGoldenSet');
+  if (result.ok === false) return t('privacy.eval.gateFailed');
+  return t('privacy.eval.done', {
+    passed: result.passed ?? 0,
+    total: result.total ?? 0,
+    blocking: result.blocking_failures ?? 0,
+    elapsed: result.elapsed_ms === undefined ? '' : ` · ${String(result.elapsed_ms)}ms`,
+  });
 }

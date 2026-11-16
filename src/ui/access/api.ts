@@ -5,6 +5,7 @@
  * （日志页右上角的开关只是跳转快捷入口，用户 m02743）。
  */
 import { resolveToken } from '../api.js';
+import { t } from '../i18n/index.js';
 
 export type LogSource = 'query' | 'trace';
 export type LogSourceFilter = 'all' | LogSource;
@@ -67,8 +68,18 @@ export interface LogQuery {
   q?: string | null;
 }
 
+interface ErrorBody {
+  message?: string;
+  error?: string;
+  detail?: { reason?: string };
+}
+
+async function errorBody(res: Response): Promise<ErrorBody> {
+  return (await res.json().catch(() => ({}))) as ErrorBody;
+}
+
 async function errorMessage(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
+  const body = await errorBody(res);
   return body.message ?? body.error ?? `HTTP ${String(res.status)}`;
 }
 
@@ -125,4 +136,93 @@ export async function purgeTraceLogs(): Promise<{ disk_removed: number; memory_r
   return postJson<{ disk_removed: number; memory_removed: number }>('/api/maintenance/trace/purge', {
     confirm: 'PURGE',
   });
+}
+
+/**
+ * 历史会话导入的客户端契约（后端契约已冻结）。
+ *
+ * - `POST /api/import` body `{since}` → 202 `{ok, since, started_at}`；
+ *   400 `E_INPUT`；409 `E_CONFLICT`（reason `import_running`：同一时刻只允许一次导入）
+ * - `GET  /api/import/status` → 运行态 + 上一次导入的结果汇总（`result` 为 null = 还没跑过）
+ */
+export interface ImportResultSummary {
+  sessions: number;
+  turns: number;
+  facts: number;
+  refreshed: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  unavailable: number;
+  promoted: number;
+  ms: number;
+}
+
+export interface ImportStatus {
+  running: boolean;
+  since: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  lines: string[];
+  result: ImportResultSummary | null;
+  error: string | null;
+}
+
+export interface ImportStarted {
+  ok: boolean;
+  since: string;
+  started_at: string;
+}
+
+/** 触发一次导入；409 已由后端判定「已有导入在执行」，其余错误用响应体 message。 */
+export async function postImport(since: string): Promise<ImportStarted> {
+  const res = await fetch('/api/import', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Moshi-Token': resolveToken(),
+    },
+    body: JSON.stringify({ since }),
+  });
+  if (res.status === 409) throw new Error(t('endpoints.import.error.running'));
+  if (!res.ok) {
+    const body = await errorBody(res);
+    // 用户 m00882：没有任何可用采集源时后端是 400 + detail.reason=no_source；
+    // 直接说人话，不要落到 409 的「已有导入在执行」文案上。
+    if (res.status === 400 && body.detail?.reason === 'no_source') {
+      throw new Error(t('endpoints.import.error.noSource'));
+    }
+    throw new Error(body.message ?? body.error ?? `HTTP ${String(res.status)}`);
+  }
+  return (await res.json()) as ImportStarted;
+}
+
+export async function fetchImportStatus(signal?: AbortSignal): Promise<ImportStatus> {
+  return getJson<ImportStatus>('/api/import/status', signal);
+}
+
+/**
+ * 采集源状态（`GET /api/collect/sources`；task-6 归一后的单一判定点）。
+ *
+ * `sources` 只列 enabled 实例；`available=false` = 一个能用的目录都没有，
+ * 导入/采集跑不起来——导入按钮据此前置置灰（用户 m00882）。
+ */
+export interface CollectSourceStatus {
+  id: string;
+  adapter: string;
+  root: string;
+  available: boolean;
+}
+
+export interface CollectSourcesState {
+  /** 配置里写了几个源（含 enabled=false 的）；false = 从没配置过 */
+  configured: boolean;
+  /** 至少一个 enabled 源的目录真实存在 */
+  available: boolean;
+  sources: CollectSourceStatus[];
+}
+
+export async function fetchCollectSources(signal?: AbortSignal): Promise<CollectSourcesState> {
+  return getJson<CollectSourcesState>('/api/collect/sources', signal);
 }

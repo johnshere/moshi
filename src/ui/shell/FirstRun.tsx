@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { useT } from '../i18n/index.js';
 import {
   BANNERS,
   firstRunState,
@@ -111,6 +112,7 @@ async function probe(signal: AbortSignal): Promise<ProbeResult> {
 
 /** 顶部首开提示条。挂在 `Shell` 最外层；`ready` 时零占位。 */
 export function FirstRun(): ReactElement | null {
+  const t = useT();
   const [result, setResult] = useState<ProbeResult | null>(null);
 
   const load = useCallback(async (signal: AbortSignal): Promise<void> => {
@@ -128,8 +130,10 @@ export function FirstRun(): ReactElement | null {
   const options: FirstRunOptions = { collectEnabled: result.collectEnabled };
   const state: FirstRunState = firstRunState(result.status, result.hasData, options);
   if (state === 'ready') return null;
-
+  // 用户 m00882：采集提醒三态暂不提示，等正式接入逻辑定稿——collect_off 没有文案，
+  // 这里直接不渲染；判定仍留在 first-run.ts（其它地方还要用这个状态）。
   const banner = BANNERS[state];
+  if (banner === undefined) return null;
   return (
     <div
       style={bannerStyle(banner.tone)}
@@ -139,8 +143,8 @@ export function FirstRun(): ReactElement | null {
       data-state={state}
       className="moshi-firstrun"
     >
-      <strong style={{ fontWeight: 600 }}>{banner.text}</strong>
-      <span style={{ opacity: 0.85 }}>{banner.hint}</span>
+      <strong style={{ fontWeight: 600 }}>{t(banner.textKey)}</strong>
+      <span style={{ opacity: 0.85 }}>{t(banner.hintKey)}</span>
       <button
         type="button"
         style={retryStyle}
@@ -149,7 +153,7 @@ export function FirstRun(): ReactElement | null {
           void load(new AbortController().signal);
         }}
       >
-        重试
+        {t('common.retry')}
       </button>
     </div>
   );

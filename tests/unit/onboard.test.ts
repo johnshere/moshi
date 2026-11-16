@@ -207,7 +207,8 @@ describe('Magpie 插件安装器', () => {
     const home = tempDir();
     const plan = planMagpieHook({ dataDir: tempDir(), home, env: {}, sourceDir: fakeSource() });
     expect(plan.supported).toBe(false);
-    expect(plan.reason).toContain('没找到 Magpie 插件目录');
+    // 服务端只下发码值，句子在界面词典（I-70 / D-187）
+    expect(plan.reason).toBe('plugin_dir_missing');
     expect(plan.steps).toEqual([]);
   });
 
@@ -232,9 +233,12 @@ describe('Magpie 插件安装器', () => {
     ]);
     // 注册表必须在配置根，不在 plugins/ 里（K7）
     expect(plan.steps[plan.steps.length - 1]?.path).toBe(path.join(configDir, 'plugins.json'));
-    expect(plan.steps[plan.steps.length - 1]?.note).toContain('以路径 spec 注册');
-    expect(plan.steps.map((step) => step.action)).toEqual(['新增', '新增', '新增', '新增', '修改']);
-    expect(plan.risk).toContain('重载 plugin-host');
+    expect(plan.steps[plan.steps.length - 1]?.note).toEqual({
+      code: 'registry_add',
+      spec: path.resolve(path.join(root, 'node_modules', 'moshi')),
+    });
+    expect(plan.steps.map((step) => step.action)).toEqual(['add', 'add', 'add', 'add', 'add']);
+    expect(plan.risk).toBe('reload_plugin_host');
   });
 
   it('没点确认就一个字节都不写（确认弹窗不是装饰）', () => {
@@ -266,6 +270,10 @@ describe('Magpie 插件安装器', () => {
     applyMagpieHook({ dataDir, env, sourceDir, confirm: true });
     const spec = JSON.parse(readFileSync(path.join(configDir, 'plugins.json'), 'utf8')) as { plugins: { spec: string }[] };
     expect(spec.plugins.filter((p) => p.spec === path.resolve(path.join(root, 'node_modules', 'moshi'))).length).toBe(1);
+    // 再规划一次：包文件与注册表都已在位 → 全部 update，注册表附注 registry_present
+    const again = planMagpieHook({ dataDir, env, sourceDir });
+    expect(again.steps.map((step) => step.action)).toEqual(['update', 'update', 'update', 'update', 'update']);
+    expect(again.steps[again.steps.length - 1]?.note).toEqual({ code: 'registry_present' });
   });
 
   it('卸载：删包文件、清掉我们的 spec、把状态标回 absent', () => {
@@ -290,7 +298,7 @@ describe('Magpie 插件安装器', () => {
     for (const host of ['magpie', 'claude-code', 'dsh'] as const) {
       const plan = planMcp(host);
       expect(plan.supported).toBe(false);
-      expect(plan.reason).toContain('本轮未实现');
+      expect(plan.reason).toBe('mcp_not_implemented');
     }
   });
 });

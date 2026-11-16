@@ -3,7 +3,7 @@
  *
  * **一个组件，两个外壳**：
  * - 独立整页 `/ui/hook`（`standalone`，外部契约：`magpie.cmd` 用它拉起界面）；
- * - 设置二级 `/ui/settings/access`（内嵌，不带整页标题与返回）。
+ * - 接入二级 `/ui/access/endpoints`（内嵌，不带整页标题与返回）。
  *
  * 为什么不能做成 iframe 内嵌：旧版 `/ui/hook` 是服务端拼的内联 HTML，嵌进来会有
  * 两层滚动、两套令牌处理。这里把功能搬进 React，两个路由共用一个组件（§16.5.5）。
@@ -16,10 +16,23 @@
  */
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
+import {
+  actionText,
+  manualTextKey,
+  noteText,
+  reasonText,
+  riskText,
+  type HookHost,
+  type InstallPlan,
+  type PlanPayload,
+} from './plan.js';
 
 // ── 服务端契约（TS 侧镜像，服务端不导给 UI，避免 UI 依赖 app 层） ──
+// 安装计划（InstallPlan / PlanPayload）与它的码→文案映射在 `./plan.js`（I-70 / D-187）。
 
-export type HookHost = 'magpie' | 'claude-code' | 'dsh';
+export type { HookHost } from './plan.js';
 
 export type InstallState = 'absent' | 'installed' | 'failed' | 'unsupported';
 
@@ -53,23 +66,6 @@ export interface TracePayload {
   capacity: number;
 }
 
-export interface InstallStep {
-  action: '新增' | '修改' | '删除';
-  path: string;
-  note?: string;
-}
-
-export interface InstallPlan {
-  host: HookHost;
-  kind: 'hook' | 'mcp';
-  supported: boolean;
-  reason: string | null;
-  root: string | null;
-  version: string | null;
-  steps: readonly InstallStep[];
-  risk: string | null;
-}
-
 export interface InstallRecord {
   state: InstallState;
   at: string | null;
@@ -78,13 +74,6 @@ export interface InstallRecord {
   reason: string | null;
   files: readonly string[];
   backup: string | null;
-}
-
-export interface PlanPayload {
-  plans: readonly InstallPlan[];
-  manual: { hook: Record<HookHost, string>; mcp: Record<HookHost, string> };
-  labels: Record<HookHost, string>;
-  keys: readonly { host: HookHost; kind: 'hook' | 'mcp'; key: string }[];
 }
 
 export interface OnboardPayload {
@@ -96,32 +85,8 @@ export interface OnboardPayload {
 
 // ── 文案表（一处定义，服务端只给宿主名） ──
 
-const TURN_LABELS: Record<string, string> = {
-  session_start: '会话开始',
-  user_prompt: '用户消息前',
-  post_tool: '工具调用后',
-  response: '回复生成前',
-  stop: '回合结束',
-  pre_compact: '压缩前',
-  session_end: '会话结束',
-};
-
-const STATUS_LABELS: Record<string, string> = {
-  ready: '已注入',
-  empty: '无内容',
-  unbound: '未绑定',
-  unauthorized: '未授权',
-  unavailable: '服务不可达',
-  invalid: '信封无效',
-  skipped: '已跳过',
-};
-
-const INSTALL_LABELS: Record<InstallState, string> = {
-  absent: '未安装',
-  installed: '已安装',
-  failed: '安装失败',
-  unsupported: '暂不支持',
-};
+// turn / outcome / install 三个枚举的文案在 `../i18n/dict.ts` 的 `enum.*` 下，
+// 统一经 `enumLabel()` 取（D-184：后端枚举值不翻译，界面文案才翻译）。
 
 // ── 样式 ──
 
@@ -223,6 +188,7 @@ export interface AccessPageProps {
 }
 
 export function AccessPage({ standalone, onboardResult }: AccessPageProps): ReactElement {
+  const t = useT();
   const [status, setStatus] = useState<HookStatusPayload | null>(null);
   const [plans, setPlans] = useState<PlanPayload | null>(null);
   const [onboard, setOnboard] = useState<OnboardPayload | null>(null);
@@ -233,8 +199,10 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
   const [manual, setManual] = useState<{ host: HookHost; kind: 'hook' | 'mcp' } | null>(null);
   const [confirming, setConfirming] = useState<InstallPlan | null>(null);
   const [resultText, setResultText] = useState<string | null>(
-    onboardResult === null ? null : onboardResult === 'ok' ? '插件已安装，重启 Magpie 后生效。' : '安装未成功，可在下方点「查看手动安装」。',
+    onboardResult === null ? null : t(onboardResult === 'ok' ? 'access.onboard.ok' : 'access.onboard.fail'),
   );
+  /** 结果条色调：安装失败要红；以前靠字符串里有没有「失败」猜，翻译后不能这么猜了 */
+  const [resultTone, setResultTone] = useState<'ok' | 'fail'>(onboardResult === 'fail' ? 'fail' : 'ok');
   const disposedRef = useRef(false);
 
   const fail = useCallback((err: unknown): void => {
@@ -294,11 +262,10 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
   // 所以结果条与安装状态必须跟着 props 更新（否则停在「未安装」直到刷新页面）。
   useEffect(() => {
     if (onboardResult === null) return;
-    setResultText(
-      onboardResult === 'ok' ? '插件已安装，重启 Magpie 后生效。' : '安装未成功，可在下方点「查看手动安装」。',
-    );
+    setResultText(t(onboardResult === 'ok' ? 'access.onboard.ok' : 'access.onboard.fail'));
+    setResultTone(onboardResult === 'ok' ? 'ok' : 'fail');
     void loadStatic();
-  }, [onboardResult, loadStatic]);
+  }, [onboardResult, loadStatic, t]);
 
   const setSwitch = async (patch: Partial<HookSwitches>): Promise<void> => {
     setBusy('config');
@@ -331,7 +298,14 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
     try {
       const body = { host: plan.host, kind: plan.kind, confirm: true };
       const res = await api<{ ok: boolean; record: InstallRecord }>('/hook/api/install', { method: 'POST', body });
-      setResultText(res.ok ? `已安装到 ${res.record.path ?? '目标目录'}，重启 Magpie 后生效。` : `安装失败：${res.record.reason ?? '未知原因'}`);
+      setResultText(
+        res.ok
+          ? t('access.result.installed', { path: res.record.path ?? t('access.result.targetDir') })
+          : t('access.result.installFail', {
+              reason: reasonText(res.record.reason) || t('access.result.unknownReason'),
+            }),
+      );
+      setResultTone(res.ok ? 'ok' : 'fail');
       setConfirming(null);
       await loadStatic();
     } catch (err) {
@@ -345,7 +319,8 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
     setBusy(`uninstall:${plan.host}:${plan.kind}`);
     try {
       await api('/hook/api/uninstall', { method: 'POST', body: { host: plan.host, kind: plan.kind } });
-      setResultText('已卸载，重启 Magpie 后生效。');
+      setResultText(t('access.result.uninstalled'));
+      setResultTone('ok');
       await loadStatic();
     } catch (err) {
       fail(err);
@@ -367,22 +342,22 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
     <div style={pageStyle(standalone)} data-testid="access-page">
       {standalone ? (
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <h2 style={titleStyle}>Agent 接入</h2>
+          <h2 style={titleStyle}>{t('access.title')}</h2>
           <a href={`/ui/graph${window.location.search}`} style={{ ...linkButtonStyle, fontSize: 12 }} data-testid="access-back">
-            ← 返回应用
+            {t('access.back')}
           </a>
         </div>
       ) : null}
       <div style={subtitleStyle}>
-        Hook 插件在 Agent 每次请求时向 moshi 要一段记忆注入；MCP 是另一条路径，本轮只显示不安装。
+        {t('access.intro')}
       </div>
 
       {resultText !== null ? (
-        <div style={{ ...cardStyle, borderColor: 'var(--color-border-strong, #3a4a5a)' }} data-testid="access-result" data-tone={resultText.includes('失败') ? 'fail' : 'ok'}>
+        <div style={{ ...cardStyle, borderColor: 'var(--color-border-strong, #3a4a5a)' }} data-testid="access-result" data-tone={resultTone}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <span style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{resultText}</span>
             <button type="button" style={linkButtonStyle} onClick={() => setResultText(null)}>
-              关闭
+              {t('common.close')}
             </button>
           </div>
         </div>
@@ -396,7 +371,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
 
       {/* ── 连接态 + 工程身份 ── */}
       <div style={cardStyle} data-testid="access-connection">
-        <div style={cardTitleStyle}>连接</div>
+        <div style={cardTitleStyle}>{t('access.conn.title')}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <span
             data-testid="access-connected"
@@ -409,7 +384,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
               color: connected ? 'var(--color-status-ok, #4caf50)' : 'var(--color-text-faint)',
             }}
           >
-            {connected ? '已连接 Magpie' : '未连接 Magpie'}
+            {connected ? t('access.conn.connected') : t('access.conn.disconnected')}
           </span>
           <button
             type="button"
@@ -418,22 +393,22 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
             disabled={busy !== null}
             onClick={() => void connect(connected ? 'disconnect' : 'connect')}
           >
-            {connected ? '断开' : '连接 Magpie'}
+            {connected ? t('access.conn.disconnect') : t('access.conn.connect')}
           </button>
-          <span style={mutedStyle}>Magpie 的插件通过本机 9836 端口回连 moshi；端口在设置 → 配置里可改。</span>
+          <span style={mutedStyle}>{t('access.conn.hint')}</span>
         </div>
       </div>
 
       {/* ── 三个真开关（magpie_enabled 由连接按钮驱动，不单独给开关，避免两处语义打架） ── */}
       <div style={cardStyle} data-testid="access-switches">
-        <div style={cardTitleStyle}>注入开关</div>
+        <div style={cardTitleStyle}>{t('access.switches.title')}</div>
         {(
           [
-            ['enabled', '启用 Hook 注入', '关掉后所有 Agent 请求都直接放行，不做任何注入'],
-            ['inject_existing', '注入已有事实', '只注入库里已有的事实，不做现场抽取'],
-            ['capture_reply', '记录回复正文', '把 Agent 的回复文本也落进台账（默认关：回复可能含敏感内容）'],
+            ['enabled', 'access.switch.enabled.label', 'access.switch.enabled.desc'],
+            ['inject_existing', 'access.switch.inject_existing.label', 'access.switch.inject_existing.desc'],
+            ['capture_reply', 'access.switch.capture_reply.label', 'access.switch.capture_reply.desc'],
           ] as const
-        ).map(([key, label, hint]) => (
+        ).map(([key, labelKey, hintKey]) => (
           <label key={key} style={{ ...rowStyle, cursor: 'pointer' }} data-testid={`access-switch-${key}`}>
             <input
               type="checkbox"
@@ -441,8 +416,8 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
               disabled={status === null || busy !== null}
               onChange={(event) => void setSwitch({ [key]: event.target.checked })}
             />
-            <span style={{ fontSize: 12, color: 'var(--color-text-primary)', minWidth: 110 }}>{label}</span>
-            <span style={mutedStyle}>{hint}</span>
+            <span style={{ fontSize: 12, color: 'var(--color-text-primary)', minWidth: 110 }}>{t(labelKey)}</span>
+            <span style={mutedStyle}>{t(hintKey)}</span>
           </label>
         ))}
       </div>
@@ -450,9 +425,9 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
       {/* ── 接入矩阵：两大类 × 三个客户端 ── */}
       {(['hook', 'mcp'] as const).map((kind) => (
         <div style={cardStyle} key={kind} data-testid={`access-group-${kind}`}>
-          <div style={cardTitleStyle}>{kind === 'hook' ? 'Hook 插件' : 'MCP 服务端'}</div>
+          <div style={cardTitleStyle}>{t(kind === 'hook' ? 'access.matrix.hook' : 'access.matrix.mcp')}</div>
           {kind === 'mcp' ? (
-            <div style={{ ...mutedStyle, marginBottom: 6 }}>本轮只做统一显示：能看到装了没装，安装下一轮实现。</div>
+            <div style={{ ...mutedStyle, marginBottom: 6 }}>{t('access.matrix.note')}</div>
           ) : null}
           {(plans?.plans ?? [])
             .filter((plan) => plan.kind === kind)
@@ -466,7 +441,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                 <div key={`${plan.host}:${plan.kind}`} style={rowStyle} data-testid={`access-plan-${plan.host}-${plan.kind}`}>
                   <span style={{ fontSize: 13, color: 'var(--color-text-primary)', minWidth: 110 }}>
                     {label}
-                    {detected ? <span style={{ ...mutedStyle, marginLeft: 6 }}>已探测到</span> : null}
+                    {detected ? <span style={{ ...mutedStyle, marginLeft: 6 }}>{t('access.matrix.detected')}</span> : null}
                   </span>
                   <span
                     data-testid={`access-state-${plan.host}-${plan.kind}`}
@@ -474,12 +449,15 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                     style={{ ...mutedStyle, minWidth: 150 }}
                   >
                     {installed
-                      ? `${INSTALL_LABELS.installed}${record.version === null ? '' : ` v${record.version}`}`
+                      ? `${enumLabel('install', 'installed')}${record.version === null ? '' : ` v${record.version}`}`
                       : kind === 'mcp'
-                        ? '即将支持'
+                        ? t('access.matrix.soon')
                         : plan.supported
-                          ? INSTALL_LABELS.absent
-                          : `${INSTALL_LABELS.unsupported}：${plan.reason ?? ''}`}
+                          ? enumLabel('install', 'absent')
+                          : t('access.notSupported', {
+                              label: enumLabel('install', 'unsupported'),
+                              reason: reasonText(plan.reason),
+                            })}
                   </span>
                   <span style={{ flex: 1 }} />
                   {isMagpieHook ? (
@@ -491,7 +469,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                         data-testid="access-uninstall"
                         onClick={() => void runUninstall(plan)}
                       >
-                        卸载
+                        {t('access.matrix.uninstall')}
                       </button>
                     ) : (
                       <button
@@ -501,12 +479,12 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                         data-testid="access-install"
                         onClick={() => setConfirming(plan)}
                       >
-                        安装
+                        {t('access.matrix.install')}
                       </button>
                     )
                   ) : (
                     <button type="button" style={buttonStyle(true)} disabled data-testid={`access-soon-${plan.host}-${plan.kind}`}>
-                      即将支持
+                      {t('access.matrix.soon')}
                     </button>
                   )}
                   <button
@@ -515,7 +493,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                     data-testid={`access-manual-${plan.host}-${plan.kind}`}
                     onClick={() => setManual({ host: plan.host, kind: plan.kind })}
                   >
-                    查看手动安装
+                    {t('access.matrix.manual')}
                   </button>
                 </div>
               );
@@ -526,8 +504,10 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
       {/* ── 注入台账 ── */}
       <div style={cardStyle} data-testid="access-trace">
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={cardTitleStyle}>注入台账</div>
-          <span style={mutedStyle}>最近 {trace?.items.length ?? 0} 条（容量 {trace?.capacity ?? 0}），只记时机/结果，不记原话</span>
+          <div style={cardTitleStyle}>{t('access.trace.title')}</div>
+          <span style={mutedStyle}>
+            {t('access.trace.meta', { n: trace?.items.length ?? 0, capacity: trace?.capacity ?? 0 })}
+          </span>
           <span style={{ flex: 1 }} />
           <button
             type="button"
@@ -539,28 +519,30 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                 .catch(fail);
             }}
           >
-            清空
+            {t('access.trace.clear')}
           </button>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
           <thead>
             <tr style={{ color: 'var(--color-text-faint)', textAlign: 'left' }}>
-              <th style={{ padding: '4px 6px' }}>时间</th>
-              <th style={{ padding: '4px 6px' }}>时机</th>
-              <th style={{ padding: '4px 6px' }}>结果</th>
-              <th style={{ padding: '4px 6px' }}>证据</th>
-              <th style={{ padding: '4px 6px' }}>字节</th>
-              <th style={{ padding: '4px 6px' }}>耗时</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.time')}</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.turn')}</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.outcome')}</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.evidence')}</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.bytes')}</th>
+              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.latency')}</th>
             </tr>
           </thead>
           <tbody>
             {(trace?.items ?? []).map((item, index) => (
               <tr key={`${item.ts}:${String(index)}`} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
                 <td style={{ padding: '4px 6px' }}>{item.ts.slice(11, 19)}</td>
-                <td style={{ padding: '4px 6px' }}>{TURN_LABELS[item.turn] ?? item.turn}</td>
+                <td style={{ padding: '4px 6px' }}>{enumLabel('turn', item.turn)}</td>
                 <td style={{ padding: '4px 6px' }}>
-                  {STATUS_LABELS[item.status] ?? item.status}
-                  {item.degraded.length > 0 ? <span style={mutedStyle}>（{item.degraded.join('/')}）</span> : null}
+                  {enumLabel('outcome', item.status)}
+                  {item.degraded.length > 0 ? (
+                    <span style={mutedStyle}>{t('common.paren', { text: item.degraded.join('/') })}</span>
+                  ) : null}
                 </td>
                 <td style={{ padding: '4px 6px' }}>{item.evidence}</td>
                 <td style={{ padding: '4px 6px' }}>{item.inject_bytes}</td>
@@ -570,7 +552,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
             {trace !== null && trace.items.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ padding: '8px 6px', ...mutedStyle }}>
-                  还没有注入记录。接上 Magpie 后，随便发一条消息就有了。
+                  {t('access.trace.empty')}
                 </td>
               </tr>
             ) : null}
@@ -595,12 +577,12 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
           }}
         >
           <div style={{ ...cardStyle, marginTop: 0, maxWidth: 420, textAlign: 'center' }}>
-            <div style={{ ...cardTitleStyle, fontSize: 15 }}>连接 Magpie 才能使用</div>
+            <div style={{ ...cardTitleStyle, fontSize: 15 }}>{t('access.gate.title')}</div>
             <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 14 }}>
-              插件要把记忆注入到 Agent 请求里，必须先连上本机 moshi。
+              {t('access.gate.desc')}
             </div>
             <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void connect('connect')} data-testid="access-mask-connect">
-              连接
+              {t('access.gate.action')}
             </button>
           </div>
         </div>
@@ -612,14 +594,17 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
           <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-manual-dialog">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ ...cardTitleStyle, fontSize: 14 }}>
-                {plans?.labels[manual.host] ?? manual.host} · {manual.kind === 'hook' ? '插件版' : 'MCP 版'}手动安装
+                {t('access.manual.title', {
+                  host: plans?.labels[manual.host] ?? manual.host,
+                  kind: t(manual.kind === 'hook' ? 'access.manual.kind.hook' : 'access.manual.kind.mcp'),
+                })}
               </div>
               <button type="button" style={linkButtonStyle} onClick={() => setManual(null)}>
-                关闭
+                {t('common.close')}
               </button>
             </div>
             <pre style={preStyle} data-testid="access-manual-text">
-              {(manual.kind === 'hook' ? plans?.manual.hook[manual.host] : plans?.manual.mcp[manual.host]) ?? '（暂无文案）'}
+              {t(manualTextKey(manual.host, manual.kind))}
             </pre>
           </div>
         </div>
@@ -629,24 +614,26 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
       {confirming !== null ? (
         <div style={overlayStyle} onClick={() => setConfirming(null)}>
           <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-confirm-dialog">
-            <div style={{ ...cardTitleStyle, fontSize: 14 }}>确认安装到 {plans?.labels[confirming.host] ?? confirming.host}？</div>
-            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 8 }}>将写入以下文件（可随时在接入页卸载）：</div>
+            <div style={{ ...cardTitleStyle, fontSize: 14 }}>{t('access.confirm.title', { host: plans?.labels[confirming.host] ?? confirming.host })}</div>
+            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 8 }}>{t('access.confirm.desc')}</div>
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
               {confirming.steps.map((step) => (
                 <li key={`${step.action}:${step.path}`}>
-                  <span style={mutedStyle}>{step.action} </span>
+                  <span style={mutedStyle}>{actionText(step.action)} </span>
                   <code style={{ fontSize: 11 }}>{step.path}</code>
-                  {step.note === undefined ? null : <span style={mutedStyle}>（{step.note}）</span>}
+                  {step.note === undefined ? null : (
+                    <span style={mutedStyle}>{t('common.paren', { text: noteText(step.note) ?? '' })}</span>
+                  )}
                 </li>
               ))}
             </ul>
-            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>注意：{confirming.risk}</div> : null}
+            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>{t('access.confirm.risk', { risk: riskText(confirming.risk) })}</div> : null}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
               <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => setConfirming(null)}>
-                取消
+                {t('access.confirm.cancel')}
               </button>
               <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void runInstall(confirming)} data-testid="access-confirm-install">
-                确认安装
+                {t('access.confirm.ok')}
               </button>
             </div>
           </div>

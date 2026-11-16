@@ -154,12 +154,12 @@ const EDGE_VERT = /* glsl */ `
     vVis = aVis;
     vMass = aMass;
     vFlow = aFlow;
-    // 方向：trace 的 path 是「种子 → 1 跳 → 2 跳」的传播方向，库里边的几何方向不一定
-    // 与它一致（co_occur 两个方向都合法），所以按 aDir 翻转 uv，而不是按 etype 语义猜。
+    // Direction: a trace path runs seed -> hop1 -> hop2, which need not match the stored
+    // geometry direction (co_occur is legal both ways), so flip uv by aDir, not by etype.
     float u = mix(uv.x, 1.0 - uv.x, aDir);
     vUv = vec2(u, uv.y);
-    // 流动点：uv.x 沿边参数 + 时间偏移 + hop×0.33 相位滞后。没有 trace 的边 aFlow=0、
-    // aHop=0 → vPhase 恒 0，片元里的 dot 通道自动熄灭（"边不流动"不需要额外开关）。
+    // Flow dots: edge parameter uv.x + time offset + hop*0.33 phase lag. Edges without a
+    // trace have aFlow=0 and aHop=0 -> vPhase stays 0 and the fragment dot channel dies out.
     vPhase = uTime * aFlow * uFlowScale + aHop * 0.33;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
@@ -177,11 +177,12 @@ const EDGE_FRAG = /* glsl */ `
 
   void main() {
     float x = fract(vUv.x * uDash - vPhase);
-    // 方向感（P2-19-B）：一段"彗星"——0.62 开始抬、0.86 到峰值、0.9–0.96 骤收。
-    // 亮端在 x 增大的一侧，沿 aDir 翻转后亮端就是证据传播方向，肉眼读成箭头。
+    // Direction cue (P2-19-B): a comet — ramps up at 0.62, peaks at 0.86, collapses 0.9-0.96.
+    // The bright end sits where x grows; after the aDir flip it points along evidence flow.
     float head = smoothstep(0.62, 0.86, x) * (1.0 - smoothstep(0.9, 0.96, x));
     float flowing = step(0.0001, vFlow);
-    // 亮度/透明度：状态表 + 流动头 + 证据质量（aMass 让证据边在沉默底上也亮得起来）。
+    // Brightness/opacity: status table + flowing head + evidence mass (aMass keeps evidence
+    // edges visible against the dim background).
     float intensity = 0.5 + 0.5 * vAlpha + 2.1 * head * flowing + 1.4 * vMass;
     float alpha = vVis + 0.6 * head * flowing + 0.55 * vMass;
     gl_FragColor = vec4(vColor * intensity, clamp(alpha, 0.0, 1.0));
@@ -214,8 +215,8 @@ const ENVELOPE_FRAG = /* glsl */ `
   varying vec3 vViewDir;
 
   void main() {
-    // 多个社区的包络球经常同心嵌套（布局未按社区分离时），加法混合会迅速叠到纯白，
-    // 所以整体再乘一个系数把每一层的贡献压小。
+    // Community envelopes often nest concentrically (when layout does not separate
+    // communities) and additive blending saturates to white, so scale each layer down.
     float d = 1.0 - abs(dot(vNormalV, vViewDir));
     gl_FragColor = vec4(vColor, vAlpha * (0.6 + 1.4 * d * d));
   }

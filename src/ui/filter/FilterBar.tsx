@@ -16,6 +16,8 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useFilter } from '../state/filter.js';
 import { FILTER_FTYPES, FILTER_STATUSES, filterToSearch } from './pure/filter.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
 
 declare global {
   interface Window {
@@ -34,45 +36,43 @@ declare global {
 const containerStyle: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  gap: 5,
+  gap: 10,
   flexWrap: 'wrap',
   fontSize: 12,
-  lineHeight: 1.6,
+  lineHeight: 1.7,
   pointerEvents: 'auto',
 };
 
 const labelStyle: CSSProperties = { color: 'var(--color-text-muted)', whiteSpace: 'nowrap' };
 
-/* 胶囊：只有可点的东西是圆的；标签保持方角，圆角不滥用 */
 const chipBase: CSSProperties = {
-  background: 'transparent',
+  background: 'var(--color-bg-raised)',
   color: 'var(--color-text-secondary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 999,
-  padding: '1px 8px',
+  borderRadius: 3,
+  padding: '0 8px',
   cursor: 'pointer',
   font: 'inherit',
-  transition: 'background-color 120ms ease, color 120ms ease, border-color 120ms ease',
 };
 
 const chipOn: CSSProperties = {
   ...chipBase,
-  background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
-  color: 'var(--color-accent-soft)',
-  border: '1px solid color-mix(in srgb, var(--color-accent) 38%, transparent)',
+  background: 'var(--color-bg-hover)',
+  color: 'var(--color-text-primary)',
+  border: '1px solid var(--color-border-strong)',
 };
 
 const textInputStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
+  background: 'var(--color-bg-raised)',
   color: 'var(--color-text-primary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 999,
-  padding: '1px 9px',
+  borderRadius: 3,
+  padding: '1px 6px',
   font: 'inherit',
-  width: 112,
+  width: 150,
 };
 
-const dateInputStyle: CSSProperties = { ...textInputStyle, width: 98, colorScheme: 'light dark' };
+const dateInputStyle: CSSProperties = { ...textInputStyle, width: 118, colorScheme: 'dark' };
 
 /** 把 ISO 时间截成 date input 能吃的 `YYYY-MM-DD`（取日期部分，容忍含时间的完整 ISO） */
 function toDateValue(iso: string | null): string {
@@ -87,6 +87,7 @@ function fromDateValue(v: string): string | null {
 }
 
 export function FilterBar(): JSX.Element {
+  const t = useT();
   const filter = useFilter((s) => s.filter);
   const active = useFilter((s) => s.active);
   const set = useFilter((s) => s.set);
@@ -139,18 +140,18 @@ export function FilterBar(): JSX.Element {
     <div
       style={{
         ...containerStyle,
-        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 8, padding: '4px 8px' } : {}),
+        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 4, padding: '4px 8px' } : {}),
       }}
     >
-      <span style={labelStyle}>
-        筛选{active ? '（已筛选）' : ''}
+      <span style={labelStyle} data-testid="filter-label">
+        {t(active ? 'filter.titleActive' : 'filter.title')}
       </span>
 
-      <label style={labelStyle}>scope</label>
+      <label style={labelStyle}>{t('filter.scope')}</label>
       <input
         type="text"
         value={scopeInput}
-        placeholder="global / project:*"
+        placeholder={t('filter.scopePlaceholder')}
         onChange={(e) => setScopeInput(e.target.value)}
         onBlur={commitScope}
         onKeyDown={(e) => {
@@ -159,7 +160,7 @@ export function FilterBar(): JSX.Element {
         style={textInputStyle}
       />
 
-      <span style={labelStyle}>类型</span>
+      <span style={labelStyle}>{t('filter.ftype')}</span>
       {FILTER_FTYPES.map((v) => (
         <button
           key={v}
@@ -168,11 +169,11 @@ export function FilterBar(): JSX.Element {
           onClick={() => toggleFtype(v)}
           style={filter.ftype.includes(v) ? chipOn : chipBase}
         >
-          {v}
+          {enumLabel('ftype', v)}
         </button>
       ))}
 
-      <span style={labelStyle}>状态</span>
+      <span style={labelStyle}>{t('filter.status')}</span>
       {FILTER_STATUSES.map((v) => (
         <button
           key={v}
@@ -181,18 +182,18 @@ export function FilterBar(): JSX.Element {
           onClick={() => toggleStatus(v)}
           style={filter.status.includes(v) ? chipOn : chipBase}
         >
-          {v}
+          {enumLabel('epistemic', v)}
         </button>
       ))}
 
-      <span style={labelStyle}>时间</span>
+      <span style={labelStyle}>{t('filter.time')}</span>
       <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} onBlur={commitFrom} style={dateInputStyle} />
       <span style={{ color: 'var(--color-text-faint)' }}>~</span>
       <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} onBlur={commitTo} style={dateInputStyle} />
 
       {active && (
         <button type="button" onClick={reset} style={{ ...chipBase, color: 'var(--color-warning)', borderColor: 'var(--color-warning-dim)' }}>
-          重置
+          {t('common.reset')}
         </button>
       )}
     </div>

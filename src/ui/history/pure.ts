@@ -16,11 +16,15 @@
  */
 import type { TraceRecord } from '../graph/pure/trace.js';
 
+import { t as translateNow, type Translator } from '../i18n/index.js';
+
 /** `/api/trace?limit=` 的 UI 默认页大小（P2-24 契约：上限 64，这里只列最近 20 条） */
 export const HISTORY_LIMIT = 20;
 
 /** 404 = trace 已被 ring buffer 淘汰（或 daemon 重启），属于正常降级 */
-export const REPLAY_MISS_MESSAGE = '该查询的 trace 已不在（仅保留最近 64 次）';
+export function replayMissMessage(t: Translator = translateNow): string {
+  return t('history.missTrace');
+}
 
 export type TraceMode = 'live' | 'replay';
 
@@ -102,12 +106,13 @@ export function historyRows(entries: readonly HistoryQueryEntry[] | null | undef
 export function historyEmptyText(
   rows: readonly HistoryRow[],
   error: string | null,
+  t: Translator = translateNow,
 ): string | null {
   if (rows.length > 0) return null;
   if (error !== null && error !== '') {
-    return `无证据链 · 历史列表取数失败（${error}）`;
+    return t('history.empty.failed', { error });
   }
-  return '无证据链 · 暂无历史查询（查询一次后出现；daemon 重启即清空）';
+  return t('history.empty.none');
 }
 
 /** 实时态：写入最新 trace（`trace` 为 null = 回到无证据链） */
@@ -131,7 +136,7 @@ export function replayState(trace: TraceRecord, queryId: string): TraceViewState
 }
 
 /** 回放取数失败（404 / ring buffer 淘汰 / 接口故障）：降级为「无证据链」，不抛错 */
-export function missState(queryId: string, message: string = REPLAY_MISS_MESSAGE): TraceViewState {
+export function missState(queryId: string, message: string = replayMissMessage()): TraceViewState {
   return {
     trace: null,
     error: message,

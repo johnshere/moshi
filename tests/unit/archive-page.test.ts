@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   archiveHref,
   detailStateFor,
-  EMPTY_TOPICS_HINT,
+  emptyTopicsHint,
   emptyStateFor,
   exportToast,
   formatProposalError,
@@ -16,7 +16,7 @@ import {
   initialSelectedSlug,
   lastExportedAt,
   previewLines,
-  PROPOSAL_ACTIONS,
+  proposalActions,
   proposedBadge,
   rebuildDisabled,
   rebuildLabel,
@@ -77,8 +77,8 @@ describe('空态/时间/哈希', () => {
   });
 
   it('空态文案说明归档条件', () => {
-    expect(EMPTY_TOPICS_HINT).toContain('≥8');
-    expect(EMPTY_TOPICS_HINT).toContain('依赖完整度');
+    expect(emptyTopicsHint()).toContain('≥8');
+    expect(emptyTopicsHint()).toContain('依赖完整度');
   });
 
   it('lastExportedAt 取最大 ISO 时间；全空 → null', () => {
@@ -152,12 +152,12 @@ describe('详情态 / 重建 / 提案文案', () => {
   });
 
   it('三选一动作齐全且各带后果文案', () => {
-    expect(PROPOSAL_ACTIONS.map((a) => a.action)).toEqual(['accept_auto', 'keep_human', 'promote_human']);
-    for (const action of PROPOSAL_ACTIONS) {
+    expect(proposalActions().map((a) => a.action)).toEqual(['accept_auto', 'keep_human', 'promote_human']);
+    for (const action of proposalActions()) {
       expect(action.label.length).toBeGreaterThan(0);
       expect(action.consequence.length).toBeGreaterThan(0);
     }
-    const promote = PROPOSAL_ACTIONS.find((a) => a.action === 'promote_human')!;
+    const promote = proposalActions().find((a) => a.action === 'promote_human')!;
     expect(promote.label).toBe('人工版转正，后续自动更新进入提案');
     expect(promote.consequence).toContain('只刷新 .proposed.md');
     expect(promote.consequence).toContain('需再次三选一');

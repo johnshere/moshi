@@ -18,6 +18,8 @@
  */
 import type { CSSProperties } from 'react';
 import type { BatchAction, PreviewResult, UndoAction } from './api.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 export interface BatchPanelProps {
   /** 当前选择对应的批量动作：由页面按选中集判定（全是淘汰候选 → prune，否则 invalidate） */
@@ -63,48 +65,54 @@ const warnStyle: CSSProperties = { color: 'var(--color-warning)' };
 /** 动作 → 文案。集中一处，避免"剪枝按钮写着失效"这类错配 */
 const COPY: Record<
   UndoAction,
-  { done: string; confirm: string; undoHint: string; previewVerb: string }
+  { done: DictKey; confirm: DictKey; undoHint: DictKey; previewVerb: DictKey }
 > = {
   invalidate: {
-    done: '批量失效已执行',
-    confirm: '确认失效',
-    undoHint: '超时后本次失效不可再撤销（撤销 = 清回 valid_to）',
-    previewVerb: '影响',
+    done: 'batch.copy.invalidate.done',
+    confirm: 'batch.copy.invalidate.confirm',
+    undoHint: 'batch.copy.invalidate.undoHint',
+    previewVerb: 'batch.copy.invalidate.verb',
   },
   prune: {
-    done: '批量剪枝已执行',
-    confirm: '确认剪枝',
-    undoHint: '超时后本次剪枝不可再撤销（撤销 = 还原 epistemic_status）',
-    previewVerb: '剪枝',
+    done: 'batch.copy.prune.done',
+    confirm: 'batch.copy.prune.confirm',
+    undoHint: 'batch.copy.prune.undoHint',
+    previewVerb: 'batch.copy.prune.verb',
   },
   alias_merge: {
-    done: '单条并入已执行',
-    confirm: '确认并入',
-    undoHint: '超时后本次并入不可再撤销（撤销 = 还原 alias 的 source / confidence）',
-    previewVerb: '并入',
+    done: 'batch.copy.aliasMerge.done',
+    confirm: 'batch.copy.aliasMerge.confirm',
+    undoHint: 'batch.copy.aliasMerge.undoHint',
+    previewVerb: 'batch.copy.aliasMerge.verb',
   },
 };
 
 export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
+  const t = useT();
   const { action, selectedCount, preview, busy } = props;
 
   if (preview !== null) {
     const copy = COPY[action];
     return (
-      <div style={panelStyle} role="dialog" aria-label="影响面预览">
+      <div style={panelStyle} role="dialog" aria-label={t('batch.preview.aria')}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 18, flexWrap: 'wrap' }}>
           <span style={{ color: 'var(--color-text-primary)' }}>
-            将{copy.previewVerb} {preview.facts} 条事实、{preview.edges} 条边、{preview.topics} 个主题
+            {t('batch.preview.line', {
+              verb: t(copy.previewVerb),
+              facts: preview.facts,
+              edges: preview.edges,
+              topics: preview.topics,
+            })}
           </span>
           {/* invalidate 必须单独显示连带失效：不显示 = 让人盲签（台账 §4 P2-07 坑）。
               prune 不连锁（cascade 恒 0），显示「0 条」只会误导，干脆不显示。 */}
           {action === 'invalidate' ? (
             <span style={warnStyle}>
-              连带失效 {preview.invalidated_by_cascade} 条依赖事实（它们依赖这批事实，会一起变 stale）
+              {t('batch.cascade', { count: preview.invalidated_by_cascade })}
             </span>
           ) : (
             <span style={{ color: 'var(--color-text-muted)' }}>
-              软删：事实行与有效区间都保留，仅标注为 pruned（可撤销）
+              {t('batch.softDelete')}
             </span>
           )}
         </div>
@@ -119,10 +127,12 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
         )}
         <div style={{ display: 'flex', gap: 10 }}>
           <button type="button" style={btn(true)} disabled={busy} onClick={props.onConfirm}>
-            {busy ? '执行中…' : `${copy.confirm}（${preview.facts} 条）`}
+            {busy
+              ? t('batch.running')
+              : t('batch.confirmWithCount', { confirm: t(copy.confirm), facts: preview.facts })}
           </button>
           <button type="button" style={btn()} disabled={busy} onClick={props.onCancelPreview}>
-            取消
+            {t('common.cancel')}
           </button>
         </div>
       </div>
@@ -135,23 +145,25 @@ export function BatchPanel(props: BatchPanelProps): JSX.Element | null {
   return (
     <div style={panelStyle} role="status">
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-        <span style={{ color: 'var(--color-text-primary)' }}>已选 {selectedCount} 条事实</span>
+        <span style={{ color: 'var(--color-text-primary)' }}>{t('batch.selected', { count: selectedCount })}</span>
         <span style={{ color: 'var(--color-text-faint)' }}>
-          将执行「{action === 'prune' ? '剪枝（软删）' : '失效'}」，先看影响面，确认后才执行
+          {t('batch.willRun', {
+            verb: action === 'prune' ? t('batch.copy.prune.verb') : t('batch.copy.invalidate.verb'),
+          })}
         </span>
         <span style={{ marginLeft: 'auto' }}>
           <button type="button" style={btn()} disabled={busy} onClick={props.onPreview}>
-            {busy ? '计算影响面…' : '预览影响'}
+            {busy ? t('batch.previewBusy') : t('batch.preview')}
           </button>
         </span>
       </div>
       {action === 'prune' && (
         <div style={{ color: 'var(--color-text-muted)' }}>
-          剪枝只标注不删除；依赖它的下游由读侧收口（不会连带改写其它事实）
+          {t('batch.pruneNote')}
         </div>
       )}
       {action === 'invalidate' && (
-        <div style={{ color: 'var(--color-text-muted)' }}>{copy.undoHint}</div>
+        <div style={{ color: 'var(--color-text-muted)' }}>{t(copy.undoHint)}</div>
       )}
     </div>
   );

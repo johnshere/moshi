@@ -6,6 +6,8 @@
  */
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 interface UpdateStatus {
   schema: string;
@@ -79,9 +81,11 @@ const buttonStyle: CSSProperties = {
 };
 
 export function UpdatePanel(): ReactElement {
+  const t = useT();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState<'check' | 'download' | 'install' | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  /** 结果行存 key + 变量而不是成品字符串：切语言时同一行能跟着变 */
+  const [message, setMessage] = useState<{ key: DictKey; vars?: Record<string, string> } | null>(null);
   const [downloaded, setDownloaded] = useState<DownloadResult | null>(null);
 
   const check = async (): Promise<void> => {
@@ -91,7 +95,7 @@ export function UpdatePanel(): ReactElement {
     try {
       setStatus(await getStatus());
     } catch (err) {
-      setMessage(`检查失败：${err instanceof Error ? err.message : String(err)}`);
+      setMessage({ key: 'settings.update.checkFailed', vars: { error: err instanceof Error ? err.message : String(err) } });
     } finally {
       setBusy(null);
     }
@@ -107,9 +111,9 @@ export function UpdatePanel(): ReactElement {
     try {
       const body = (await post('/api/update/download')) as DownloadResult;
       setDownloaded(body);
-      setMessage(`已下载 ${body.version}（${mb(body.bytes)}），可以安装。`);
+      setMessage({ key: 'settings.update.downloaded', vars: { version: body.version, size: mb(body.bytes) } });
     } catch (err) {
-      setMessage(`下载失败：${err instanceof Error ? err.message : String(err)}`);
+      setMessage({ key: 'settings.update.downloadFailed', vars: { error: err instanceof Error ? err.message : String(err) } });
     } finally {
       setBusy(null);
     }
@@ -120,9 +124,9 @@ export function UpdatePanel(): ReactElement {
     setMessage(null);
     try {
       await post('/api/update/install');
-      setMessage('安装程序已启动，默识会短暂停止并自动重启；界面稍后刷新即可。');
+      setMessage({ key: 'settings.update.installStarted' });
     } catch (err) {
-      setMessage(`安装失败：${err instanceof Error ? err.message : String(err)}`);
+      setMessage({ key: 'settings.update.installFailed', vars: { error: err instanceof Error ? err.message : String(err) } });
     } finally {
       setBusy(null);
     }
@@ -130,17 +134,17 @@ export function UpdatePanel(): ReactElement {
 
   return (
     <div style={panelStyle} data-testid="update-panel">
-      <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>软件更新</div>
+      <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('settings.update.title')}</div>
       <div>
-        当前版本：{status === null ? '—' : status.current}
-        {status !== null && status.enabled && status.ok && !status.available && ' · 已是最新版本'}
-        {status !== null && !status.enabled && ' · 自动更新已关闭'}
+        {t('settings.update.current', { version: status === null ? '—' : status.current })}
+        {status !== null && status.enabled && status.ok && !status.available && t('settings.update.upToDate')}
+        {status !== null && !status.enabled && t('settings.update.disabled')}
       </div>
       {status !== null && status.ok && status.available && (
         <div>
-          发现新版本 <strong>{status.latest}</strong>
-          {status.published_at === null ? '' : `（${status.published_at.slice(0, 10)}）`}
-          {status.asset_url === null && ' · 该版本没有安装包资产'}
+          {t('settings.update.found', { version: status.latest ?? '' })}
+          {status.published_at === null ? '' : t('settings.update.published', { date: status.published_at.slice(0, 10) })}
+          {status.asset_url === null && t('settings.update.noAsset')}
         </div>
       )}
       {status !== null && status.ok && status.available && status.notes !== null && (
@@ -161,11 +165,11 @@ export function UpdatePanel(): ReactElement {
         </pre>
       )}
       {status !== null && !status.ok && (
-        <div style={{ color: 'var(--color-warning-soft)' }}>检查失败：{status.error}</div>
+        <div style={{ color: 'var(--color-warning-soft)' }}>{t('settings.update.checkFailed', { error: status.error ?? '' })}</div>
       )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button type="button" style={buttonStyle} onClick={() => void check()} disabled={busy !== null}>
-          {busy === 'check' ? '检查中…' : '检查更新'}
+          {busy === 'check' ? t('settings.update.checking') : t('settings.update.check')}
         </button>
         {status !== null && status.ok && status.available && status.asset_url !== null && (
           <button
@@ -174,7 +178,7 @@ export function UpdatePanel(): ReactElement {
             onClick={() => void download()}
             disabled={busy !== null}
           >
-            {busy === 'download' ? '下载中…' : '下载更新'}
+            {busy === 'download' ? t('settings.update.downloading') : t('settings.update.download')}
           </button>
         )}
         {downloaded !== null && (
@@ -184,11 +188,11 @@ export function UpdatePanel(): ReactElement {
             onClick={() => void install()}
             disabled={busy !== null}
           >
-            {busy === 'install' ? '启动安装…' : '安装并重启'}
+            {busy === 'install' ? t('settings.update.installing') : t('settings.update.install')}
           </button>
         )}
       </div>
-      {message !== null && <div>{message}</div>}
+      {message !== null && <div>{t(message.key, message.vars)}</div>}
     </div>
   );
 }

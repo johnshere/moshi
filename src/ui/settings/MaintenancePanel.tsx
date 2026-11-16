@@ -10,6 +10,9 @@
  */
 import { useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { useT } from '../i18n/index.js';
+import { t as translate } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 interface Counts {
   fts_missing: number;
@@ -28,17 +31,17 @@ interface RebuildResult {
   details?: Record<string, unknown>;
 }
 
-const TARGETS: readonly { target: 'fts' | 'vec' | 'degree' | 'all'; label: string }[] = [
-  { target: 'fts', label: '重建 FTS' },
-  { target: 'vec', label: '重建向量' },
-  { target: 'degree', label: '重算度数' },
-  { target: 'all', label: '全部重建' },
+const TARGETS: readonly { target: 'fts' | 'vec' | 'degree' | 'all'; labelKey: DictKey }[] = [
+  { target: 'fts', labelKey: 'settings.maint.target.fts' },
+  { target: 'vec', labelKey: 'settings.maint.target.vec' },
+  { target: 'degree', labelKey: 'settings.maint.target.degree' },
+  { target: 'all', labelKey: 'settings.maint.target.all' },
 ];
 
-const COUNT_LABELS: readonly { key: keyof Counts; label: string }[] = [
-  { key: 'fts_missing', label: 'FTS 缺失' },
-  { key: 'vec_missing', label: '向量缺失' },
-  { key: 'degree_mismatch', label: '度数不一致' },
+const COUNT_LABELS: readonly { key: keyof Counts; labelKey: DictKey }[] = [
+  { key: 'fts_missing', labelKey: 'settings.maint.count.fts' },
+  { key: 'vec_missing', labelKey: 'settings.maint.count.vec' },
+  { key: 'degree_mismatch', labelKey: 'settings.maint.count.degree' },
 ];
 
 async function postRebuild(target: string, dryRun: boolean): Promise<RebuildResult> {
@@ -53,8 +56,10 @@ async function postRebuild(target: string, dryRun: boolean): Promise<RebuildResu
     detail?: { reason?: string };
   };
   if (!res.ok) {
+    const message = body.message ?? body.error ?? `HTTP ${String(res.status)}`;
+    const reason = body.detail?.reason;
     throw new Error(
-      `${body.message ?? body.error ?? `HTTP ${String(res.status)}`}${body.detail?.reason === undefined ? '' : `（${body.detail.reason}）`}`,
+      reason === undefined ? message : translate('settings.cfg.httpError', { message, reason }),
     );
   }
   return body as RebuildResult;
@@ -83,6 +88,7 @@ const buttonStyle: CSSProperties = {
 };
 
 export function MaintenancePanel(): ReactElement {
+  const t = useT();
   const [dryRun, setDryRun] = useState(true);
   const [running, setRunning] = useState<string | null>(null);
   const [result, setResult] = useState<RebuildResult | null>(null);
@@ -104,9 +110,9 @@ export function MaintenancePanel(): ReactElement {
 
   return (
     <section data-testid="maintenance-panel" style={panelStyle}>
-      <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>维护 / 索引重建</div>
+      <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('settings.maint.title')}</div>
       <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-        重建会扫描全库；默认先勾选「只统计」看差异，再取消勾选执行。执行期间 API 可能短暂变慢。
+        {t('settings.maint.desc')}
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-secondary)', fontSize: 12 }}>
         <input
@@ -116,20 +122,20 @@ export function MaintenancePanel(): ReactElement {
           disabled={running !== null}
           onChange={(e) => { setDryRun(e.target.checked); }}
         />
-        只统计不重建（dry_run）
+        {t('settings.maint.dryRun')}
       </label>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {TARGETS.map((t) => (
+        {TARGETS.map((item) => (
           <button
-            key={t.target}
+            key={item.target}
             type="button"
-            data-testid={`rebuild-${t.target}`}
+            data-testid={`rebuild-${item.target}`}
             style={{ ...buttonStyle, opacity: running !== null ? 0.5 : 1 }}
             disabled={running !== null}
-            onClick={() => { void run(t.target); }}
+            onClick={() => { void run(item.target); }}
           >
-            {running === t.target ? '执行中…' : t.label}
+            {running === item.target ? t('settings.maint.running') : t(item.labelKey)}
           </button>
         ))}
       </div>
@@ -146,15 +152,15 @@ export function MaintenancePanel(): ReactElement {
       {result !== null && (
         <div data-testid="maintenance-result" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
-            {result.target} · {result.dry_run ? 'dry_run' : '已执行'} · {String(result.elapsed_ms)}ms
+            {result.target} · {result.dry_run ? 'dry_run' : t('settings.maint.done')} · {String(result.elapsed_ms)}ms
             {result.skipped !== undefined && result.skipped.length > 0
-              ? ` · 跳过 ${result.skipped.join(', ')}`
+              ? t('settings.maint.skipped', { list: result.skipped.join(', ') })
               : ''}
           </div>
           <table style={{ borderCollapse: 'collapse', fontSize: 12, width: 'min(520px, 100%)' }}>
             <thead>
               <tr style={{ color: 'var(--color-text-muted)', textAlign: 'left' }}>
-                <th style={{ padding: '2px 8px 2px 0', fontWeight: 500 }}>指标</th>
+                <th style={{ padding: '2px 8px 2px 0', fontWeight: 500 }}>{t('settings.maint.col.metric')}</th>
                 <th style={{ padding: '2px 8px', fontWeight: 500 }}>before</th>
                 <th style={{ padding: '2px 0', fontWeight: 500 }}>after</th>
               </tr>
@@ -162,7 +168,7 @@ export function MaintenancePanel(): ReactElement {
             <tbody>
               {COUNT_LABELS.map((c) => (
                 <tr key={c.key} style={{ color: 'var(--color-text-secondary)' }}>
-                  <td style={{ padding: '2px 8px 2px 0' }}>{c.label}</td>
+                  <td style={{ padding: '2px 8px 2px 0' }}>{t(c.labelKey)}</td>
                   <td style={{ padding: '2px 8px' }}>{result.before[c.key]}</td>
                   <td style={{ padding: '2px 0', color: result.after[c.key] < result.before[c.key] ? 'var(--color-success-soft)' : 'var(--color-text-primary)' }}>
                     {result.after[c.key]}

@@ -9,6 +9,7 @@ import { useEffect, useState, type CSSProperties, type ReactElement } from 'reac
 import { fetchScopes, type ScopeItem } from './api.js';
 import { scopeOptions } from './scope-options.js';
 import { useFilter } from '../state/filter.js';
+import { useT } from '../i18n/index.js';
 
 const selectStyle: CSSProperties = {
   background: 'var(--color-bg-overlay)',
@@ -23,6 +24,7 @@ const selectStyle: CSSProperties = {
 };
 
 export function ScopeSwitcher(): ReactElement {
+  const t = useT();
   const current = useFilter((s) => s.filter.scope);
   const set = useFilter((s) => s.set);
   const [items, setItems] = useState<ScopeItem[]>([]);
@@ -39,12 +41,12 @@ export function ScopeSwitcher(): ReactElement {
     return () => controller.abort();
   }, []);
 
-  const options = scopeOptions(items, current);
+  const options = scopeOptions(items, current, t);
   return (
     <select
       data-testid="scope-switcher"
-      aria-label="作用域切换"
-      title="作用域：全局 / 单项目"
+      aria-label={t('scope.switcher.label')}
+      title={t('scope.switcher.title')}
       style={selectStyle}
       value={current ?? ''}
       onChange={(event) => {

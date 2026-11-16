@@ -5,7 +5,8 @@
  * 这里不直接 fetch，方便页面统一处理 loading / 错误 / 列表刷新。
  */
 import type { CSSProperties, ReactElement } from 'react';
-import { PROPOSAL_ACTIONS, type ArchiveProposalAction } from './pure.js';
+import { proposalActions, type ArchiveProposalAction } from './pure.js';
+import { useT } from '../i18n/index.js';
 
 export interface ProposedDialogProps {
   slug: string;
@@ -52,12 +53,13 @@ const optionStyle = (busy: boolean): CSSProperties => ({
 });
 
 export function ProposedDialog(props: ProposedDialogProps): ReactElement {
+  const t = useT();
   const { slug, title, busy, error, onClose, onAction } = props;
   return (
     <div style={overlayStyle} role="dialog" aria-modal="true" data-testid="archive-proposed-dialog">
       <div style={cardStyle}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <h3 style={{ margin: 0, fontSize: 16, color: 'var(--color-text-primary)' }}>处理待合并提案</h3>
+          <h3 style={{ margin: 0, fontSize: 16, color: 'var(--color-text-primary)' }}>{t('archive.dialog.title')}</h3>
           <span style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{title ?? slug}</span>
           <span style={{ flex: 1 }} />
           <button
@@ -72,15 +74,15 @@ export function ProposedDialog(props: ProposedDialogProps): ReactElement {
               cursor: busy ? 'wait' : 'pointer',
               fontSize: 16,
             }}
-            aria-label="关闭"
+            aria-label={t('common.close')}
           >
             ×
           </button>
         </div>
         <p style={{ margin: '8px 0 12px', color: 'var(--color-text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
-          `.proposed.md` 说明自动版与人工版不一致；请选择其一。操作会立即写盘并刷新列表。
+          {t('archive.dialog.desc')}
         </p>
-        {PROPOSAL_ACTIONS.map((item) => (
+        {proposalActions(t).map((item) => (
           <button
             key={item.action}
             type="button"
@@ -95,7 +97,7 @@ export function ProposedDialog(props: ProposedDialogProps): ReactElement {
         ))}
         {busy ? (
           <div style={{ color: 'var(--color-warning-soft)', fontSize: 12 }} data-testid="archive-proposed-busy">
-            提交中…
+            {t('common.submitting')}
           </div>
         ) : null}
         {error !== null ? (
