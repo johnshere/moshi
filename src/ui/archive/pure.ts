@@ -4,6 +4,9 @@
  * 全部无 DOM / 无 fetch，方便单测钉死行为；组件只负责取数与渲染。
  */
 
+import { t as translateNow, type Translator } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
+
 export type ArchiveStatus = 'active' | 'merged' | 'split';
 export type HumanEdited = 0 | 1 | 2;
 
@@ -78,9 +81,12 @@ export function initialSelectedSlug(
 }
 
 /** 三态徽标：0 自动（无徽标）、1 待合并（可处理）、2 永久人工（无提案，不弹对话框）。 */
-export function proposedBadge(topic: Pick<ArchiveTopicSummary, 'human_edited'>): ProposedBadge {
-  if (topic.human_edited === 1) return { visible: true, label: '待合并', canHandle: true };
-  if (topic.human_edited === 2) return { visible: true, label: '永久人工', canHandle: false };
+export function proposedBadge(
+  topic: Pick<ArchiveTopicSummary, 'human_edited'>,
+  t: Translator = translateNow,
+): ProposedBadge {
+  if (topic.human_edited === 1) return { visible: true, label: t('archive.badge.proposed'), canHandle: true };
+  if (topic.human_edited === 2) return { visible: true, label: t('archive.human.locked'), canHandle: false };
   return BADGE_NONE;
 }
 
@@ -93,8 +99,13 @@ export function emptyStateFor(input: { loading: boolean; error: string | null; t
   return 'list';
 }
 
-export const EMPTY_TOPICS_HINT = '暂无主题（社区事实数 ≥8 且依赖完整度达标后才会归档）';
-export const EMPTY_ARCHIVE_DIR_HINT = '尚未配置归档目录';
+export function emptyTopicsHint(t: Translator = translateNow): string {
+  return t('archive.empty.topics');
+}
+
+export function emptyArchiveDirHint(t: Translator = translateNow): string {
+  return t('archive.empty.noDirQuestion');
+}
 
 /** 列表里最大的 last_exported_at（ISO 字符串可直接比较）；无则 null = 从未导出。 */
 export function lastExportedAt(
@@ -156,8 +167,8 @@ export function detailStateFor(
   return 'ok';
 }
 
-export function rebuildLabel(busy: boolean): string {
-  return busy ? '重建中…' : '重建归档';
+export function rebuildLabel(busy: boolean, t: Translator = translateNow): string {
+  return busy ? t('archive.rebuild.busy') : t('archive.rebuild.idle');
 }
 
 export function rebuildDisabled(busy: boolean, loading: boolean): boolean {
@@ -173,10 +184,13 @@ export interface ArchiveExportResult {
   elapsed_ms: number;
 }
 
-export function exportToast(result: ArchiveExportResult): string {
-  return `重建完成：写入 ${String(result.written)}、未变 ${String(result.unchanged)}、待合并 ${String(
-    result.proposed,
-  )}（${String(result.elapsed_ms)}ms）`;
+export function exportToast(result: ArchiveExportResult, t: Translator = translateNow): string {
+  return t('archive.exportToast', {
+    written: result.written,
+    unchanged: result.unchanged,
+    proposed: result.proposed,
+    elapsed: result.elapsed_ms,
+  });
 }
 
 export type ArchiveProposalAction = 'accept_auto' | 'keep_human' | 'promote_human';
@@ -187,30 +201,46 @@ export interface ProposalActionMeta {
   consequence: string;
 }
 
-export const PROPOSAL_ACTIONS: readonly ProposalActionMeta[] = [
+const PROPOSAL_ACTION_SPECS: readonly {
+  action: ArchiveProposalAction;
+  labelKey: DictKey;
+  consequenceKey: DictKey;
+}[] = [
   {
     action: 'accept_auto',
-    label: '用自动版覆盖人工修改',
-    consequence: '以 .proposed.md 的自动正文覆盖当前归档，revision +1，此后恢复自动导出。',
+    labelKey: 'archive.action.acceptAuto.label',
+    consequenceKey: 'archive.action.acceptAuto.why',
   },
   {
     action: 'keep_human',
-    label: '保留人工版，此后不再自动导出（永久人工）',
-    consequence: '人工版成为基线并标记 human_edited=2；后续导出跳过该主题，也不再生成提案。',
+    labelKey: 'archive.action.keepHuman.label',
+    consequenceKey: 'archive.action.keepHuman.why',
   },
   {
     action: 'promote_human',
-    label: '人工版转正，后续自动更新进入提案',
-    consequence: '人工正文保持不变；后续自动更新只刷新 .proposed.md，需再次三选一后才会覆盖。',
+    labelKey: 'archive.action.promoteHuman.label',
+    consequenceKey: 'archive.action.promoteHuman.why',
   },
 ];
 
-export function formatProposalError(input: { error: string; reason?: string | null }): string {
-  return input.reason === undefined || input.reason === null || input.reason === ''
-    ? input.error
-    : `${input.error}（${input.reason}）`;
+/** 三选一的文案（调用期取当前语言，不要缓存成模块常量）。 */
+export function proposalActions(t: Translator = translateNow): ProposalActionMeta[] {
+  return PROPOSAL_ACTION_SPECS.map((spec) => ({
+    action: spec.action,
+    label: t(spec.labelKey),
+    consequence: t(spec.consequenceKey),
+  }));
 }
 
-export function formatTimestamp(iso: string | null): string {
-  return iso === null || iso === '' ? '从未导出' : iso;
+export function formatProposalError(
+  input: { error: string; reason?: string | null },
+  t: Translator = translateNow,
+): string {
+  return input.reason === undefined || input.reason === null || input.reason === ''
+    ? input.error
+    : t('archive.errorWithReason', { error: input.error, reason: input.reason });
+}
+
+export function formatTimestamp(iso: string | null, t: Translator = translateNow): string {
+  return iso === null || iso === '' ? t('archive.neverExported') : iso;
 }

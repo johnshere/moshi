@@ -465,7 +465,10 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                         ? t('access.matrix.soon')
                         : plan.supported
                           ? enumLabel('install', 'absent')
-                          : `${enumLabel('install', 'unsupported')}：${plan.reason ?? ''}`}
+                          : t('access.notSupported', {
+                              label: enumLabel('install', 'unsupported'),
+                              reason: plan.reason ?? '',
+                            })}
                   </span>
                   <span style={{ flex: 1 }} />
                   {isMagpieHook ? (
@@ -548,7 +551,9 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                 <td style={{ padding: '4px 6px' }}>{enumLabel('turn', item.turn)}</td>
                 <td style={{ padding: '4px 6px' }}>
                   {enumLabel('outcome', item.status)}
-                  {item.degraded.length > 0 ? <span style={mutedStyle}>（{item.degraded.join('/')}）</span> : null}
+                  {item.degraded.length > 0 ? (
+                    <span style={mutedStyle}>{t('common.paren', { text: item.degraded.join('/') })}</span>
+                  ) : null}
                 </td>
                 <td style={{ padding: '4px 6px' }}>{item.evidence}</td>
                 <td style={{ padding: '4px 6px' }}>{item.inject_bytes}</td>
@@ -627,7 +632,9 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                 <li key={`${step.action}:${step.path}`}>
                   <span style={mutedStyle}>{step.action} </span>
                   <code style={{ fontSize: 11 }}>{step.path}</code>
-                  {step.note === undefined ? null : <span style={mutedStyle}>（{step.note}）</span>}
+                  {step.note === undefined ? null : (
+                    <span style={mutedStyle}>{t('common.paren', { text: step.note })}</span>
+                  )}
                 </li>
               ))}
             </ul>

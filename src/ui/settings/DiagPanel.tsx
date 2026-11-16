@@ -9,6 +9,8 @@
  */
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { resolveToken } from '../api.js';
+import { t as translate, useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 import { evalRunText } from './privacy-pure.js';
 
 // 与 core/diag/types.ts 逐字段一致；UI 包不跨包 import 服务端类型，故在此复述契约。
@@ -41,14 +43,14 @@ interface DiagReport {
 
 const INVARIANT_IDS = ['I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10'] as const;
 
-const QUALITY_FIELDS: readonly { key: keyof DiagReport['quality']; label: string }[] = [
-  { key: 'orphan_ratio', label: '孤立节点比' },
-  { key: 'modularity', label: '社区模块度' },
-  { key: 'stale_chains', label: 'stale 依赖链' },
-  { key: 'near_dup_ratio', label: '近似重复比' },
-  { key: 'key_entity_coverage', label: '关键实体覆盖率' },
-  { key: 'scope_leak', label: '跨 scope 泄漏' },
-  { key: 'layout_freshness', label: '布局滞后（h）' },
+const QUALITY_FIELDS: readonly { key: keyof DiagReport['quality']; labelKey: DictKey }[] = [
+  { key: 'orphan_ratio', labelKey: 'diag.quality.orphan' },
+  { key: 'modularity', labelKey: 'diag.quality.modularity' },
+  { key: 'stale_chains', labelKey: 'diag.quality.staleChains' },
+  { key: 'near_dup_ratio', labelKey: 'diag.quality.nearDup' },
+  { key: 'key_entity_coverage', labelKey: 'diag.quality.keyCoverage' },
+  { key: 'scope_leak', labelKey: 'diag.quality.scopeLeak' },
+  { key: 'layout_freshness', labelKey: 'diag.quality.layoutFreshness' },
 ];
 
 async function fetchDiag(signal?: AbortSignal): Promise<DiagReport> {
@@ -115,7 +117,7 @@ function chip(text: string, color?: string): JSX.Element {
 }
 
 function formatMetric(value: number | null): string {
-  return value === null ? '—（无数据）' : String(value);
+  return value === null ? translate('diag.noData') : String(value);
 }
 
 function formatSize(value: number | null): string {
@@ -127,6 +129,7 @@ function invariantColor(ok: boolean): string {
 }
 
 export function DiagPanel(): JSX.Element {
+  const t = useT();
   const [report, setReport] = useState<DiagReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -180,12 +183,12 @@ export function DiagPanel(): JSX.Element {
       if (!res.ok) {
         setEvalMessage(
           res.status === 409
-            ? '已有评测在跑'
+            ? t('diag.evalRunning')
             : (body.message ?? body.error ?? `HTTP ${String(res.status)}`),
         );
         return;
       }
-      setEvalMessage(evalRunText(body, res.status));
+      setEvalMessage(evalRunText(body, res.status, t));
       await load();
     } catch (err) {
       setEvalMessage(err instanceof Error ? err.message : String(err));
@@ -198,10 +201,10 @@ export function DiagPanel(): JSX.Element {
     return (
       <div style={panelStyle}>
         <div style={{ ...cardStyle, borderColor: 'var(--color-danger-dim)' }}>
-          <span style={sectionTitleStyle}>自检数据加载失败</span>
+          <span style={sectionTitleStyle}>{t('diag.loadFailed')}</span>
           <span style={{ color: 'var(--color-danger-soft)' }}>{error}</span>
           <button type="button" onClick={() => void load()} disabled={busy}>
-            重试
+            {t('diag.retry')}
           </button>
         </div>
       </div>
@@ -211,7 +214,7 @@ export function DiagPanel(): JSX.Element {
   if (report === null) {
     return (
       <div style={panelStyle}>
-        <span>正在读取自检数据…</span>
+        <span>{t('diag.loading')}</span>
       </div>
     );
   }
@@ -221,39 +224,39 @@ export function DiagPanel(): JSX.Element {
   return (
     <div style={panelStyle}>
       <div style={rowStyle}>
-        <span style={sectionTitleStyle}>自检</span>
+        <span style={sectionTitleStyle}>{t('diag.title')}</span>
         <span style={{ color: failures.length === 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
-          {failures.length === 0 ? 'I1–I10 全绿' : `不变量失败：${failures.join(', ')}`}
+          {failures.length === 0 ? t('diag.allGreen') : t('diag.invariantFailed', { list: failures.join(', ') })}
         </span>
         <button type="button" onClick={() => void load()} disabled={busy}>
-          {busy ? '刷新中…' : '刷新'}
+          {busy ? t('diag.refreshing') : t('diag.refresh')}
         </button>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>数据库</span>
+        <span style={sectionTitleStyle}>{t('diag.db')}</span>
         <div style={rowStyle}>
-          {chip(`完整性 ${report.db.integrity}`, report.db.integrity === 'ok' ? 'var(--color-success)' : 'var(--color-danger)')}
+          {chip(t('diag.integrity', { value: report.db.integrity }), report.db.integrity === 'ok' ? 'var(--color-success)' : 'var(--color-danger)')}
           {chip(`user_version ${String(report.db.user_version)}`)}
-          {chip(`大小 ${formatSize(report.db.size_mb)}`)}
+          {chip(t('diag.size', { value: formatSize(report.db.size_mb) }))}
           {chip(`WAL ${formatSize(report.db.wal_mb)}`)}
         </div>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>索引</span>
+        <span style={sectionTitleStyle}>{t('diag.indexes')}</span>
         <div style={rowStyle}>
           {chip(`FTS ${report.indexes.fts}`, report.indexes.fts === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
-          {chip(`向量 ${report.indexes.vec}`, report.indexes.vec === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
+          {chip(t('diag.vec', { value: report.indexes.vec }), report.indexes.vec === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
           {chip(
-            `degree 不一致 ${String(report.indexes.degree_mismatch)}`,
+            t('diag.degreeMismatch', { count: report.indexes.degree_mismatch }),
             report.indexes.degree_mismatch === 0 ? 'var(--color-success)' : 'var(--color-danger)',
           )}
         </div>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>不变量</span>
+        <span style={sectionTitleStyle}>{t('diag.invariants')}</span>
         <div style={rowStyle}>
           {INVARIANT_IDS.map((id) => (
             <span key={id} style={{ ...chipStyle, color: invariantColor(report.invariants[id] === true) }}>
@@ -264,53 +267,53 @@ export function DiagPanel(): JSX.Element {
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>图质量（六项 + 布局新鲜度）</span>
+        <span style={sectionTitleStyle}>{t('diag.quality')}</span>
         <div style={rowStyle}>
           {QUALITY_FIELDS.map((field) => (
             <span key={field.key} style={chipStyle}>
-              {field.label} {formatMetric(report.quality[field.key])}
+              {t(field.labelKey)} {formatMetric(report.quality[field.key])}
             </span>
           ))}
         </div>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>待办 / 结构</span>
+        <span style={sectionTitleStyle}>{t('diag.backlog')}</span>
         <div style={rowStyle}>
           {chip(
-            `实体消解待办 ${String(report.resolve.pending)}`,
+            t('diag.resolvePending', { count: report.resolve.pending }),
             report.resolve.pending === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
           )}
           {chip(
-            `结构待晋升 ${String(report.schema.pending_promotions)}`,
+            t('diag.schemaPending', { count: report.schema.pending_promotions }),
             report.schema.pending_promotions === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
           )}
         </div>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>模型 / 归档</span>
+        <span style={sectionTitleStyle}>{t('diag.modelArchive')}</span>
         <div style={rowStyle}>
           {chip(`embed ${report.model.embed}`)}
           {chip(`gat ${report.model.gat}`)}
-          {chip(`权重 ${report.model.weights ? '有' : '无'}`)}
-          {chip(`归档主题 ${String(report.archive.topics)}`)}
-          {chip(`待导出 ${String(report.archive.dirty)}`)}
-          {chip(`人工修改 ${String(report.archive.human_edited)}`)}
-          {chip(`待合并提案 ${String(report.archive.proposed_pending)}`)}
-          {chip(`已合并/分裂 ${String(report.archive.merged_or_split)}`)}
+          {chip(t('diag.weights', { value: report.model.weights ? t('diag.has') : t('diag.none') }))}
+          {chip(t('diag.archiveTopics', { count: report.archive.topics }))}
+          {chip(t('diag.archiveDirty', { count: report.archive.dirty }))}
+          {chip(t('diag.humanEdited', { count: report.archive.human_edited }))}
+          {chip(t('diag.proposedPending', { count: report.archive.proposed_pending }))}
+          {chip(t('diag.mergedSplit', { count: report.archive.merged_or_split }))}
         </div>
       </div>
 
       <div style={cardStyle}>
-        <span style={sectionTitleStyle}>最近 harvest / eval</span>
+        <span style={sectionTitleStyle}>{t('diag.recent')}</span>
         <div style={rowStyle}>
           {chip(`harvest ${report.last_harvest_at ?? '—'}`)}
           {report.last_eval === null
             ? chip('eval —')
             : chip(
                 `eval ${report.last_eval.at} · ${String(report.last_eval.passed)}/${String(report.last_eval.total)}` +
-                  ` · 阻断 ${String(report.last_eval.blocking_failures)}`,
+                  t('diag.blocking', { count: report.last_eval.blocking_failures }),
               )}
           <button
             type="button"
@@ -318,7 +321,7 @@ export function DiagPanel(): JSX.Element {
             disabled={evalBusy}
             onClick={() => void runEval()}
           >
-            {evalBusy ? '评测中…' : '跑 golden set'}
+            {evalBusy ? t('diag.evalBusy') : t('diag.runEval')}
           </button>
         </div>
         {evalMessage !== null && (

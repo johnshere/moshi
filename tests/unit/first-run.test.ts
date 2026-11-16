@@ -129,7 +129,7 @@ describe('firstRunState 五态与优先级', () => {
     // 文案没了：组件取不到 banner 就不渲染（不改其它三态）
     expect(Object.keys(BANNERS).sort()).toEqual(['daemon_off', 'no_data', 'sidecar_off']);
     expect(BANNERS.collect_off).toBeUndefined();
-    expect(BANNERS.daemon_off?.text).toBe('默识 daemon 未运行');
+    expect(BANNERS.daemon_off?.textKey).toBe('firstRun.daemonOff.text');
   });
 });
 

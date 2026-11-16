@@ -14,6 +14,8 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { navigate } from './navigate.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 type HookHost = 'magpie' | 'claude-code' | 'dsh';
 
@@ -68,7 +70,11 @@ async function api<T>(path: string, init?: { method?: string; body?: unknown }):
   return (await res.json()) as T;
 }
 
-const VIA_LABELS: Record<string, string> = { dir: '目录', port: '端口', process: '进程' };
+const VIA_KEYS: Record<string, DictKey> = {
+  dir: 'onboard.via.dir',
+  port: 'onboard.via.port',
+  process: 'onboard.via.process',
+};
 
 const overlayStyle: CSSProperties = {
   position: 'fixed',
@@ -132,6 +138,7 @@ export interface OnboardModalProps {
 }
 
 export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactElement | null {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>('hidden');
   const [onboard, setOnboard] = useState<OnboardPayload | null>(null);
   const [plans, setPlans] = useState<PlanPayload | null>(null);
@@ -235,13 +242,13 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
       <div style={modalStyle}>
         {phase === 'pick' ? (
           <>
-            <h3 style={titleStyle}>接入你的 Agent</h3>
+            <h3 style={titleStyle}>{t('onboard.title')}</h3>
             <div style={{ ...mutedStyle, marginTop: 6 }}>
-              检测到本机装了这些工具。勾选后我会把 moshi 的 Hook 插件装进去——装好之后，Agent 每次发消息前会先向 moshi 要一段相关记忆。
+              {t('onboard.intro')}
             </div>
 
             <div style={groupStyle}>
-              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>Hook 插件</div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>{t('onboard.group.hook')}</div>
               {hookPlans.map((plan) => {
                 const key = `${plan.host}:${plan.kind}`;
                 const detection = onboard?.detected?.hosts[plan.host];
@@ -270,9 +277,13 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                       </span>
                       <span style={{ ...mutedStyle, marginLeft: 8 }}>
                         {hit
-                          ? `已探测到（${(detection?.via ?? []).map((via) => VIA_LABELS[via] ?? via).join('、')}）`
-                          : '未探测到'}
-                        {unusable ? ` · 暂不支持：${plan.reason ?? ''}` : ''}
+                          ? t('onboard.detected', {
+                              via: (detection?.via ?? [])
+                                .map((via) => (VIA_KEYS[via] === undefined ? via : t(VIA_KEYS[via] as DictKey)))
+                                .join(t('common.listSep')),
+                            })
+                          : t('onboard.notDetected')}
+                        {unusable ? t('onboard.unsupported', { reason: plan.reason ?? '' }) : ''}
                       </span>
                     </span>
                   </label>
@@ -281,12 +292,12 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
             </div>
 
             <div style={groupStyle}>
-              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>MCP 服务端</div>
+              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>{t('onboard.group.mcp')}</div>
               {mcpPlans.map((plan) => (
                 <div key={`${plan.host}:${plan.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }} data-testid={`onboard-mcp-${plan.host}`}>
                   <input type="checkbox" disabled checked={false} />
                   <span style={{ fontSize: 13, color: 'var(--color-text-faint)' }}>{plans?.labels[plan.host] ?? plan.host}</span>
-                  <span style={{ ...mutedStyle, marginLeft: 4 }}>即将支持（本轮只显示）</span>
+                  <span style={{ ...mutedStyle, marginLeft: 4 }}>{t('onboard.mcpSoon')}</span>
                 </div>
               ))}
             </div>
@@ -295,11 +306,11 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
               <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => void redetect()} data-testid="onboard-redetect">
-                重新探测
+                {t('onboard.redetect')}
               </button>
               <span style={{ flex: 1 }} />
               <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => void close()} data-testid="onboard-close">
-                以后再说
+                {t('onboard.later')}
               </button>
               <button
                 type="button"
@@ -308,18 +319,19 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                 onClick={() => setPhase('confirm')}
                 data-testid="onboard-next"
               >
-                下一步
+                {t('onboard.next')}
               </button>
             </div>
           </>
         ) : (
           <>
-            <h3 style={titleStyle}>确认安装</h3>
-            <div style={{ ...mutedStyle, marginTop: 6 }}>下面这些文件会被写入。装错了可以在「接入 → 接入点」里一键卸载。</div>
+            <h3 style={titleStyle}>{t('onboard.confirm.title')}</h3>
+            <div style={{ ...mutedStyle, marginTop: 6 }}>{t('onboard.confirm.intro')}</div>
             {confirmPlans.map((plan) => (
               <div key={`${plan.host}:${plan.kind}`} style={groupStyle}>
                 <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 4 }}>
-                  {plans?.labels[plan.host] ?? plan.host} · {plan.kind === 'hook' ? 'Hook 插件' : 'MCP'}
+                  {plans?.labels[plan.host] ?? plan.host} ·{' '}
+                  {plan.kind === 'hook' ? t('onboard.group.hook') : 'MCP'}
                   {plan.root === null ? null : <span style={mutedStyle}> → {plan.root}</span>}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
@@ -330,17 +342,17 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                     </li>
                   ))}
                 </ul>
-                {plan.risk !== null ? <div style={{ ...mutedStyle, marginTop: 4 }}>注意：{plan.risk}</div> : null}
+                {plan.risk !== null ? <div style={{ ...mutedStyle, marginTop: 4 }}>{t('onboard.risk', { risk: plan.risk })}</div> : null}
               </div>
             ))}
             {error !== null ? <div style={{ ...mutedStyle, color: 'var(--color-status-error, #e05252)', marginTop: 10 }}>{error}</div> : null}
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <span style={{ flex: 1 }} />
               <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => setPhase('pick')}>
-                返回
+                {t('onboard.back')}
               </button>
               <button type="button" style={buttonStyle(true, busy)} disabled={busy} onClick={() => void installAndJump()} data-testid="onboard-confirm">
-                {busy ? '安装中…' : '确认安装'}
+                {busy ? t('onboard.installing') : t('onboard.confirm.ok')}
               </button>
             </div>
           </>

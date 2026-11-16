@@ -147,7 +147,7 @@ export function FilterBar(): JSX.Element {
         {t(active ? 'filter.titleActive' : 'filter.title')}
       </span>
 
-      <label style={labelStyle}>scope</label>
+      <label style={labelStyle}>{t('filter.scope')}</label>
       <input
         type="text"
         value={scopeInput}

@@ -1,15 +1,14 @@
 /**
- * 应用外壳（P2-19-A，概设 §8.1）：左侧一级导航 + 顶栏全局搜索/三灯/待办角标。
+ * 应用外壳（P2-19-A，概设 §8.1）：左侧一级导航 + 顶栏语言/三灯/待办角标。
  *
  * 外壳只负责「常驻」和「取全局状态」，不接管页面内容：页面仍是 absolute inset:0
  * 填满 <main>。三灯与角标 30s 轮询一次，取数失败显式降级，不静默装正常。
+ * 顶栏只留 语言 + 三灯 + 角标；全局搜索与作用域下拉在记忆页工具条上（V-10，用户 m01201）。
  */
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
 import { NAV, hrefForPath, lightColor, pageHref, queueBadge, statusLights, type AccessSection, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
-import { SearchBox } from './SearchBox.js';
-import { ScopeSwitcher } from './ScopeSwitcher.js';
 import { LocaleSwitch } from './LocaleSwitch.js';
 import { useT } from '../i18n/index.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
@@ -104,6 +103,27 @@ function isPlainLeftClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
 }
 
+/**
+ * `/` 的落点：全局搜索框挂在记忆页工具条上（V-10，用户 m01201 把顶栏收成 语言+三灯+角标）。
+ * 当前页没有搜索框（图谱 / 待办 / 归档 / 设置）就先跳到记忆页，再等 DOM 挂上后聚焦。
+ */
+function focusGlobalSearch(): void {
+  const take = (): boolean => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="global-search"]');
+    if (input === null) return false;
+    input.focus();
+    input.select();
+    return true;
+  };
+  if (take()) return;
+  navigatePage('memories');
+  let attempts = 0;
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    if (take() || attempts >= 20) window.clearInterval(timer);
+  }, 50);
+}
+
 export interface ShellProps {
   route: PageKey;
   /** 设置二级；非设置页传 null（设计 §16.5.2：菜单树展开态由 URL 决定） */
@@ -144,9 +164,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
         case 'focus-search': {
           event.preventDefault();
           pendingGRef.current = null;
-          const input = document.querySelector<HTMLInputElement>('[data-testid="global-search"]');
-          input?.focus();
-          input?.select();
+          focusGlobalSearch();
           return;
         }
         case 'nav':
@@ -264,9 +282,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
 
       <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
         <header style={topbarStyle}>
-          <SearchBox />
           <div style={{ flex: 1 }} />
-          <ScopeSwitcher />
           <LocaleSwitch />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
             {lights.map((light) => (

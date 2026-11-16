@@ -276,7 +276,7 @@ export function EndpointsPage(): ReactElement {
                     ids: sources.sources
                       .filter((source) => source.available)
                       .map((source) => source.id)
-                      .join('、'),
+                      .join(t('common.listSep')),
                   })
                 : t('endpoints.import.sources.none')}
           </div>

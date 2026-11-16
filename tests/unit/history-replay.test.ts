@@ -15,7 +15,7 @@ import {
   historyRows,
   liveState,
   missState,
-  REPLAY_MISS_MESSAGE,
+  replayMissMessage,
   replayState,
   selectedIdOf,
   shouldPollLatest,
@@ -129,7 +129,7 @@ describe('实时 / 回放状态迁移（不串数据）', () => {
     expect(state.trace).toBeNull();
     expect(state.mode).toBe('replay');
     expect(state.queryId).toBe(Q2);
-    expect(state.error).toBe(REPLAY_MISS_MESSAGE);
+    expect(state.error).toBe(replayMissMessage());
     expect(state.error).toContain('64');
     expect(missState(Q2, '网络断开').error).toBe('网络断开');
   });

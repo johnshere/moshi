@@ -8,6 +8,7 @@
  */
 import { useCallback, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { useT } from '../i18n/index.js';
 
 interface EntityRow {
   entity_id: string;
@@ -117,6 +118,7 @@ async function callJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function EntityMergePanel(): ReactElement {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [rows, setRows] = useState<EntityRow[]>([]);
@@ -193,7 +195,7 @@ export function EntityMergePanel(): ReactElement {
         }}
         style={{ ...buttonStyle, position: 'fixed', right: 12, bottom: 12, zIndex: 9 }}
       >
-        实体合并
+        {t('merge.open')}
       </button>
     );
   }
@@ -201,8 +203,8 @@ export function EntityMergePanel(): ReactElement {
   return (
     <div data-testid="entity-merge-panel" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <strong style={{ color: 'var(--color-text-primary)', fontSize: 13 }}>实体合并</strong>
-        <span style={{ color: 'var(--color-text-muted)' }}>合并后源实体标记 merged_into，不物理删除；不可撤销</span>
+        <strong style={{ color: 'var(--color-text-primary)', fontSize: 13 }}>{t('merge.title')}</strong>
+        <span style={{ color: 'var(--color-text-muted)' }}>{t('merge.hint')}</span>
         <span style={{ flex: 1 }} />
         <button
           type="button"
@@ -210,7 +212,7 @@ export function EntityMergePanel(): ReactElement {
           onClick={() => setOpen(false)}
           style={buttonStyle}
         >
-          关闭
+          {t('common.close')}
         </button>
       </div>
 
@@ -219,7 +221,7 @@ export function EntityMergePanel(): ReactElement {
           data-testid="entity-merge-query"
           style={inputStyle}
           value={query}
-          placeholder="搜索实体名或别名"
+          placeholder={t('merge.searchPlaceholder')}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') void search();
@@ -232,19 +234,23 @@ export function EntityMergePanel(): ReactElement {
           onClick={() => void search()}
           style={buttonStyle}
         >
-          搜索
+          {t('merge.search')}
         </button>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ color: 'var(--color-text-muted)', padding: '8px 2px' }}>没有结果</div>
+        <div style={{ color: 'var(--color-text-muted)', padding: '8px 2px' }}>{t('merge.empty')}</div>
       ) : (
         <div style={{ marginTop: 8, border: '1px solid var(--color-border-subtle)', borderRadius: 4 }}>
           {rows.map((row) => (
             <div key={row.entity_id} data-testid="entity-merge-row" style={rowStyle}>
               <span style={{ color: 'var(--color-text-primary)' }}>{row.canonical_name}</span>
               <span style={{ color: 'var(--color-text-muted)' }}>
-                {row.etype} · 事实 {row.fact_count} · 别名 {row.alias_count}
+                {t('merge.rowMeta', {
+                  etype: row.etype,
+                  facts: row.fact_count,
+                  aliases: row.alias_count,
+                })}
               </span>
               <span style={{ flex: 1 }} />
               <button
@@ -257,7 +263,7 @@ export function EntityMergePanel(): ReactElement {
                   color: fromId === row.entity_id ? 'var(--color-warning-soft)' : 'var(--color-text-primary)',
                 }}
               >
-                设为源
+                {t('merge.setSource')}
               </button>
               <button
                 type="button"
@@ -269,7 +275,7 @@ export function EntityMergePanel(): ReactElement {
                   color: toId === row.entity_id ? 'var(--color-success)' : 'var(--color-text-primary)',
                 }}
               >
-                设为目标
+                {t('merge.setTarget')}
               </button>
             </div>
           ))}
@@ -278,9 +284,13 @@ export function EntityMergePanel(): ReactElement {
 
       <div style={{ display: 'flex', gap: 12, marginTop: 10, alignItems: 'center' }}>
         <span data-testid="entity-merge-selection" style={{ color: 'var(--color-text-secondary)' }}>
-          源：{fromId === null ? '—' : (rows.find((r) => r.entity_id === fromId)?.canonical_name ?? fromId)}
-          {'  '}目标：
-          {toId === null ? '—' : (rows.find((r) => r.entity_id === toId)?.canonical_name ?? toId)}
+          {t('merge.sourceLabel')}
+          {fromId === null
+            ? t('common.dash')
+            : (rows.find((r) => r.entity_id === fromId)?.canonical_name ?? fromId)}
+          {'  '}
+          {t('merge.targetLabel')}
+          {toId === null ? t('common.dash') : (rows.find((r) => r.entity_id === toId)?.canonical_name ?? toId)}
         </span>
         <span style={{ flex: 1 }} />
         <button
@@ -290,7 +300,7 @@ export function EntityMergePanel(): ReactElement {
           onClick={() => void doPreview()}
           style={buttonStyle}
         >
-          预览
+          {t('merge.preview')}
         </button>
         <button
           type="button"
@@ -299,15 +309,25 @@ export function EntityMergePanel(): ReactElement {
           onClick={() => void doMerge()}
           style={{ ...buttonStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger-soft)' }}
         >
-          确认合并
+          {t('merge.confirm')}
         </button>
       </div>
 
       {preview === null ? null : (
         <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: 'var(--color-bg-base)', padding: 8, borderRadius: 4 }}>
           <div>
-            可合并：{preview.can_merge ? '是' : `否（${preview.blocking_reason ?? '未知原因'}）`} · 将移动事实{' '}
-            {preview.will_move.facts} · 边 {preview.will_move.edges} · 别名 {preview.will_move.aliases} · 冲突{' '}
+            {t('merge.canMerge', {
+              can: preview.can_merge
+                ? t('common.yes')
+                : t('merge.noWithReason', {
+                    reason: preview.blocking_reason ?? t('merge.unknownReason'),
+                  }),
+            })}{' '}
+            {t('merge.willMove', {
+              facts: preview.will_move.facts,
+              edges: preview.will_move.edges,
+              aliases: preview.will_move.aliases,
+            })}{' '}
             <span data-testid="entity-merge-conflict-count" style={{ color: preview.conflicts.length > 0 ? 'var(--color-warning-soft)' : 'var(--color-success)' }}>
               {preview.conflicts.length}
             </span>
@@ -326,8 +346,13 @@ export function EntityMergePanel(): ReactElement {
 
       {result === null ? null : (
         <div data-testid="entity-merge-result" style={{ marginTop: 10, color: 'var(--color-success)' }}>
-          已合并：移动事实 {result.moved_facts}、去重 {result.deduped_facts}、别名 {result.merged_aliases}；
-          冲突未自动裁决 {result.conflicts_resolved}；可撤销：{result.undoable ? '是' : '否'}
+          {t('merge.result', {
+            moved: result.moved_facts,
+            deduped: result.deduped_facts,
+            aliases: result.merged_aliases,
+            conflicts: result.conflicts_resolved,
+            undoable: result.undoable ? t('common.yes') : t('common.no'),
+          })}
         </div>
       )}
 

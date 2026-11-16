@@ -80,9 +80,11 @@ export function firstRunState(
   return 'ready';
 }
 
+import type { DictKey } from '../i18n/dict.js';
+
 export interface BannerSpec {
-  text: string;
-  hint: string;
+  textKey: DictKey;
+  hintKey: DictKey;
   tone: 'error' | 'info' | 'muted' | 'warn';
 }
 
@@ -93,18 +95,18 @@ export interface BannerSpec {
  */
 export const BANNERS: Partial<Record<Exclude<FirstRunState, 'ready'>, BannerSpec>> = {
   daemon_off: {
-    text: '默识 daemon 未运行',
-    hint: '运行 `moshi daemon` 后重试',
+    textKey: 'firstRun.daemonOff.text',
+    hintKey: 'firstRun.daemonOff.hint',
     tone: 'error',
   },
   no_data: {
-    text: '还没有记忆',
-    hint: '运行 `moshi harvest`，或把会话文件放进采集目录',
+    textKey: 'firstRun.noData.text',
+    hintKey: 'firstRun.noData.hint',
     tone: 'info',
   },
   sidecar_off: {
-    text: '语义检索未启用（可选）',
-    hint: '不影响使用；需要向量召回时重新运行默识安装包，勾选「Python 组件」',
+    textKey: 'firstRun.sidecarOff.text',
+    hintKey: 'firstRun.sidecarOff.hint',
     tone: 'muted',
   },
   // 用户 m00882：采集提醒三态暂不提示，等正式接入逻辑定稿

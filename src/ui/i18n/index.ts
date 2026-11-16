@@ -15,6 +15,9 @@ export { LOCALES, useLocale, type Locale } from '../state/locale.js';
 
 export type DictVars = Readonly<Record<string, string | number>>;
 
+/** 翻译函数签名：`useT()` 的返回值，也是纯函数模块可注入的默认参数类型。 */
+export type Translator = (key: DictKey, vars?: DictVars) => string;
+
 const DICTS: Readonly<Record<Locale, Readonly<Record<DictKey, string>>>> = { zh, en };
 
 export function hasKey(key: string): key is DictKey {
@@ -33,7 +36,7 @@ export function t(key: DictKey, vars?: DictVars): string {
 }
 
 /** 组件用：返回绑定了当前 locale 的 `t`。 */
-export function useT(): (key: DictKey, vars?: DictVars) => string {
+export function useT(): Translator {
   const locale = useLocale((state) => state.locale);
   return useCallback((key: DictKey, vars?: DictVars) => translate(locale, key, vars), [locale]);
 }

@@ -21,6 +21,7 @@ import { useSelection } from '../state/selection.js';
 import { fetchFactDetail, patchFact, type FactDetail } from './api.js';
 import { guessExtControl, formatExtValue } from './pure/attrs.js';
 import { lastAuditByField, lastModifiedLine, type AuditView } from './pure/lastAudit.js';
+import { useT } from '../i18n/index.js';
 
 /** 抽屉默认宽度（概设 §8.2：420px，可拖宽） */
 const DEFAULT_WIDTH = 420;
@@ -64,6 +65,7 @@ interface WritableRowProps {
 }
 
 function WritableRow({ label, value, step, min, max, audit, onCommit }: WritableRowProps): JSX.Element {
+  const t = useT();
   const [draft, setDraft] = useState<string>(String(value));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +76,7 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
   const commit = useCallback(async (): Promise<void> => {
     const n = Number(draft);
     if (!Number.isFinite(n) || n < min || n > max) {
-      setError(`必须是 ${min}..${max} 的数字`);
+      setError(t('inspector.rangeError', { min, max }));
       return;
     }
     setBusy(true);
@@ -87,7 +89,7 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
     } finally {
       setBusy(false);
     }
-  }, [draft, min, max, onCommit]);
+  }, [draft, min, max, onCommit, t]);
 
   return (
     <div style={{ padding: '3px 0' }}>
@@ -104,7 +106,7 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void commit();
           }}
           disabled={busy}
-          aria-label={`${label} 可写`}
+          aria-label={t('inspector.writable', { label })}
           style={{
             background: 'var(--color-bg-raised)',
             color: 'var(--color-text-primary)',
@@ -129,12 +131,12 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
             font: 'inherit',
           }}
         >
-          {busy ? '提交中…' : '提交'}
+          {busy ? t('inspector.submitting') : t('inspector.submit')}
         </button>
       </div>
       {/* 详设 §10.5：每个可写项旁必须有"上次是谁、什么时候改的" */}
       <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginLeft: 106 }}>
-        {lastModifiedLine(audit) ?? '从未被人工修改'}
+        {lastModifiedLine(audit, t) ?? t('inspector.neverModified')}
       </div>
       {error !== null && <div style={{ fontSize: 10, color: 'var(--color-danger)', marginLeft: 106 }}>{error}</div>}
     </div>
@@ -149,13 +151,14 @@ function StructRow({ label, value }: { label: string; value: unknown }): JSX.Ele
 
 /** attrs.ext：按值猜控件，只读呈现（详设 §10.5：不做自定义表单） */
 function ExtRow({ value }: { value: unknown }): JSX.Element {
+  const t = useT();
   const guess = guessExtControl(value);
   const text = formatExtValue(value);
   const glyph =
-    guess.kind === 'number' ? '[数字] '
-    : guess.kind === 'boolean' ? '[开关] '
-    : guess.kind === 'datetime' ? '[日期] '
-    : guess.kind === 'text' ? '[文本] '
+    guess.kind === 'number' ? t('inspector.kind.number')
+    : guess.kind === 'boolean' ? t('inspector.kind.boolean')
+    : guess.kind === 'datetime' ? t('inspector.kind.datetime')
+    : guess.kind === 'text' ? t('inspector.kind.text')
     : '[KV] ';
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', padding: '3px 0' }}>
@@ -234,6 +237,7 @@ function DigestLink({ d }: { d: { id: string; content: string; valid_to: string 
 }
 
 export function Inspector(): JSX.Element {
+  const t = useT();
   const focusId = useSelection((s) => s.focusId);
   const [detail, setDetail] = useState<FactDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -300,7 +304,7 @@ export function Inspector(): JSX.Element {
   // 提交可写项：PATCH 成功后重拉详情并写回 state，让"上次修改"行当场更新（audit 最新一行）
   const commitNumber = useCallback(
     (field: 'confidence' | 'strength' | 'importance', next: number): Promise<void> => {
-      if (detail === null) return Promise.reject(new Error('详情未加载'));
+      if (detail === null) return Promise.reject(new Error(t('inspector.detailNotLoaded')));
       return patchFact(detail.id, { [field]: next }).then(() =>
         fetchFactDetail(detail.id).then((fresh) => setDetail(fresh)),
       );
@@ -313,21 +317,21 @@ export function Inspector(): JSX.Element {
     if (detail === null) return [];
     const f = detail.attrs.frozen;
     return [
-      { label: '主体', value: `${f.subject.name} (${f.subject.entity_id})` },
-      { label: '谓词', value: f.predicate },
-      { label: '取值', value: JSON.stringify(f.value) },
+      { label: t('inspector.kv.subject'), value: `${f.subject.name} (${f.subject.entity_id})` },
+      { label: t('inspector.kv.predicate'), value: f.predicate },
+      { label: t('inspector.kv.value'), value: JSON.stringify(f.value) },
       { label: 'scope', value: detail.scope },
       { label: 'canonical_key', value: detail.canonical_key.slice(0, 8) },
       { label: 'pool', value: detail.pool },
     ];
-  }, [detail]);
+  }, [detail, t]);
 
   if (focusId === null) return <span hidden />;
 
   return (
     <div
       role="complementary"
-      aria-label="事实检查器"
+      aria-label={t('inspector.aria.fact')}
       style={{
         position: 'absolute',
         top: 0,
@@ -348,7 +352,7 @@ export function Inspector(): JSX.Element {
         onMouseDown={(e) => {
           dragRef.current = { startX: e.clientX, startW: width };
         }}
-        title="拖动调整宽度"
+        title={t('inspector.drag')}
         style={{
           position: 'absolute',
           left: -3,
@@ -360,7 +364,7 @@ export function Inspector(): JSX.Element {
         }}
       />
       <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--color-border-subtle)' }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>检查器</span>
+        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>{t('inspector.title')}</span>
         <span style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 8, fontFamily: 'ui-monospace, monospace' }}>
           {detail === null ? focusId : detail.id}
         </span>
@@ -368,8 +372,8 @@ export function Inspector(): JSX.Element {
           <button
             type="button"
             onClick={close}
-            title="关闭（Esc）"
-            aria-label="关闭检查器"
+            title={t('inspector.close.title')}
+            aria-label={t('inspector.close.aria')}
             style={{
               background: 'transparent',
               border: 'none',
@@ -383,23 +387,23 @@ export function Inspector(): JSX.Element {
         </span>
       </div>
 
-      {loading && <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>加载中…</div>}
+      {loading && <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('inspector.loading')}</div>}
       {error !== null && (
         <div style={{ padding: 12, color: 'var(--color-danger)' }}>
-          加载失败：{error}
+          {t('inspector.loadFailed', { error })}
           <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: 'var(--color-text-secondary)', background: 'transparent', border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
-            关闭
+            {t('common.close')}
           </button>
         </div>
       )}
       {!loading && error === null && detail === null && (
-        <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>未加载</div>
+        <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('inspector.notLoaded')}</div>
       )}
 
       {!loading && error === null && detail !== null && (
         <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
           {/* 摘要档（常显） */}
-          <SectionCard title="摘要" tag="可写：confidence / strength" defaultOpen>
+          <SectionCard title={t('inspector.section.summary')} tag={t('inspector.section.summaryTag')} defaultOpen>
             <ReadonlyRow label="content" value={detail.content} />
             <WritableRow
               label="confidence"
@@ -426,7 +430,7 @@ export function Inspector(): JSX.Element {
           </SectionCard>
 
           {/* 结构档（常显） */}
-          <SectionCard title="结构" tag="全只读" defaultOpen>
+          <SectionCard title={t('inspector.section.structure')} tag={t('inspector.section.structureTag')} defaultOpen>
             {structureRows.map((r) => (
               <StructRow key={r.label} label={r.label} value={r.value} />
             ))}
@@ -438,12 +442,12 @@ export function Inspector(): JSX.Element {
               </div>
             ))}
             {Object.keys(detail.attrs.ext).length === 0 && (
-              <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>attrs.ext 为空（扩展槽未启用）</div>
+              <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{t('inspector.attrsEmpty')}</div>
             )}
           </SectionCard>
 
           {/* 溯源档（默认折叠） */}
-          <SectionCard title="溯源" tag="全只读" defaultOpen={false}>
+          <SectionCard title={t('inspector.section.trace')} tag={t('inspector.section.structureTag')} defaultOpen={false}>
             {detail.source_episode !== null && (
               <div style={{ padding: '3px 0' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline' }}>
@@ -451,17 +455,17 @@ export function Inspector(): JSX.Element {
                   <span style={KV_CELL}>{detail.source_episode.id}</span>
                 </div>
                 <div style={{ color: 'var(--color-text-muted)', fontSize: 10, marginLeft: 106 }}>
-                  {detail.source_episode.summary ?? '无摘要'} · {detail.source_episode.ts}
+                  {detail.source_episode.summary ?? t('inspector.noSummary')} · {detail.source_episode.ts}
                 </div>
                 <div style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 106 }}>
-                  span：{detail.span === null ? '—' : `[${detail.span[0]}, ${detail.span[1]}]`}
+                  {t('inspector.span', { value: detail.span === null ? '—' : `[${detail.span[0]}, ${detail.span[1]}]` })}
                 </div>
               </div>
             )}
-            {detail.superseded_by !== null && <ReadonlyRow label="被取代" value={detail.superseded_by} />}
+            {detail.superseded_by !== null && <ReadonlyRow label={t('inspector.supersededBy')} value={detail.superseded_by} />}
             {detail.superseded.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>取代了（supersedes 链反向）</div>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.supersedes')}</div>
                 {detail.superseded.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
@@ -470,7 +474,7 @@ export function Inspector(): JSX.Element {
             {detail.depends.upstream.length > 0 && (
               <div style={{ padding: '3px 0' }}>
                 <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
-                  依赖链上游（我依赖，各 3 跳）
+                  {t('inspector.upstream')}
                 </div>
                 {detail.depends.upstream.map((d) => (
                   <DigestLink key={d.id} d={d} />
@@ -480,7 +484,7 @@ export function Inspector(): JSX.Element {
             {detail.depends.downstream.length > 0 && (
               <div style={{ padding: '3px 0' }}>
                 <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
-                  依赖链下游（依赖我，各 3 跳）
+                  {t('inspector.downstream')}
                 </div>
                 {detail.depends.downstream.map((d) => (
                   <DigestLink key={d.id} d={d} />
@@ -489,7 +493,7 @@ export function Inspector(): JSX.Element {
             )}
             {detail.conflicts.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-warning)', fontSize: 10, paddingBottom: 2 }}>冲突对（互斥）</div>
+                <div style={{ color: 'var(--color-warning)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.conflicts')}</div>
                 {detail.conflicts.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
@@ -497,7 +501,7 @@ export function Inspector(): JSX.Element {
             )}
             {detail.audits.length > 0 && (
               <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>audit 历史</div>
+                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.audit')}</div>
                 {detail.audits.map((a) => (
                   <div key={`${a.field}-${a.ts}-${a.source}`} style={{ fontSize: 10, color: 'var(--color-text-muted)', padding: '2px 0' }}>
                     {a.field}: {a.before ?? '∅'} → {a.after ?? '∅'} · {a.source ?? 'unknown'} @ {a.ts}
@@ -512,7 +516,7 @@ export function Inspector(): JSX.Element {
               detail.depends.downstream.length === 0 &&
               detail.conflicts.length === 0 &&
               detail.audits.length === 0 && (
-                <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>无溯源信息</div>
+                <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{t('inspector.noProvenance')}</div>
               )}
           </SectionCard>
         </div>

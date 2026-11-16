@@ -11,7 +11,7 @@ import {
   overviewRows,
   purgeDeletedTotal,
   purgeSummary,
-  PURGE_SCOPES,
+  purgeScopes,
   type PrivacyOverview,
   type WouldDelete,
 } from '../../src/ui/settings/privacy-pure.js';
@@ -57,8 +57,8 @@ describe('canSubmitPurge', () => {
   });
 
   it('四个 scope 都有中文标签且值唯一', () => {
-    expect(PURGE_SCOPES.map((s) => s.value)).toEqual(['all', 'facts', 'sessions', 'archive']);
-    for (const scope of PURGE_SCOPES) expect(scope.label.length).toBeGreaterThan(0);
+    expect(purgeScopes().map((s) => s.value)).toEqual(['all', 'facts', 'sessions', 'archive']);
+    for (const scope of purgeScopes()) expect(scope.label.length).toBeGreaterThan(0);
   });
 });
 

@@ -11,6 +11,8 @@
  */
 import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { t as translate, useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 
 interface ConfigView {
   schema: string;
@@ -39,44 +41,44 @@ const PORT_MIN = 1024;
 const PORT_MAX = 49151;
 
 const FIELD_GROUPS: readonly {
-  title: string;
-  hint?: string;
-  fields: readonly { path: string; label: string; kind: 'text' | 'number' | 'toggle' }[];
+  titleKey: DictKey;
+  hintKey?: DictKey;
+  fields: readonly { path: string; labelKey: DictKey; kind: 'text' | 'number' | 'toggle' }[];
 }[] = [
   {
-    title: '采集与整理',
-    hint: 'cron 为 5 段标准表达式（分 时 日 月 周）；间隔单位毫秒，最小 1000。',
+    titleKey: 'settings.cfg.group.ingest',
+    hintKey: 'settings.cfg.group.ingestHint',
     fields: [
-      { path: 'ingest.harvest_cron', label: 'harvest cron', kind: 'text' },
-      { path: 'collect.enabled', label: '启用来源采集', kind: 'toggle' },
-      { path: 'collect.interval_ms', label: '采集扫描间隔 (ms)', kind: 'number' },
-      { path: 'collect.llm_scan', label: 'LLM 扫描', kind: 'toggle' },
-      { path: 'layout.enabled', label: '启用图布局', kind: 'toggle' },
-      { path: 'layout.interval_ms', label: '布局间隔 (ms)', kind: 'number' },
+      { path: 'ingest.harvest_cron', labelKey: 'settings.cfg.harvestCron', kind: 'text' },
+      { path: 'collect.enabled', labelKey: 'settings.cfg.collectEnabled', kind: 'toggle' },
+      { path: 'collect.interval_ms', labelKey: 'settings.cfg.collectInterval', kind: 'number' },
+      { path: 'collect.llm_scan', labelKey: 'settings.cfg.collectLlmScan', kind: 'toggle' },
+      { path: 'layout.enabled', labelKey: 'settings.cfg.layoutEnabled', kind: 'toggle' },
+      { path: 'layout.interval_ms', labelKey: 'settings.cfg.layoutInterval', kind: 'number' },
     ],
   },
   {
-    title: '归档与阈值',
+    titleKey: 'settings.cfg.group.archive',
     fields: [
-      { path: 'archive.export_cron', label: 'export cron', kind: 'text' },
-      { path: 'archive.dirty_threshold_facts', label: '脏阈值：事实数', kind: 'number' },
+      { path: 'archive.export_cron', labelKey: 'settings.cfg.exportCron', kind: 'text' },
+      { path: 'archive.dirty_threshold_facts', labelKey: 'settings.cfg.dirtyFacts', kind: 'number' },
       {
         path: 'archive.dirty_threshold_confidence',
-        label: '脏阈值：置信度 (0–1)',
+        labelKey: 'settings.cfg.dirtyConfidence',
         kind: 'number',
       },
-      { path: 'archive.min_facts', label: '最少事实数', kind: 'number' },
-      { path: 'archive.history_keep', label: '历史保留版本数', kind: 'number' },
+      { path: 'archive.min_facts', labelKey: 'settings.cfg.minFacts', kind: 'number' },
+      { path: 'archive.history_keep', labelKey: 'settings.cfg.historyKeep', kind: 'number' },
     ],
   },
   {
-    title: '启动期配置',
-    hint: '端口可修改，保存后需重启 daemon；数据目录 / 归档目录仍只读。',
+    titleKey: 'settings.cfg.group.startup',
+    hintKey: 'settings.cfg.group.startupHint',
     fields: [
-      { path: 'http.port', label: 'HTTP 端口', kind: 'number' },
-      { path: 'storage.data_dir', label: '数据目录', kind: 'text' },
-      { path: 'storage.archive_dir', label: '归档目录', kind: 'text' },
-      { path: 'storage.backup_keep', label: '备份保留份数', kind: 'number' },
+      { path: 'http.port', labelKey: 'settings.cfg.httpPort', kind: 'number' },
+      { path: 'storage.data_dir', labelKey: 'settings.cfg.dataDir', kind: 'text' },
+      { path: 'storage.archive_dir', labelKey: 'settings.cfg.archiveDir', kind: 'text' },
+      { path: 'storage.backup_keep', labelKey: 'settings.cfg.backupKeep', kind: 'number' },
     ],
   },
 ];
@@ -127,7 +129,8 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   };
   if (!res.ok) {
     const reason = body.detail?.reason;
-    throw new Error(`${body.message ?? body.error ?? `HTTP ${String(res.status)}`}${reason === undefined ? '' : `（${reason}）`}`);
+    const message = body.message ?? body.error ?? `HTTP ${String(res.status)}`;
+    throw new Error(reason === undefined ? message : translate('settings.cfg.httpError', { message, reason }));
   }
   return body as T;
 }
@@ -175,6 +178,7 @@ const buttonStyle: CSSProperties = {
 };
 
 export function ConfigForm(): ReactElement {
+  const t = useT();
   const [loaded, setLoaded] = useState<FlatConfig | null>(null);
   const [draft, setDraft] = useState<FlatConfig>({});
   const [baseline, setBaseline] = useState<FlatConfig>({});
@@ -233,7 +237,7 @@ export function ConfigForm(): ReactElement {
       port < PORT_MIN ||
       port > PORT_MAX
     ) {
-      setError(`端口必须是 ${PORT_MIN}–${PORT_MAX} 之间的整数`);
+      setError(t('settings.cfg.portRange', { min: PORT_MIN, max: PORT_MAX }));
       return;
     }
     setSaving(true);
@@ -250,7 +254,12 @@ export function ConfigForm(): ReactElement {
       });
       setBaseline(draft);
       setRestart(res.restart_required ? res.applied : []);
-      setToast(`已保存 ${String(res.applied.length)} 项${res.restart_required ? '，重启后生效' : ''}`);
+      setToast(
+        t('settings.cfg.saved', {
+          count: res.applied.length,
+          restart: res.restart_required ? t('settings.cfg.savedRestart') : '',
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -261,11 +270,11 @@ export function ConfigForm(): ReactElement {
   return (
     <section data-testid="config-form" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>配置</div>
+        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('settings.cfg.title')}</div>
         <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{configPath}</div>
       </div>
 
-      {loading && <div style={{ color: 'var(--color-text-secondary)' }}>加载配置…</div>}
+      {loading && <div style={{ color: 'var(--color-text-secondary)' }}>{t('settings.cfg.loading')}</div>}
       {error !== null && (
         <div
           data-testid="config-error"
@@ -287,20 +296,20 @@ export function ConfigForm(): ReactElement {
           data-testid="config-restart-hint"
           style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px' }}
         >
-          需重启 moshi daemon 后生效：{restart.join('、')}
+          {t('settings.cfg.restartNeeded', { list: restart.join(', ') })}
         </div>
       )}
 
       {loaded !== null && FIELD_GROUPS.map((group) => (
-        <div key={group.title} style={groupStyle}>
-          <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>{group.title}</div>
-          {group.hint !== undefined && <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{group.hint}</div>}
+        <div key={group.titleKey} style={groupStyle}>
+          <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>{t(group.titleKey)}</div>
+          {group.hintKey !== undefined && <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{t(group.hintKey)}</div>}
           {group.fields.map((field) => {
             const value = draft[field.path];
             const readOnly = STARTUP_PATHS.has(field.path);
             return (
               <label key={field.path} style={rowStyle} data-testid={`config-row-${field.path}`}>
-                <span style={labelStyle}>{field.label}</span>
+                <span style={labelStyle}>{t(field.labelKey)}</span>
                 {field.kind === 'toggle' ? (
                   <input
                     type="checkbox"
@@ -336,7 +345,9 @@ export function ConfigForm(): ReactElement {
           data-testid="config-port-hint"
           style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 4, padding: '6px 8px', lineHeight: 1.6 }}
         >
-          重启后 MCP 地址变为 <code>http://127.0.0.1:{String(draft['http.port'])}/mcp</code>；需在 Claude Code / Magpie 等宿主同步更新，旧地址会立即失效。
+          {t('settings.cfg.portNoticePrefix')}
+          <code>http://127.0.0.1:{String(draft['http.port'])}/mcp</code>
+          {t('settings.cfg.portNoticeSuffix')}
         </div>
       )}
 
@@ -348,7 +359,11 @@ export function ConfigForm(): ReactElement {
           disabled={!dirty || saving}
           onClick={() => { void save(); }}
         >
-          {saving ? '保存中…' : dirty ? `保存 ${String(Object.keys(changed).length)} 项` : '没有改动'}
+          {saving
+            ? t('settings.cfg.saving')
+            : dirty
+              ? t('settings.cfg.saveCount', { count: Object.keys(changed).length })
+              : t('settings.cfg.noChanges')}
         </button>
         {dirty && (
           <button
@@ -357,7 +372,7 @@ export function ConfigForm(): ReactElement {
             style={{ ...buttonStyle, background: 'var(--color-bg-hover)' }}
             onClick={() => { setDraft(baseline); setToast(null); }}
           >
-            撤销改动
+            {t('settings.cfg.reset')}
           </button>
         )}
       </div>

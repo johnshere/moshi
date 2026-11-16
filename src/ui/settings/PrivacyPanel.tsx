@@ -11,12 +11,13 @@
  */
 import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
+import { t as translate, useT } from '../i18n/index.js';
 import {
   canSubmitPurge,
   overviewRows,
   purgeDeletedTotal,
   purgeSummary,
-  PURGE_SCOPES,
+  purgeScopes,
   type PrivacyOverview,
   type PurgePreview,
   type PurgeResult,
@@ -32,7 +33,8 @@ interface ErrorPayload {
 
 function errorText(body: UnknownBody, status: number): string {
   const reason = body.detail?.reason;
-  return `${body.message ?? body.error ?? `HTTP ${String(status)}`}${reason === undefined ? '' : `（${reason}）`}`;
+  const message = body.message ?? body.error ?? `HTTP ${String(status)}`;
+  return reason === undefined ? message : translate('settings.cfg.httpError', { message, reason });
 }
 
 interface UnknownBody extends ErrorPayload {
@@ -156,6 +158,7 @@ const errorStyle: CSSProperties = {
 };
 
 export function PrivacyPanel(): ReactElement {
+  const t = useT();
   const [overview, setOverview] = useState<PrivacyOverview | null>(null);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -197,7 +200,7 @@ export function PrivacyPanel(): ReactElement {
     setNotice(null);
     void downloadAllExport()
       .then((filename) => {
-        setNotice(`已导出全库 JSON（${filename}）`);
+        setNotice(t('privacy.exported', { file: filename }));
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
@@ -240,7 +243,7 @@ export function PrivacyPanel(): ReactElement {
       .then((out) => {
         if (out.dryRun) return;
         const total = purgeDeletedTotal(out.result.deleted);
-        setNotice(`已清理 ${String(total)} 条，请重启 daemon`);
+        setNotice(t('privacy.purged', { count: total }));
         setDialogOpen(false);
         setPreview(null);
         return load();
@@ -256,7 +259,7 @@ export function PrivacyPanel(): ReactElement {
   return (
     <section data-testid="privacy-panel" style={panelStyle}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>隐私 / 全库导出</div>
+        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('privacy.title')}</div>
         <button
           type="button"
           data-testid="privacy-refresh"
@@ -264,7 +267,7 @@ export function PrivacyPanel(): ReactElement {
           disabled={busy}
           onClick={() => void load()}
         >
-          {busy ? '刷新中…' : '刷新'}
+          {busy ? t('privacy.refreshing') : t('privacy.refresh')}
         </button>
         <button
           type="button"
@@ -273,7 +276,7 @@ export function PrivacyPanel(): ReactElement {
           disabled={exporting}
           onClick={onExport}
         >
-          {exporting ? '导出中…' : '导出全库 JSON'}
+          {exporting ? t('privacy.exporting') : t('privacy.export')}
         </button>
         <button
           type="button"
@@ -281,12 +284,12 @@ export function PrivacyPanel(): ReactElement {
           style={dangerButtonStyle}
           onClick={openDialog}
         >
-          清理数据
+          {t('privacy.purge')}
         </button>
       </div>
 
       <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-        物理删除不可恢复；这是唯一删除入口（先审计后删，归档只删白名单文件）。
+        {t('privacy.purgeHint')}
       </div>
 
       {notice !== null && (
@@ -303,9 +306,9 @@ export function PrivacyPanel(): ReactElement {
       <div data-testid="privacy-overview" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {overview === null
           ? busy
-            ? '正在读取隐私总览…'
-            : '隐私总览未加载'
-          : overviewRows(overview).map((row) => (
+            ? t('privacy.loading')
+            : t('privacy.notLoaded')
+          : overviewRows(overview, t).map((row) => (
               <div key={row.label} data-testid="privacy-row" style={rowStyle}>
                 <span style={{ color: 'var(--color-text-muted)' }}>{row.label}</span>
                 <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{row.value}</span>
@@ -326,9 +329,9 @@ export function PrivacyPanel(): ReactElement {
             gap: 8,
           }}
         >
-          <div style={{ color: 'var(--color-danger-soft)', fontWeight: 600 }}>清理数据（不可恢复）</div>
+          <div style={{ color: 'var(--color-danger-soft)', fontWeight: 600 }}>{t('privacy.dialog.title')}</div>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>范围</span>
+            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>{t('privacy.scopeLabel')}</span>
             <select
               data-testid="privacy-scope"
               value={scope}
@@ -338,7 +341,7 @@ export function PrivacyPanel(): ReactElement {
                 setPreview(null);
               }}
             >
-              {PURGE_SCOPES.map((s) => (
+              {purgeScopes(t).map((s) => (
                 <option key={s.value} value={s.value}>
                   {s.label}
                 </option>
@@ -346,11 +349,11 @@ export function PrivacyPanel(): ReactElement {
             </select>
           </label>
           <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>确认</span>
+            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>{t('privacy.confirmLabel')}</span>
             <input
               data-testid="privacy-confirm"
               value={confirmText}
-              placeholder="手输 PURGE"
+              placeholder={t('privacy.confirmPlaceholder')}
               style={{ ...inputStyle, width: 160 }}
               onChange={(e) => {
                 setConfirmText(e.target.value);
@@ -366,7 +369,7 @@ export function PrivacyPanel(): ReactElement {
               disabled={previewBusy || executing}
               onClick={onPreview}
             >
-              {previewBusy ? '统计中…' : '先预览'}
+              {previewBusy ? t('privacy.previewing') : t('privacy.preview')}
             </button>
             <button
               type="button"
@@ -378,7 +381,7 @@ export function PrivacyPanel(): ReactElement {
               disabled={!canSubmitPurge(confirmText, scope) || executing}
               onClick={onExecute}
             >
-              {executing ? '清理中…' : '确认清理'}
+              {executing ? t('privacy.executing') : t('privacy.execConfirm')}
             </button>
             <button
               type="button"
@@ -389,16 +392,16 @@ export function PrivacyPanel(): ReactElement {
                 setDialogOpen(false);
               }}
             >
-              取消
+              {t('common.cancel')}
             </button>
           </div>
           {preview !== null && (
             <div data-testid="privacy-preview" style={{ fontSize: 12, color: 'var(--color-warning-soft)' }}>
-              将删除：{purgeSummary(preview)}
+              {t('privacy.previewLine', { summary: purgeSummary(preview, t) })}
             </div>
           )}
           <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-            实跑会写 audit（privacy.purge）后删除；归档只删 archive_dir 内 topics/**/*.md 与 _history/**。
+            {t('privacy.auditNote')}
           </div>
         </div>
       )}

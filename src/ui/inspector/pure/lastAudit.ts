@@ -6,6 +6,11 @@
  * 只有"存在该字段的 audit 行"才显示"上次修改"——从来没有被人工改过的字段
  * 不显示来源（不是黑箱，是诚实：还没人改过）。
  */
+import { t as translateNow } from '../../i18n/index.js';
+import type { DictKey } from '../../i18n/dict.js';
+
+export type Translator = (key: DictKey, vars?: Readonly<Record<string, string | number>>) => string;
+
 export interface AuditView {
   field: string;
   before: string | null;
@@ -23,8 +28,7 @@ export function lastAuditByField(audits: readonly AuditView[], field: string): A
 }
 
 /** `上次修改：{source} @ {ts}` 的单行文案；ts 原样输出（ISO），不在这里做时区格式化 */
-export function lastModifiedLine(audit: AuditView | null): string | null {
+export function lastModifiedLine(audit: AuditView | null, t: Translator = translateNow): string | null {
   if (audit === null) return null;
-  const source = audit.source ?? 'unknown';
-  return `上次修改：${source} @ ${audit.ts}`;
+  return t('inspector.lastModified', { source: audit.source ?? 'unknown', ts: audit.ts });
 }

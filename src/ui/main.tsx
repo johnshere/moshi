@@ -40,6 +40,8 @@ import { useSelection } from './state/selection.js';
 import { FilterBar } from './filter/FilterBar.js';
 import { FactsTable } from './table/FactsTable.js';
 import { Inspector } from './inspector/Inspector.js';
+import { useT } from './i18n/index.js';
+import type { DictKey } from './i18n/dict.js';
 
 /**
  * 首屏默认页大小：与服务端 `DEFAULT_GRAPH_LIMIT` 对齐。
@@ -55,11 +57,11 @@ const FULL_LIMIT = 5000;
 type View = '3d' | '2d' | 'table';
 const VIEW_KEY = 'view';
 
-/** 三个视图按钮：标题 / 说明都在这里，避免 JSX 里再写一遍三元 */
-const VIEWS: readonly { v: View; label: string; title: string; tag: string }[] = [
-  { v: '3d', label: '3D', title: '3D 发现视图：拖动旋转、点击选中', tag: '3D / §10.3' },
-  { v: '2d', label: '2D', title: '2D 确认视图：看清拓扑、精确点选', tag: '2D / §8.7' },
-  { v: 'table', label: '表格', title: '表格视图：游标分页 + 虚拟滚动（10k 行首屏 < 500ms）', tag: '表格 / §10.8' },
+/** 三个视图按钮：标题 / 说明都在这里，避免 JSX 里再写一遍三元（V-10 起存 key，渲染时再取文案） */
+const VIEWS: readonly { v: View; labelKey: DictKey; titleKey: DictKey; tagKey: DictKey }[] = [
+  { v: '3d', labelKey: 'graph.view.d3.label', titleKey: 'graph.view.d3.title', tagKey: 'graph.view.d3.tag' },
+  { v: '2d', labelKey: 'graph.view.d2.label', titleKey: 'graph.view.d2.title', tagKey: 'graph.view.d2.tag' },
+  { v: 'table', labelKey: 'graph.view.table.label', titleKey: 'graph.view.table.title', tagKey: 'graph.view.table.tag' },
 ];
 
 function initialLimit(): number {
@@ -150,6 +152,7 @@ function useNow(active: boolean): number {
  * 那条闪烁的因果关系。活跃时必须带条数与时间，否则用户不知道亮的是谁引起的。
  */
 function ActivityNote(): JSX.Element {
+  const t = useT();
   const snapshot = useActivity((s) => s.snapshot);
   const hitId = useActivity((s) => s.hitId);
   const hitAt = useActivity((s) => s.hitAt);
@@ -157,9 +160,7 @@ function ActivityNote(): JSX.Element {
   const now = useNow(live);
   if (snapshot === null || hitId === null) {
     return (
-      <div style={{ color: 'var(--color-text-faint)' }}>
-        当前无活跃调用 · 画布默认沉默（点一个节点 = 一次命中，亮 4–6 秒）
-      </div>
+      <div style={{ color: 'var(--color-text-faint)' }}>{t('graph.activity.idle')}</div>
     );
   }
   const ageMs = Math.max(now - hitAt, 0);
@@ -167,12 +168,12 @@ function ActivityNote(): JSX.Element {
   const expired = ageMs >= ACTIVITY_TTL_MS;
   const truncated =
     snapshot.truncatedNodes > 0 || snapshot.truncatedEdges > 0
-      ? `（已截断 ${snapshot.truncatedNodes} 节点 / ${snapshot.truncatedEdges} 边，上限 64 / 256）`
+      ? t('graph.activity.truncated', { nodes: snapshot.truncatedNodes, edges: snapshot.truncatedEdges })
       : '';
   return (
     <div style={{ color: expired ? 'var(--color-text-faint)' : 'var(--color-text-secondary)' }}>
-      最近调用：命中 {snapshot.activeNodes} 条（1 跳）+ {snapshot.activeEdges} 条边 ·{' '}
-      {expired ? `已回落（${seconds} 秒前）` : `${seconds} 秒前`}
+      {t('graph.activity.hit', { nodes: snapshot.activeNodes, edges: snapshot.activeEdges })}
+      {expired ? t('graph.activity.expired', { seconds }) : t('graph.activity.ago', { seconds })}
       {truncated}
     </div>
   );
@@ -189,6 +190,7 @@ function ActivityNote(): JSX.Element {
  * 无 trace 时明确写「无」：留白会被当成"渲染坏了"，而"还没查询"本是正常状态。
  */
 function TraceNote(): JSX.Element {
+  const t = useT();
   const trace = useTrace((s) => s.trace);
   const error = useTrace((s) => s.error);
   const mode = useTrace((s) => s.mode);
@@ -197,29 +199,35 @@ function TraceNote(): JSX.Element {
   if (summary === null) {
     return (
       <div style={{ color: 'var(--color-text-faint)' }}>
-        证据链：无{error === null ? '' : `（${error}）`} · 查询一次后自动显示「直击 / 1 跳 / 2+ 跳」
+        {t('graph.trace.empty', {
+            err: error === null ? '' : t('common.paren', { text: error }),
+          })}
       </div>
     );
   }
   return (
     <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--color-text-secondary)' }}>
       <span style={{ color: mode === 'replay' ? 'var(--color-warning)' : 'var(--color-text-faint)' }}>
-        {mode === 'replay' ? `回放 ${replayId === null ? '' : replayId.slice(-8)}` : '实时'}
+        {mode === 'replay'
+          ? t('graph.trace.replay', { id: replayId === null ? '' : replayId.slice(-8) })
+          : t('graph.trace.live')}
       </span>
-      <span style={{ color: 'var(--color-text-secondary)' }}>证据链 {summary.query_id.slice(-8)}</span>
+      <span style={{ color: 'var(--color-text-secondary)' }}>
+        {t('graph.trace.title', { id: summary.query_id.slice(-8) })}
+      </span>
       <span>
         {summary.route} · {summary.source}/{summary.model_mode}
       </span>
       <span className="moshi-trace-badge" style={{ color: 'var(--color-text-primary)' }}>
-        ● 直击 {summary.direct}（亮节点 + 光晕，不画入射流）
+        {t('graph.trace.direct', { count: summary.direct })}
       </span>
       <span className="moshi-trace-badge" style={{ color: 'var(--color-accent-soft)' }}>
-        → 1 跳 {summary.hop1}（快流）
+        {t('graph.trace.hop1', { count: summary.hop1 })}
       </span>
       <span className="moshi-trace-badge" style={{ color: 'var(--color-text-muted)' }}>
-        → 2+ 跳 {summary.hop2}（慢流）
+        {t('graph.trace.hop2', { count: summary.hop2 })}
       </span>
-      <span>证据边 {summary.edges}</span>
+      <span>{t('graph.trace.edges', { count: summary.edges })}</span>
     </div>
   );
 }
@@ -241,6 +249,7 @@ interface ImpactPreviewCounts {
 }
 
 function ImpactPreview({ ids }: { ids: readonly string[] }): JSX.Element {
+  const t = useT();
   const [busy, setBusy] = useState(false);
   const [counts, setCounts] = useState<ImpactPreviewCounts | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -276,20 +285,27 @@ function ImpactPreview({ ids }: { ids: readonly string[] }): JSX.Element {
   return (
     <span style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
       <button type="button" onClick={() => void preview()} disabled={busy} style={buttonStyle}>
-        {busy ? '预览中…' : '预览影响'}
+        {busy ? t('graph.preview.running') : t('graph.preview.title')}
       </button>
       {counts !== null && (
         <span style={{ marginLeft: 8, color: 'var(--color-text-secondary)' }}>
-          事实 {counts.facts} · 边 {counts.edges} · 主题 {counts.topics} · 级联失效{' '}
-          {counts.invalidated_by_cascade}
+          {t('graph.preview.counts', {
+            facts: counts.facts,
+            edges: counts.edges,
+            topics: counts.topics,
+            cascade: counts.invalidated_by_cascade,
+          })}
         </span>
       )}
-      {error !== null && <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>预览失败：{error}</span>}
+      {error !== null && (
+        <span style={{ marginLeft: 8, color: 'var(--color-danger)' }}>{t('graph.preview.error', { error })}</span>
+      )}
     </span>
   );
 }
 
 function App({ route }: { route: RouteInfo }): JSX.Element {
+  const t = useT();
   const [data, setData] = useState<GraphPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -404,19 +420,19 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
   }, [selectedFocusId]);
 
   // 深链有 id 但当前图里没有（被 limit 截掉 / 已删除）→ 取消选中并提示，不装作选中。
-  const [focusNote, setFocusNote] = useState<string | null>(null);
+  const [focusMiss, setFocusMiss] = useState(false);
   useEffect(() => {
     if (route.focusId === null || data === null) {
-      setFocusNote(null);
+      setFocusMiss(false);
       return;
     }
     if (data.nodes.some((node) => node.id === route.focusId)) {
-      setFocusNote(null);
+      setFocusMiss(false);
       return;
     }
     useSelection.getState().clear();
-    setFocusNote(`深链 focus=${route.focusId} 不在当前图中（limit=${limit}），已取消选中`);
-  }, [data, route.focusId, limit]);
+    setFocusMiss(true);
+  }, [data, route.focusId]);
 
   // 表格视图的「聚焦」= 选中 + 滚到行；行是虚拟滚动的，等它进 DOM 再滚。
   useEffect(() => {
@@ -441,7 +457,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
   const fps = view === '2d' ? stats2d?.fps : stats3d?.fps;
   const is2d = view === '2d';
   const isTable = view === 'table';
-  const tag = VIEWS.find((v) => v.v === view)?.tag ?? '3D / §10.3';
+  const tagKey = VIEWS.find((v) => v.v === view)?.tagKey ?? 'graph.view.d3.tag';
   const hitId = useActivity((s) => s.hitId);
   const seq = useActivity((s) => s.seq);
 
@@ -486,8 +502,8 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 14, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
-            默识 · 记忆图谱{' '}
-            <span style={{ color: 'var(--color-text-faint)', fontSize: 12 }}>{tag}</span>
+            {t('graph.title')}{' '}
+            <span style={{ color: 'var(--color-text-faint)', fontSize: 12 }}>{t(tagKey)}</span>
           </div>
           <span style={{ pointerEvents: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
             {VIEWS.map((item) => (
@@ -497,15 +513,15 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                 onClick={() => showView(item.v)}
                 disabled={view === item.v}
                 aria-pressed={view === item.v}
-                title={item.title}
+                title={t(item.titleKey)}
                 style={switchStyle(view === item.v)}
               >
-                {item.label}
+                {t(item.labelKey)}
               </button>
             ))}
           </span>
           <span style={{ marginLeft: 'auto' }}>
-            {loading && <span className="moshi-spinner" data-testid="hud-spinner" role="status" aria-label="加载中" />}
+            {loading && <span className="moshi-spinner" data-testid="hud-spinner" role="status" aria-label={t('common.loading')} />}
           </span>
         </div>
         {/* 筛选条：三视图共享同一份状态（详设 §10.2），URL 是唯一真相源，写 URL 可分享可回退 */}
@@ -515,8 +531,8 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
         {/* 表格态的状态栏在表格自己的底栏里（行数 / 请求数 / fps 钩子），HUD 不再重复 */}
         {!isTable && (
           <div>
-            <Badge label="节点" value={meta === undefined ? '—' : `${meta.returned_nodes} / ${meta.total_nodes}`} />
-            <Badge label="边" value={meta === undefined ? '—' : `${meta.returned_edges} / ${meta.total_edges}`} />
+            <Badge label={t('graph.stat.nodes')} value={meta === undefined ? '—' : `${meta.returned_nodes} / ${meta.total_nodes}`} />
+            <Badge label={t('graph.stat.edges')} value={meta === undefined ? '—' : `${meta.returned_edges} / ${meta.total_edges}`} />
             {!is2d && (
               <Badge
                 label="draw calls"
@@ -524,11 +540,11 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
               />
             )}
             <Badge label="fps" value={fps === undefined ? '—' : fps.toFixed(1)} />
-            {!is2d && <Badge label="标签" value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
-            {is2d && <Badge label="选中" value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
+            {!is2d && <Badge label={t('graph.stat.labels')} value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
+            {is2d && <Badge label={t('graph.stat.selected')} value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
             <span style={{ pointerEvents: 'auto' }}>
               <button type="button" onClick={() => void load(limit, scope)} style={buttonStyle}>
-                {loading ? '加载中…' : '刷新'}
+                {loading ? t('common.loading') : t('graph.refresh')}
               </button>
               {meta !== undefined && meta.returned_nodes < meta.total_nodes && (
                 <button
@@ -536,7 +552,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                   onClick={() => void load(FULL_LIMIT, scope)}
                   style={{ ...buttonStyle, background: 'var(--color-bg-raised)', color: 'var(--color-warning)', border: '1px solid var(--color-warning-dim)', marginLeft: 6 }}
                 >
-                  加载全量（{FULL_LIMIT}）
+                  {t('graph.loadAll', { limit: FULL_LIMIT })}
                 </button>
               )}
               {selectedIds.size >= 2 && <ImpactPreview ids={[...selectedIds]} />}
@@ -545,19 +561,23 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
         )}
         {!isTable && meta !== undefined && meta.truncated && (
           <div style={{ color: 'var(--color-warning)' }}>
-            结果被截断：只返回了 {meta.returned_nodes} / {meta.total_nodes} 个节点（limit={meta.limit}）。
-            点「加载全量」一次取满（{FULL_LIMIT}），或用 `?limit=` / cursor 分批取。
+            {t('graph.truncated', {
+              returned: meta.returned_nodes,
+              total: meta.total_nodes,
+              limit: meta.limit,
+              full: FULL_LIMIT,
+            })}
           </div>
         )}
         {!isTable && meta !== undefined && meta.nodes_without_layout > 0 && (
           <div style={{ color: 'var(--color-text-muted)' }}>
-            另有 {meta.nodes_without_layout} 个活跃事实还没有 layout 坐标，未参与绘制。
+            {t('graph.noLayout', { count: meta.nodes_without_layout })}
           </div>
         )}
-        {!isTable && error !== null && <div style={{ color: 'var(--color-danger)' }}>取数失败：{error}</div>}
-        {!isTable && focusNote !== null && (
+        {!isTable && error !== null && <div style={{ color: 'var(--color-danger)' }}>{t('graph.loadError', { error })}</div>}
+        {!isTable && focusMiss && (
           <div style={{ color: 'var(--color-warning)' }} data-testid="focus-miss">
-            {focusNote}
+            {t('graph.focusMiss', { focus: route.focusId ?? '', limit })}
           </div>
         )}
         {!isTable && <ActivityNote />}
@@ -576,9 +596,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
             pointerEvents: 'none',
           }}
         >
-          {is2d
-            ? '拖动平移 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 点空白取消选中 · 空白处拖框 = 框选（Shift 合并、Esc 清空） · 坐标取布局表的 (x, z)，前端不跑布局'
-            : '拖动旋转 · 滚轮缩放 · 点击节点 = 选中（放大 + 常显标签） · 标签只在活跃层、且离相机比整图半径更近时出现 · Y 四层 = strength'}
+          {is2d ? t('graph.help.d2') : t('graph.help.d3')}
         </div>
       )}
     </div>
