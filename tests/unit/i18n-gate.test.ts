@@ -27,11 +27,6 @@ interface AllowedLiteral {
 
 const ALLOWED_LITERALS: readonly AllowedLiteral[] = [
   {
-    file: 'src/ui/access/AccessPage.tsx',
-    values: ['新增', '修改', '删除'],
-    why: 'InstallStep.action 是服务端下发的码值，UI 层不翻译（待后端改码，I-70）',
-  },
-  {
     file: 'src/ui/graph/pure/encoding.ts',
     values: ['[失效]'],
     why: '节点 label 的服务端标签前缀，属数据契约，只做匹配不做展示替换',

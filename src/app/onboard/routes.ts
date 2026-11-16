@@ -47,36 +47,10 @@ export const HOST_LABELS: Record<HookHost, string> = {
 };
 
 /**
- * 手动安装文案（设计 §16.6 R12）：**分两类**——插件版 / MCP 版，各客户端各一段。
- * 文案与设计 §7.3 / §11 同源，不另起一套说法。
+ * 手动安装文案（设计 §16.6 R12）**不在服务端**（D-184 / D-187）：
+ * 它是纯静态说明，跟着界面语言走，正本在 `src/ui/i18n/dict.ts` 的 `access.manualText.*`。
+ * 服务端只下发宿主/类型（`host` + `kind`），界面自己取文案——这样中英文案只有一份。
  */
-export const MANUAL_HOOK: Record<HookHost, string> = {
-  magpie: [
-    '1. 找到 Magpie 配置根：~/.config/magpie（plugins/ 是插件包目录，plugins.json 是注册表）',
-    '2. 把安装器产出的包目录整个拷到 <配置根>/plugins/node_modules/moshi/（目录名就是插件名）',
-    '3. 编辑 <配置根>/plugins.json（注册表在配置根，不在 plugins/ 里），追加 {"spec":"<该目录的绝对路径>"}',
-    '4. 重启 Magpie（或结束 magpie-bun 让宿主重拉），app.log 出现该插件加载记录即生效',
-  ].join('\n'),
-  'claude-code': [
-    '在 ~/.claude/settings.json 加 hooks 段（时机：UserPromptSubmit / PostToolUse / Stop）：',
-    '{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"moshi hook emit --host claude-code --turn user_prompt","timeout":30}]}]}}',
-    '注意：一次性入口 `moshi hook emit` 尚未实现（设计 §12.3：本轮只登记），现在配了也跑不通。',
-  ].join('\n'),
-  dsh: 'DSH 需要宿主内插件（cordis.patch.yml 挂载），本轮未实现（设计 §11.2）。',
-};
-
-export const MANUAL_MCP: Record<HookHost, string> = {
-  magpie: [
-    '在 Magpie 的 MCP 配置文件里加入 moshi 服务端（MCP 版本轮未实现，仅列出格式）：',
-    '{"mcpServers":{"moshi":{"command":"node","args":["<moshi 安装目录>/dist/app/main.js","mcp"]}}}',
-  ].join('\n'),
-  'claude-code': [
-    '在 ~/.claude.json（或项目 .mcp.json）的 mcpServers 段加入：',
-    '{"moshi":{"command":"node","args":["<moshi 安装目录>/dist/app/main.js","mcp"]}}',
-  ].join('\n'),
-  dsh: '在 DSH 的 MCP 配置里加入同样的 stdio 服务端条目（本轮只显示，不做写入）。',
-};
-
 export interface OnboardRoutesDeps {
   key(host: HookHost, kind: 'hook' | 'mcp'): string;
 }
@@ -154,7 +128,6 @@ export async function onboardRoutes(
     ];
     return reply.send({
       plans,
-      manual: { hook: MANUAL_HOOK, mcp: MANUAL_MCP },
       labels: HOST_LABELS,
       /** 界面直接用它渲染按钮文案（一处定义） */
       keys: plans.map((plan) => ({ host: plan.host, kind: plan.kind, key: installKey(plan.host, plan.kind) })),
@@ -199,7 +172,7 @@ function planHookPlaceholder(host: HookHost): InstallPlan {
     host,
     kind: 'hook',
     supported: false,
-    reason: HOST_LABELS[host] === 'Claude Code' ? '缺少一次性钩子入口（moshi hook emit 未实现）' : '缺少宿主内插件（设计 §11.2 未实现）',
+    reason: host === 'claude-code' ? 'hook_emit_missing' : 'host_plugin_missing',
     root: null,
     version: null,
     steps: [],

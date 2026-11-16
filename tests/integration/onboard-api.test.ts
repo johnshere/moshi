@@ -150,8 +150,15 @@ describe('/hook/api/install 安装计划与执行', () => {
   it('计划：六个条目（3 客户端 × 插件/MCP），只有 magpie+hook 可装', async () => {
     const pluginRoot = await makeApp();
     const body = (await call('GET', '/hook/api/install/plan')).json() as {
-      plans: { host: string; kind: string; supported: boolean; root: string | null; steps: unknown[] }[];
-      manual: { hook: Record<string, string>; mcp: Record<string, string> };
+      plans: {
+        host: string;
+        kind: string;
+        supported: boolean;
+        reason: string | null;
+        root: string | null;
+        steps: { action: string; path: string; note?: { code: string } }[];
+        risk: string | null;
+      }[];
       keys: { host: string; kind: string; key: string }[];
     };
     expect(body.plans.map((plan) => `${plan.host}:${plan.kind}`)).toEqual([
@@ -167,11 +174,17 @@ describe('/hook/api/install 安装计划与执行', () => {
     expect(magpieHook?.root).toBe(pluginRoot);
     expect(magpieHook?.steps.length).toBe(5);
     expect(body.plans.filter((plan) => plan.supported).length).toBe(1);
-    // 手动文案两类齐全（R12：插件版/MCP 版各客户端都要有）
-    for (const host of ['magpie', 'claude-code', 'dsh']) {
-      expect(body.manual.hook[host]?.length).toBeGreaterThan(0);
-      expect(body.manual.mcp[host]?.length).toBeGreaterThan(0);
-    }
+    // I-70 / D-187：响应只带码值 + 数据，文案在界面词典
+    expect(body).not.toHaveProperty('manual');
+    expect(magpieHook?.steps.map((step) => step.action)).toEqual(['add', 'add', 'add', 'add', 'add']);
+    expect(magpieHook?.steps[0]?.note).toMatchObject({ code: 'from_package' });
+    expect(magpieHook?.steps[4]?.note).toMatchObject({ code: 'registry_add' });
+    expect(magpieHook?.risk).toBe('reload_plugin_host');
+    const reasonOf = (host: string, kind: string): string | null =>
+      body.plans.find((plan) => plan.host === host && plan.kind === kind)?.reason ?? null;
+    expect(reasonOf('claude-code', 'hook')).toBe('hook_emit_missing');
+    expect(reasonOf('dsh', 'hook')).toBe('host_plugin_missing');
+    expect(reasonOf('magpie', 'mcp')).toBe('mcp_not_implemented');
     expect(body.keys.find((item) => item.host === 'magpie' && item.kind === 'hook')?.key).toBe('magpie-hook');
   });
 

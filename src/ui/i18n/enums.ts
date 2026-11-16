@@ -16,6 +16,10 @@ const DOMAIN_PREFIX = {
   turn: 'enum.turn.',
   outcome: 'enum.outcome.',
   install: 'enum.install.',
+  // I-70 / D-187：安装计划的码值（以前服务端直接下发中文句子）
+  installAction: 'enum.installAction.',
+  installReason: 'enum.installReason.',
+  installRisk: 'enum.installRisk.',
 } as const satisfies Record<string, string>;
 
 export type EnumDomain = keyof typeof DOMAIN_PREFIX;

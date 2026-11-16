@@ -70,11 +70,37 @@ export function pluginRootCandidates(home: string, env: NodeJS.ProcessEnv): read
   ];
 }
 
-/** 计划里的一条动作：`路径` + `动作`，两列都要显示给用户（二次确认弹窗原样渲染） */
+/**
+ * 计划里的一条动作：`路径` + `动作`，两列都要显示给用户（二次确认弹窗原样渲染）。
+ *
+ * **码值不翻译**（D-184 / D-187）：`action` 是数据契约，界面用 `enumLabel('installAction', …)`
+ * 映射成当前语言；`note` 同理只下发码与数据（`file` / `spec`），文案在前端词典。
+ */
+export type InstallAction = 'add' | 'update' | 'remove';
+
+/** 不支持/不可安装的原因码（界面 `enumLabel('installReason', …)`；未知值原样显示） */
+export type InstallReasonCode =
+  | 'plugin_dir_missing'
+  | 'package_missing'
+  | 'hook_emit_missing'
+  | 'host_plugin_missing'
+  | 'mcp_not_implemented'
+  /** 卸载：没有可卸的记录（不是失败：状态本来就是 absent） */
+  | 'nothing_to_uninstall';
+
+/** 已知不确定性码（设计 §16.10 K7）：显示在确认弹窗底部，不隐藏 */
+export type InstallRiskCode = 'reload_plugin_host';
+
+/** 一条动作的附注：只给码 + 数据，句子由前端拼 */
+export type InstallStepNote =
+  | { code: 'from_package'; file: string }
+  | { code: 'registry_present' }
+  | { code: 'registry_add'; spec: string };
+
 export interface InstallStep {
-  action: '新增' | '修改' | '删除';
+  action: InstallAction;
   path: string;
-  note?: string;
+  note?: InstallStepNote;
 }
 
 export interface InstallPlan {
@@ -82,13 +108,13 @@ export interface InstallPlan {
   kind: 'hook' | 'mcp';
   /** false = 这条路本轮不支持/没找到目标（不是失败） */
   supported: boolean;
-  /** 不支持或不可安装的原因，直接显示 */
-  reason: string | null;
+  /** 不支持或不可安装的原因码；由界面译成文案 */
+  reason: InstallReasonCode | null;
   root: string | null;
   version: string | null;
   steps: readonly InstallStep[];
   /** 已知不确定性（设计 §16.10 K7）：显示在确认弹窗底部，不隐藏 */
-  risk: string | null;
+  risk: InstallRiskCode | null;
 }
 
 export interface InstallOptions {
@@ -107,8 +133,7 @@ export interface InstallOutcome {
   written: readonly string[];
 }
 
-const RISK_NOTE =
-  '插件以"绝对路径 spec"注册（与 `magpie plugin add <本地路径>` 同形）；装完需重载 plugin-host（重启 Magpie 或结束 magpie-bun）才会被宿主导入。';
+const RISK_CODE: InstallRiskCode = 'reload_plugin_host';
 
 /** 从当前文件位置向上找工程根（含 packages/magpie-moshi 的那一层） */
 function findSourceDir(start: string): string | null {
@@ -201,14 +226,14 @@ export function planMagpieHook(opts: InstallOptions): InstallPlan {
     kind: 'hook',
     root: null,
     version: null,
-    risk: RISK_NOTE,
+    risk: RISK_CODE,
   };
   const root = resolveRoot(opts);
   if (root === null) {
     return {
       ...base,
       supported: false,
-      reason: '没找到 Magpie 插件目录（~/.config/magpie/plugins、%LOCALAPPDATA%/magpie/plugins 均不存在）',
+      reason: 'plugin_dir_missing',
       steps: [],
     };
   }
@@ -218,7 +243,7 @@ export function planMagpieHook(opts: InstallOptions): InstallPlan {
       ...base,
       root,
       supported: false,
-      reason: '安装包没打包进当前版本（dist/magpie-moshi 与 packages/magpie-moshi 都不存在）',
+      reason: 'package_missing',
       steps: [],
     };
   }
@@ -230,16 +255,17 @@ export function planMagpieHook(opts: InstallOptions): InstallPlan {
   const files = targetFiles(root);
 
   const steps: InstallStep[] = files.map((item) => ({
-    action: existsSync(item.file) ? '修改' : '新增',
+    action: existsSync(item.file) ? 'update' : 'add',
     path: item.file,
-    note: `来自 ${path.join(sourceDir, item.name)}`,
+    note: { code: 'from_package', file: path.join(sourceDir, item.name) },
   }));
-  const pluginsAction: InstallStep['action'] =
-    specs.length === specsNext.length ? '修改' : existsSync(pluginsFile) ? '修改' : '新增';
+  // 注册表已在清单里 = 只确保可加载（update）；否则真追加 path spec（add）
+  const pluginsAction: InstallAction = specs.length === specsNext.length ? 'update' : 'add';
   steps.push({
     action: pluginsAction,
     path: pluginsFile,
-    note: specs.length === specsNext.length ? '已在清单中，仅确保可加载' : `以路径 spec 注册：${spec}`,
+    note:
+      specs.length === specsNext.length ? { code: 'registry_present' } : { code: 'registry_add', spec },
   });
 
   return { ...base, root, version, supported: true, reason: null, steps };
@@ -251,7 +277,7 @@ export function planMcp(host: HookHost): InstallPlan {
     host,
     kind: 'mcp',
     supported: false,
-    reason: 'MCP 安装本轮未实现（设计 §16.7：只显示不处理）',
+    reason: 'mcp_not_implemented',
     root: null,
     version: null,
     steps: [],
@@ -379,7 +405,7 @@ export function uninstallMagpieHook(opts: InstallOptions): InstallOutcome {
     host: 'magpie',
     kind: 'hook',
     supported: record !== undefined && record.state === 'installed',
-    reason: record !== undefined && record.state === 'installed' ? null : '没有可卸载的安装记录',
+    reason: record !== undefined && record.state === 'installed' ? null : 'nothing_to_uninstall',
     root: record?.path ?? null,
     version: record?.version ?? null,
     steps: [],

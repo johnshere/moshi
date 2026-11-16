@@ -16,8 +16,13 @@ import { resolveToken } from '../api.js';
 import { navigate } from './navigate.js';
 import { useT } from '../i18n/index.js';
 import type { DictKey } from '../i18n/dict.js';
-
-type HookHost = 'magpie' | 'claude-code' | 'dsh';
+import {
+  actionText,
+  reasonText,
+  riskText,
+  type HookHost,
+  type PlanPayload,
+} from '../access/plan.js';
 
 interface HostDetection {
   hit: boolean;
@@ -29,29 +34,6 @@ interface OnboardPayload {
   detected: { at: string; hosts: Record<HookHost, HostDetection> } | null;
   labels: Record<HookHost, string>;
   installs: Record<string, { state: string; at: string | null }>;
-}
-
-interface InstallStep {
-  action: string;
-  path: string;
-  note?: string;
-}
-
-interface InstallPlan {
-  host: HookHost;
-  kind: 'hook' | 'mcp';
-  supported: boolean;
-  reason: string | null;
-  root: string | null;
-  version: string | null;
-  steps: readonly InstallStep[];
-  risk: string | null;
-}
-
-interface PlanPayload {
-  plans: readonly InstallPlan[];
-  labels: Record<HookHost, string>;
-  keys: readonly { host: HookHost; kind: 'hook' | 'mcp'; key: string }[];
 }
 
 async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
@@ -283,7 +265,7 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                                 .join(t('common.listSep')),
                             })
                           : t('onboard.notDetected')}
-                        {unusable ? t('onboard.unsupported', { reason: plan.reason ?? '' }) : ''}
+                        {unusable ? t('onboard.unsupported', { reason: reasonText(plan.reason) }) : ''}
                       </span>
                     </span>
                   </label>
@@ -337,12 +319,12 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
                   {plan.steps.map((step) => (
                     <li key={`${step.action}:${step.path}`}>
-                      <span style={mutedStyle}>{step.action} </span>
+                      <span style={mutedStyle}>{actionText(step.action)} </span>
                       <code style={{ fontSize: 11 }}>{step.path}</code>
                     </li>
                   ))}
                 </ul>
-                {plan.risk !== null ? <div style={{ ...mutedStyle, marginTop: 4 }}>{t('onboard.risk', { risk: plan.risk })}</div> : null}
+                {plan.risk !== null ? <div style={{ ...mutedStyle, marginTop: 4 }}>{t('onboard.risk', { risk: riskText(plan.risk) })}</div> : null}
               </div>
             ))}
             {error !== null ? <div style={{ ...mutedStyle, color: 'var(--color-status-error, #e05252)', marginTop: 10 }}>{error}</div> : null}

@@ -18,10 +18,21 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Reac
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 import { enumLabel } from '../i18n/enums.js';
+import {
+  actionText,
+  manualTextKey,
+  noteText,
+  reasonText,
+  riskText,
+  type HookHost,
+  type InstallPlan,
+  type PlanPayload,
+} from './plan.js';
 
 // ── 服务端契约（TS 侧镜像，服务端不导给 UI，避免 UI 依赖 app 层） ──
+// 安装计划（InstallPlan / PlanPayload）与它的码→文案映射在 `./plan.js`（I-70 / D-187）。
 
-export type HookHost = 'magpie' | 'claude-code' | 'dsh';
+export type { HookHost } from './plan.js';
 
 export type InstallState = 'absent' | 'installed' | 'failed' | 'unsupported';
 
@@ -55,23 +66,6 @@ export interface TracePayload {
   capacity: number;
 }
 
-export interface InstallStep {
-  action: '新增' | '修改' | '删除';
-  path: string;
-  note?: string;
-}
-
-export interface InstallPlan {
-  host: HookHost;
-  kind: 'hook' | 'mcp';
-  supported: boolean;
-  reason: string | null;
-  root: string | null;
-  version: string | null;
-  steps: readonly InstallStep[];
-  risk: string | null;
-}
-
 export interface InstallRecord {
   state: InstallState;
   at: string | null;
@@ -80,13 +74,6 @@ export interface InstallRecord {
   reason: string | null;
   files: readonly string[];
   backup: string | null;
-}
-
-export interface PlanPayload {
-  plans: readonly InstallPlan[];
-  manual: { hook: Record<HookHost, string>; mcp: Record<HookHost, string> };
-  labels: Record<HookHost, string>;
-  keys: readonly { host: HookHost; kind: 'hook' | 'mcp'; key: string }[];
 }
 
 export interface OnboardPayload {
@@ -314,7 +301,9 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
       setResultText(
         res.ok
           ? t('access.result.installed', { path: res.record.path ?? t('access.result.targetDir') })
-          : t('access.result.installFail', { reason: res.record.reason ?? t('access.result.unknownReason') }),
+          : t('access.result.installFail', {
+              reason: reasonText(res.record.reason) || t('access.result.unknownReason'),
+            }),
       );
       setResultTone(res.ok ? 'ok' : 'fail');
       setConfirming(null);
@@ -467,7 +456,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
                           ? enumLabel('install', 'absent')
                           : t('access.notSupported', {
                               label: enumLabel('install', 'unsupported'),
-                              reason: plan.reason ?? '',
+                              reason: reasonText(plan.reason),
                             })}
                   </span>
                   <span style={{ flex: 1 }} />
@@ -615,7 +604,7 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
               </button>
             </div>
             <pre style={preStyle} data-testid="access-manual-text">
-              {(manual.kind === 'hook' ? plans?.manual.hook[manual.host] : plans?.manual.mcp[manual.host]) ?? t('access.manual.empty')}
+              {t(manualTextKey(manual.host, manual.kind))}
             </pre>
           </div>
         </div>
@@ -630,15 +619,15 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
             <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
               {confirming.steps.map((step) => (
                 <li key={`${step.action}:${step.path}`}>
-                  <span style={mutedStyle}>{step.action} </span>
+                  <span style={mutedStyle}>{actionText(step.action)} </span>
                   <code style={{ fontSize: 11 }}>{step.path}</code>
                   {step.note === undefined ? null : (
-                    <span style={mutedStyle}>{t('common.paren', { text: step.note })}</span>
+                    <span style={mutedStyle}>{t('common.paren', { text: noteText(step.note) ?? '' })}</span>
                   )}
                 </li>
               ))}
             </ul>
-            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>{t('access.confirm.risk', { risk: confirming.risk })}</div> : null}
+            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>{t('access.confirm.risk', { risk: riskText(confirming.risk) })}</div> : null}
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
               <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => setConfirming(null)}>
                 {t('access.confirm.cancel')}
