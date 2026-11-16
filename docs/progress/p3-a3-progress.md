@@ -30,7 +30,7 @@
 ## 阻断（21:20）
 
 - 本机库重编码时，sidecar 写 `~/.moshi/sidecar.ready.tmp` 被拒：venv 的 python.exe 带低完整性标签（2026-11-06 更正：继承父目录 `E:\Workspace` 的 `Low (OI)(CI)` 标签，非 DSH 沙箱创建所致），记 B-7。
-- 详见 `docs/待处理-sidecar-venv低完整性标签.md`。
+- 详见 `docs/任务台账.md` B-7。
 - vec-sync 真 sidecar 全链路 3/3 通过（临时目录在工程内，同为低完整性，所以不受影响）。
 
 ## 环境供给遗留（2026-11-05 并入本卡，B-7 按工程缺陷处理，D-149）
