@@ -64,7 +64,7 @@ const SourceInstanceSchema = z
     /** 实例 id，也是游标 key；缺省 = adapter 名 */
     id: z.string().min(1).optional(),
     adapter: z.string().min(1),
-    /** 会话根目录；缺省 claude-code = `<home>/.claude/projects`，generic-jsonl = `<data_dir>/inbox` */
+    /** 会话根目录；缺省 claude-code = `<home>/.claude/projects`，dsh = `<home>/.dsh/sessions`，generic-jsonl = `<data_dir>/inbox` */
     root: z.string().optional(),
     enabled: z.boolean().default(true),
     /** 该实例的字段映射（仅 generic-jsonl 用） */
@@ -76,7 +76,9 @@ const SourceSpecSchema = z.union([z.string().min(1), SourceInstanceSchema]);
 
 const IngestSchema = z
   .object({
-    sources: z.array(SourceSpecSchema).default(['claude-code']),
+    // 默认扫两个本机会话源：Claude Code 与 DSh（`~/.dsh/sessions`）。
+    // 新装或配置里没写 ingest 段时两者都采集，任一目录不存在只是标记不可用。
+    sources: z.array(SourceSpecSchema).default(['claude-code', 'dsh']),
     harvest_cron: z.string().default('0 3 * * *'),
     harvest_batch: positiveInt.default(200),
     import_batch: positiveInt.default(500),

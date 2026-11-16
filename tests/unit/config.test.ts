@@ -33,7 +33,7 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.server.port).toBe(9836);
     expect(cfg.model.gat_mode).toBe('off');
     expect(cfg.retrieval.rrf_k).toBe(60);
-    expect(cfg.ingest.sources).toEqual(['claude-code']);
+    expect(cfg.ingest.sources).toEqual(['claude-code', 'dsh']);
   });
 
   it('拼错的键启动失败，且错误信息指出键名', () => {
@@ -157,13 +157,19 @@ describe('配置加载（详设 §3.6）', () => {
 });
 
 describe('resolveSources（P3-A8 source 实例）', () => {
-  it('旧字符串写法：id=adapter，claude-code 根 = <home>/.claude/projects', () => {
+  it('旧字符串写法：id=adapter，claude-code / dsh 各用默认根', () => {
     const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'a.yaml'), home: HOME });
     expect(resolveSources(cfg, HOME)).toEqual([
       {
         id: 'claude-code',
         adapter: 'claude-code',
         root: path.join(HOME, '.claude', 'projects'),
+        enabled: true,
+      },
+      {
+        id: 'dsh',
+        adapter: 'dsh',
+        root: path.join(HOME, '.dsh', 'sessions'),
         enabled: true,
       },
     ]);

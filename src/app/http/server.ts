@@ -14,6 +14,7 @@
  * 裸 `http.createServer(app)` 让 Node.js 标准事件循环驱动 Fastify，这是官方推荐做法。
  */
 import http from 'node:http';
+import os from 'node:os';
 import Fastify from 'fastify';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -47,6 +48,7 @@ import { defaultUiDistDir, staticRoutes } from './static.js';
 import { HookTraceStore } from '../../core/hook/trace.js';
 import { TraceSink } from '../../core/hook/traceSink.js';
 import { hookRoutes, createHookConnection, type HookConnection } from './routes/hook.js';
+import { importRoutes, type ImportSpawn } from './routes/import.js';
 import { onboardRoutes } from '../onboard/routes.js';
 import type { HookDeps } from '../hook/service.js';
 import { createInjectThrottle, type InjectThrottle } from '../hook/throttle.js';
@@ -105,6 +107,8 @@ export interface HttpDeps {
   encode?: (text: string) => Promise<Float32Array | null>;
   /** 钩子召回的模型打分（同上） */
   score?: McpDeps['score'];
+  /** 历史导入的子进程注入（测试用假 spawn；`null` = 强制进程内降级） */
+  importSpawn?: ImportSpawn | null;
 }
 
 export async function buildHttpApp(deps: HttpDeps) {
@@ -254,6 +258,16 @@ export async function buildHttpApp(deps: HttpDeps) {
     traceDir: dataPaths(deps.cfg).hook,
     sink: hookTraceSink,
     traceStore: hookTrace,
+  });
+
+  // ── 历史会话导入（接入点页）：子进程跑，daemon 主线程只收状态 ──
+  await app.register(importRoutes, {
+    prefix: '/api',
+    db: deps.db,
+    cfg: deps.cfg,
+    home: deps.home ?? os.homedir(),
+    paths: dataPaths(deps.cfg),
+    ...(deps.importSpawn === undefined ? {} : { spawn: deps.importSpawn }),
   });
 
   // ── 客户端入驻（Z-01C-h / i，设计 §16.3~§16.6）：探测 / 状态 / 安装计划 / 安装 ──

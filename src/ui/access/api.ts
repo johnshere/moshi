@@ -126,3 +126,59 @@ export async function purgeTraceLogs(): Promise<{ disk_removed: number; memory_r
     confirm: 'PURGE',
   });
 }
+
+/**
+ * 历史会话导入的客户端契约（后端契约已冻结）。
+ *
+ * - `POST /api/import` body `{since}` → 202 `{ok, since, started_at}`；
+ *   400 `E_INPUT`；409 `E_CONFLICT`（reason `import_running`：同一时刻只允许一次导入）
+ * - `GET  /api/import/status` → 运行态 + 上一次导入的结果汇总（`result` 为 null = 还没跑过）
+ */
+export interface ImportResultSummary {
+  sessions: number;
+  turns: number;
+  facts: number;
+  refreshed: number;
+  quarantined: number;
+  skipped: number;
+  failed: number;
+  unavailable: number;
+  promoted: number;
+  ms: number;
+}
+
+export interface ImportStatus {
+  running: boolean;
+  since: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  lines: string[];
+  result: ImportResultSummary | null;
+  error: string | null;
+}
+
+export interface ImportStarted {
+  ok: boolean;
+  since: string;
+  started_at: string;
+}
+
+/** 触发一次导入；409 已由后端判定「已有导入在执行」，这里统一成人话，其余错误用响应体 message。 */
+export async function postImport(since: string): Promise<ImportStarted> {
+  const res = await fetch('/api/import', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Moshi-Token': resolveToken(),
+    },
+    body: JSON.stringify({ since }),
+  });
+  if (res.status === 409) throw new Error('已有导入在执行');
+  if (!res.ok) throw new Error(await errorMessage(res));
+  return (await res.json()) as ImportStarted;
+}
+
+export async function fetchImportStatus(signal?: AbortSignal): Promise<ImportStatus> {
+  return getJson<ImportStatus>('/api/import/status', signal);
+}

@@ -39,6 +39,8 @@ export interface ImportArgs {
   sources?: string[];
   batchSize?: number;
   factsPerSecond?: number;
+  /** 机器可读模式：进度走 stderr，stdout 只输出一行 JSON（daemon 的 /api/import 用它） */
+  json?: boolean;
   help?: boolean;
 }
 
@@ -67,6 +69,10 @@ export function parseImportArgs(args: readonly string[]): ImportArgs {
     if (a === undefined) break;
     if (a === '--help' || a === '-h') {
       out.help = true;
+      continue;
+    }
+    if (a === '--json') {
+      out.json = true;
       continue;
     }
     const eq = a.indexOf('=');
@@ -115,6 +121,17 @@ export function normalizeSince(input: string): string {
     throw new MoshiError('E_INPUT', `--since 不是合法日期：${input}`, { input });
   }
   return new Date(ms).toISOString();
+}
+
+/**
+ * 导入的退出码口径（CLI 与 daemon 的 `/api/import` 共用）。
+ *
+ * 4 = 配置的源一个都用不上；部分源缺失不算失败——默认源是 `claude-code + dsh`，
+ * 机器上缺其中一个目录是常态。一个源都没配（`unavailable` 为空）只是"无事可做"，
+ * 仍算成功，所以这里要求 `unavailable` 非空才可能返回 4。
+ */
+export function importExitCode(sourceCount: number, unavailable: readonly string[]): number {
+  return unavailable.length > 0 && sourceCount - unavailable.length <= 0 ? 4 : 0;
 }
 
 /** 令牌桶式的简单限速：保证"每秒不超过 N 条" */
@@ -230,12 +247,13 @@ export const importCommand: Command = {
     if (parsed.help === true) {
       ctx.stdout(
         [
-          '用法：moshi import [--since 2025-01-01] [--source claude-code] [--batch 500] [--rate 20]',
+          '用法：moshi import [--since 2025-01-01] [--source claude-code] [--batch 500] [--rate 20] [--json]',
           '',
           '  --since   起始时间（缺省 1970-01-01，即全部历史）',
           '  --source  按 source id 过滤（也接受 adapter 名），可重复；缺省取配置 [ingest] sources',
           '  --batch   每批 annotation 数（默认取 [ingest] import_batch）',
           '  --rate    每秒最多写入多少条事实（默认 20，0 表示不限速）',
+          '  --json    进度走 stderr，stdout 只输出一行 JSON 结果（机器调用用）',
           '',
         ].join('\n'),
       );
@@ -259,6 +277,9 @@ export const importCommand: Command = {
       batchSize: parsed.batchSize ?? ctx.cfg.ingest.import_batch,
       factsPerSecond: parsed.factsPerSecond ?? 20,
     };
+    // `--json`：进度改走 stderr，stdout 留干净给最后一行 JSON
+    const json = parsed.json === true;
+    const progress = json ? ctx.stderr : ctx.stdout;
 
     const paths = dataPaths(ctx.cfg);
     const { db } = openDb({ file: paths.db });
@@ -268,12 +289,25 @@ export const importCommand: Command = {
         db,
         opts,
         importCursorsFile: paths.importCursors,
-        onProgress: (line) => {
-          ctx.stdout(line);
-        },
+        onProgress: progress,
       });
       // CLI 上写错的 --source 与"配置的源不可用"同样处理：跳过，不算失败
       const unavailable = [...unknown, ...result.unavailable];
+      // 退出码只看"配置的源有没有一个能用上"：双源默认下缺 ~/.dsh 只跳过 dsh
+      const code = importExitCode(sources.length, result.unavailable);
+      if (unavailable.length > 0) {
+        ctx.stderr(
+          code === 4
+            ? `未找到可导入的会话源：${unavailable.join(', ')}（跳过，不算失败）\n`
+            : `跳过不可用的会话源：${unavailable.join(', ')}\n`,
+        );
+      }
+
+      if (json) {
+        // daemon 的 /api/import 子进程按 stdout 最后一行解析，别的都不要往 stdout 写
+        ctx.stdout(`${JSON.stringify({ ...result, unavailable, ok: code === 0 })}\n`);
+        return code;
+      }
 
       const counts = tableCounts(db);
       ctx.stdout(
@@ -286,11 +320,7 @@ export const importCommand: Command = {
             .map(([k, v]) => `${k}=${String(v)}`)
             .join(' ')}\n`,
       );
-      if (unavailable.length > 0) {
-        ctx.stderr(`未找到可导入的会话源：${unavailable.join(', ')}（跳过，不算失败）\n`);
-        return 4;
-      }
-      return 0;
+      return code;
     } finally {
       closeDb(db);
     }
