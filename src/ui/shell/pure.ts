@@ -7,27 +7,29 @@
  * 路由仍是「按 pathname 前缀分派」，不引路由库（概设 §8.9：不加没必要的依赖）。
  * URL 是唯一真相源：页面、筛选、深链都从 pathname + search 解析，不回写 store。
  */
+import type { DictKey } from '../i18n/dict.js';
 
 /** 六个一级页面（概设 §8.1；P4 新增「接入」）。顺序即左侧导航顺序。 */
 export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'access' | 'settings';
 
 export interface PageDef {
   key: PageKey;
-  label: string;
+  /** 菜单文案（D-184：只存 key，渲染时经 `t()` 取当前语言） */
+  labelKey: DictKey;
   /** 概设 §8.1 的页面路径；`/ui` 默认重定向到 graph。 */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const PAGES: readonly PageDef[] = [
-  { key: 'graph', label: '图谱', path: '/ui/graph', title: '3D/2D/表格三视图 + 证据链' },
-  { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
-  { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
-  { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
+  { key: 'graph', labelKey: 'nav.graph', path: '/ui/graph', titleKey: 'nav.graph.title' },
+  { key: 'memories', labelKey: 'nav.memories', path: '/ui/memories', titleKey: 'nav.memories.title' },
+  { key: 'inbox', labelKey: 'nav.inbox', path: '/ui/inbox', titleKey: 'nav.inbox.title' },
+  { key: 'archive', labelKey: 'nav.archive', path: '/ui/archive', titleKey: 'nav.archive.title' },
   // 接入是**树节点**：日志 / 接入点两个二级（P4；用户 m00882 并入接入相关全部；用户 m01083 把「日志与保留」改成日志页弹框）
-  { key: 'access', label: '接入', path: '/ui/access', title: '日志 / 接入点' },
+  { key: 'access', labelKey: 'nav.access', path: '/ui/access', titleKey: 'nav.access.title' },
   // 设置是**树节点**：二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
-  { key: 'settings', label: '设置', path: '/ui/settings', title: '配置 / 维护 / 隐私 / 诊断' },
+  { key: 'settings', labelKey: 'nav.settings', path: '/ui/settings', titleKey: 'nav.settings.title' },
 ];
 
 export const DEFAULT_PAGE: PageKey = 'graph';
@@ -44,17 +46,17 @@ export type SettingsSection = 'config' | 'maintain' | 'privacy' | 'diagnose';
 
 export interface SettingsSectionDef {
   key: SettingsSection;
-  label: string;
+  labelKey: DictKey;
   /** `/ui/settings/<key>` */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
-  { key: 'config', label: '配置', path: '/ui/settings/config', title: '配置白名单键' },
-  { key: 'maintain', label: '维护', path: '/ui/settings/maintain', title: '索引重建、备份恢复、自动更新' },
-  { key: 'privacy', label: '隐私', path: '/ui/settings/privacy', title: '采集与导出、脱敏、清理' },
-  { key: 'diagnose', label: '诊断', path: '/ui/settings/diagnose', title: '自检、图质量、模型归档' },
+  { key: 'config', labelKey: 'settings.section.config', path: '/ui/settings/config', titleKey: 'settings.section.config.title' },
+  { key: 'maintain', labelKey: 'settings.section.maintain', path: '/ui/settings/maintain', titleKey: 'settings.section.maintain.title' },
+  { key: 'privacy', labelKey: 'settings.section.privacy', path: '/ui/settings/privacy', titleKey: 'settings.section.privacy.title' },
+  { key: 'diagnose', labelKey: 'settings.section.diagnose', path: '/ui/settings/diagnose', titleKey: 'settings.section.diagnose.title' },
 ];
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'config';
@@ -64,15 +66,15 @@ export type AccessSection = 'logs' | 'endpoints';
 
 export interface AccessSectionDef {
   key: AccessSection;
-  label: string;
+  labelKey: DictKey;
   /** `/ui/access/<key>` */
   path: string;
-  title: string;
+  titleKey: DictKey;
 }
 
 export const ACCESS_SECTIONS: readonly AccessSectionDef[] = [
-  { key: 'logs', label: '日志', path: '/ui/access/logs', title: '统一日志流 + 按接入点统计（只读）' },
-  { key: 'endpoints', label: '接入点', path: '/ui/access/endpoints', title: 'Magpie 插件 / MCP / CLI / 界面 的状态与安装' },
+  { key: 'logs', labelKey: 'access.section.logs', path: '/ui/access/logs', titleKey: 'access.section.logs.title' },
+  { key: 'endpoints', labelKey: 'access.section.endpoints', path: '/ui/access/endpoints', titleKey: 'access.section.endpoints.title' },
 ];
 
 export const DEFAULT_ACCESS_SECTION: AccessSection = 'logs';
@@ -229,16 +231,16 @@ export function hrefForPath(path: string, currentSearch = ''): string {
 /** 左侧菜单树的一个子节点（设置二级 / 接入二级） */
 export interface NavChild {
   key: string;
-  label: string;
+  labelKey: DictKey;
   path: string;
 }
 
 /** 左侧菜单树的一个节点：有 children 的节点可展开（设置） */
 export interface NavNode {
   key: PageKey;
-  label: string;
+  labelKey: DictKey;
   path: string;
-  title: string;
+  titleKey: DictKey;
   children?: readonly NavChild[];
 }
 
@@ -252,12 +254,12 @@ export const NAV: readonly NavNode[] = PAGES.map((page) => {
   if (page.key === 'settings') {
     return {
       key: page.key,
-      label: page.label,
+      labelKey: page.labelKey,
       path: page.path,
-      title: page.title,
+      titleKey: page.titleKey,
       children: SETTINGS_SECTIONS.map((section) => ({
         key: section.key,
-        label: section.label,
+        labelKey: section.labelKey,
         path: section.path,
       })),
     };
@@ -265,17 +267,17 @@ export const NAV: readonly NavNode[] = PAGES.map((page) => {
   if (page.key === 'access') {
     return {
       key: page.key,
-      label: page.label,
+      labelKey: page.labelKey,
       path: page.path,
-      title: page.title,
+      titleKey: page.titleKey,
       children: ACCESS_SECTIONS.map((section) => ({
         key: section.key,
-        label: section.label,
+        labelKey: section.labelKey,
         path: section.path,
       })),
     };
   }
-  return { key: page.key, label: page.label, path: page.path, title: page.title };
+  return { key: page.key, labelKey: page.labelKey, path: page.path, titleKey: page.titleKey };
 });
 
 /** 顶部搜索回车目标：`/ui/memories?q=<输入>`。 */
@@ -363,10 +365,11 @@ export type LightState = 'ok' | 'warn' | 'off' | 'error';
 
 export interface StatusLight {
   key: 'daemon' | 'sidecar' | 'vector';
-  label: string;
+  labelKey: DictKey;
   state: LightState;
-  /** 灯旁的一句话；hover title 与无障碍文本都用它 */
-  text: string;
+  /** 灯旁的一句话（key + 变量）；hover title 与无障碍文本都用它 */
+  textKey: DictKey;
+  textVars?: Readonly<Record<string, string | number>>;
 }
 
 /** `GET /api/status` 的最小读取契约（server.ts 内联路由，字段全可选）。 */
@@ -401,33 +404,51 @@ export function statusLights(status: DaemonStatus | null): StatusLight[] {
 
   const daemonLight: StatusLight =
     daemon === 'ok'
-      ? { key: 'daemon', label: 'daemon', state: 'ok', text: 'daemon 运行中' }
-      : { key: 'daemon', label: 'daemon', state: 'error', text: status === null ? '未连接（/api/status 取数失败）' : `异常：${daemon ?? '未知'}` };
+      ? { key: 'daemon', labelKey: 'light.daemon.label', state: 'ok', textKey: 'light.daemon.ok' }
+      : {
+          key: 'daemon',
+          labelKey: 'light.daemon.label',
+          state: 'error',
+          textKey: status === null ? 'light.daemon.error' : 'light.daemon.abnormal',
+          ...(status === null ? {} : { textVars: { state: daemon ?? 'unknown' } }),
+        };
 
   let sidecarLight: StatusLight;
   if (sidecarState === null) {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '未配置（无 sidecar 依赖）' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'off', textKey: 'light.sidecar.unset' };
   } else if (sidecarMode === 'off') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: '已关闭（mode=off）' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'off', textKey: 'light.sidecar.off' };
   } else if (sidecarState === 'ready') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'ok', text: 'ready' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'ok', textKey: 'light.sidecar.ready' };
   } else if (sidecarState === 'starting') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'warn', text: '启动中' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'warn', textKey: 'light.sidecar.starting' };
   } else if (sidecarState === 'failed') {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'error', text: 'failed' };
+    sidecarLight = { key: 'sidecar', labelKey: 'light.sidecar.label', state: 'error', textKey: 'light.sidecar.failed' };
   } else {
-    sidecarLight = { key: 'sidecar', label: 'sidecar', state: 'off', text: sidecarState };
+    // 后端给了没登记的 state：原样透出（不翻译），标 off 而不是假装正常
+    sidecarLight = {
+      key: 'sidecar',
+      labelKey: 'light.sidecar.label',
+      state: 'off',
+      textKey: 'light.sidecar.other',
+      textVars: { state: sidecarState },
+    };
   }
 
   let vectorLight: StatusLight;
   if (vectorState === 'on') {
-    const progress =
-      indexed === null || total === null ? '已启用' : `已索引 ${String(indexed)} / ${String(total)}`;
-    vectorLight = { key: 'vector', label: '向量', state: total !== null && total > 0 && indexed === 0 ? 'warn' : 'ok', text: progress };
+    const hasCounts = indexed !== null && total !== null;
+    vectorLight = {
+      key: 'vector',
+      labelKey: 'light.vector.label',
+      state: total !== null && total > 0 && indexed === 0 ? 'warn' : 'ok',
+      textKey: hasCounts ? 'light.vector.indexed' : 'light.vector.enabled',
+      ...(hasCounts ? { textVars: { indexed: indexed ?? 0, total: total ?? 0 } } : {}),
+    };
   } else if (vectorState === 'off') {
-    vectorLight = { key: 'vector', label: '向量', state: 'off', text: '已关闭（vector_disabled）' };
+    vectorLight = { key: 'vector', labelKey: 'light.vector.label', state: 'off', textKey: 'light.vector.off' };
   } else {
-    vectorLight = { key: 'vector', label: '向量', state: 'warn', text: '未知（状态缺失）' };
+    vectorLight = { key: 'vector', labelKey: 'light.vector.label', state: 'warn', textKey: 'light.vector.unknown' };
   }
 
   return [daemonLight, sidecarLight, vectorLight];

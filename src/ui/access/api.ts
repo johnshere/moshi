@@ -5,6 +5,7 @@
  * （日志页右上角的开关只是跳转快捷入口，用户 m02743）。
  */
 import { resolveToken } from '../api.js';
+import { t } from '../i18n/index.js';
 
 export type LogSource = 'query' | 'trace';
 export type LogSourceFilter = 'all' | LogSource;
@@ -184,13 +185,13 @@ export async function postImport(since: string): Promise<ImportStarted> {
     },
     body: JSON.stringify({ since }),
   });
-  if (res.status === 409) throw new Error('已有导入在执行');
+  if (res.status === 409) throw new Error(t('endpoints.import.error.running'));
   if (!res.ok) {
     const body = await errorBody(res);
     // 用户 m00882：没有任何可用采集源时后端是 400 + detail.reason=no_source；
     // 直接说人话，不要落到 409 的「已有导入在执行」文案上。
     if (res.status === 400 && body.detail?.reason === 'no_source') {
-      throw new Error('没有可用的采集来源，请先配置 collect.sources');
+      throw new Error(t('endpoints.import.error.noSource'));
     }
     throw new Error(body.message ?? body.error ?? `HTTP ${String(res.status)}`);
   }

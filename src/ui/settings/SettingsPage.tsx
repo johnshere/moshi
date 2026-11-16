@@ -15,6 +15,8 @@
 import type { CSSProperties, ReactElement } from 'react';
 import { navigate } from '../shell/navigate.js';
 import { SETTINGS_SECTIONS, settingsHref, type SettingsSection } from '../shell/pure.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 import { ConfigForm } from './ConfigForm.js';
 import { DiagPanel } from './DiagPanel.js';
 import { MaintenancePanel } from './MaintenancePanel.js';
@@ -33,11 +35,11 @@ const tabStyle = (active: boolean): CSSProperties => ({
 });
 
 /** 二级标题与说明：每屏一句，别让人猜这一屏管什么。 */
-const HINTS: Record<SettingsSection, string> = {
-  config: '白名单键，原子写回 YAML；改完即时生效的会当场生效，需要重启的会标出来。',
-  maintain: '索引重建、备份恢复与自动更新；这些操作会改磁盘，执行前请看清提示。',
-  privacy: '采集、脱敏、导出与清理；导出是全库快照，清理是不可逆操作。',
-  diagnose: '只读自检（I1–I10 / 图质量 / 模型归档），不改任何数据。',
+const HINTS: Record<SettingsSection, DictKey> = {
+  config: 'settings.hint.config',
+  maintain: 'settings.hint.maintain',
+  privacy: 'settings.hint.privacy',
+  diagnose: 'settings.hint.diagnose',
 };
 
 export interface SettingsPageProps {
@@ -46,13 +48,14 @@ export interface SettingsPageProps {
 }
 
 export function SettingsPage({ section }: SettingsPageProps): ReactElement {
+  const t = useT();
   return (
     <div
       data-testid="settings-page"
       data-section={section}
       style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
     >
-      <div style={{ padding: '14px 18px 0', color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>设置</div>
+      <div style={{ padding: '14px 18px 0', color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>{t('settings.title')}</div>
       {/* 二级页签：左侧菜单树也能进，这里再给一排页签，省得来回看左栏 */}
       <div
         data-testid="settings-tabs"
@@ -71,13 +74,13 @@ export function SettingsPage({ section }: SettingsPageProps): ReactElement {
               event.preventDefault();
               navigate(settingsHref(item.key, window.location.search));
             }}
-            title={item.title}
+            title={t(item.titleKey)}
           >
-            {item.label}
+            {t(item.labelKey)}
           </a>
         ))}
       </div>
-      <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '8px 18px 10px' }}>{HINTS[section]}</div>
+      <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '8px 18px 10px' }}>{t(HINTS[section])}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, padding: '0 18px 18px' }}>
         {section === 'config' ? <ConfigForm /> : null}
         {section === 'maintain' ? (

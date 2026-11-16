@@ -6,6 +6,7 @@
  * 弹框只在 `open` 时挂载，避免日志页常驻时先拉一次配置。
  */
 import { useEffect, useRef, type CSSProperties, type ReactElement } from 'react';
+import { useT } from '../i18n/index.js';
 import { AccessLogsPanel } from '../settings/AccessLogsPanel.js';
 
 export interface LogConfigModalProps {
@@ -62,6 +63,7 @@ const closeStyle: CSSProperties = {
 };
 
 export function LogConfigModal({ open, onClose, initialSection = 'query-log' }: LogConfigModalProps): ReactElement | null {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement | null>(null);
 
   // Esc 关闭：只在打开时挂，卸载即移除
@@ -100,17 +102,17 @@ export function LogConfigModal({ open, onClose, initialSection = 'query-log' }: 
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label="日志与保留"
+        aria-label={t('access.logConfig.title')}
         style={panelStyle}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
           <div style={{ flex: 1 }}>
-            <h3 style={titleStyle}>日志与保留</h3>
+            <h3 style={titleStyle}>{t('access.logConfig.title')}</h3>
             <div style={hintStyle}>
-              查询日志保留与清空、插件运行日志档位；这是唯一写入口，日志页只展示与跳转。
+              {t('access.logConfig.hint')}
             </div>
           </div>
-          <button type="button" aria-label="关闭" data-testid="log-config-modal-close" style={closeStyle} onClick={onClose}>
+          <button type="button" aria-label={t('common.close')} data-testid="log-config-modal-close" style={closeStyle} onClick={onClose}>
             ×
           </button>
         </div>

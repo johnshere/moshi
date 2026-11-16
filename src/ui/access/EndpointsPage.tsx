@@ -8,6 +8,8 @@
  */
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { AccessPage } from './AccessPage.js';
+import { useT } from '../i18n/index.js';
+import type { DictKey } from '../i18n/dict.js';
 import {
   fetchCollectSources,
   fetchImportStatus,
@@ -18,11 +20,11 @@ import {
   type LogsSummaryGroup,
 } from './api.js';
 
-const ENDPOINTS: readonly { kind: string; label: string; desc: string }[] = [
-  { kind: 'gateway', label: '网关（Magpie）', desc: 'LLM 网关钩子：每次请求做一次召回，把记忆注入 system。' },
-  { kind: 'mcp', label: 'MCP', desc: 'MCP 服务器：memory_query / annotate / feedback / correct 四个工具。' },
-  { kind: 'cli', label: '命令行', desc: '`moshi` CLI 的检索与维护命令（本地直连）。' },
-  { kind: 'ui', label: '界面', desc: '本界面里的检索与图谱交互。' },
+const ENDPOINTS: readonly { kind: string; labelKey: DictKey; descKey: DictKey }[] = [
+  { kind: 'gateway', labelKey: 'endpoints.def.gateway.label', descKey: 'endpoints.def.gateway.desc' },
+  { kind: 'mcp', labelKey: 'endpoints.def.mcp.label', descKey: 'endpoints.def.mcp.desc' },
+  { kind: 'cli', labelKey: 'endpoints.def.cli.label', descKey: 'endpoints.def.cli.desc' },
+  { kind: 'ui', labelKey: 'endpoints.def.ui.label', descKey: 'endpoints.def.ui.desc' },
 ];
 
 const cardStyle: CSSProperties = {
@@ -42,11 +44,11 @@ function fmtTime(ts: string | null): string {
 
 type ImportRange = '1d' | '3d' | '7d' | 'all';
 
-const IMPORT_RANGES: readonly { value: ImportRange; label: string }[] = [
-  { value: '1d', label: '近 1 天' },
-  { value: '3d', label: '近 3 天' },
-  { value: '7d', label: '近 7 天' },
-  { value: 'all', label: '全部历史' },
+const IMPORT_RANGES: readonly { value: ImportRange; labelKey: DictKey }[] = [
+  { value: '1d', labelKey: 'endpoints.import.range.1d' },
+  { value: '3d', labelKey: 'endpoints.import.range.3d' },
+  { value: '7d', labelKey: 'endpoints.import.range.7d' },
+  { value: 'all', labelKey: 'endpoints.import.range.all' },
 ];
 
 const importButtonStyle: CSSProperties = {
@@ -85,16 +87,24 @@ function fmtElapsed(startedAt: string | null, now: number): string {
 }
 
 /** 状态行文案：空闲 / 执行中（已用时 mm:ss）/ 完成摘要 / 失败。 */
-function importStatusText(status: ImportStatus | null, now: number): string {
-  if (status === null) return '状态读取中…';
-  if (status.running) return `执行中 · 已用时 ${fmtElapsed(status.started_at, now)}`;
-  if (status.error !== null) return `失败：${status.error}`;
+function importStatusText(t: (key: DictKey, vars?: Readonly<Record<string, string | number>>) => string, status: ImportStatus | null, now: number): string {
+  if (status === null) return t('endpoints.import.status.loading');
+  if (status.running) return t('endpoints.import.status.running', { elapsed: fmtElapsed(status.started_at, now) });
+  if (status.error !== null) return t('endpoints.import.status.failed', { error: status.error });
   const result = status.result;
-  if (result === null) return '空闲';
-  return `完成：${String(result.sessions)} 会话、${String(result.turns)} 回合、${String(result.facts)} 条新事实、隔离 ${String(result.quarantined)}、失败 ${String(result.failed)}、用时 ${String(Math.round(result.ms / 1000))}s`;
+  if (result === null) return t('endpoints.import.status.idle');
+  return t('endpoints.import.status.done', {
+    sessions: result.sessions,
+    turns: result.turns,
+    facts: result.facts,
+    quarantined: result.quarantined,
+    failed: result.failed,
+    ms: Math.round(result.ms / 1000),
+  });
 }
 
 export function EndpointsPage(): ReactElement {
+  const t = useT();
   const [groups, setGroups] = useState<LogsSummaryGroup[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -181,10 +191,10 @@ export function EndpointsPage(): ReactElement {
 
   const importStatusLine =
     importActionError !== null
-      ? `未启动：${importActionError}`
+      ? t('endpoints.import.notStarted', { error: importActionError })
       : importPollError !== null
-        ? `状态读取失败：${importPollError}`
-        : importStatusText(importStatus, now);
+        ? t('endpoints.import.pollError', { error: importPollError })
+        : importStatusText(t, importStatus, now);
   const importStatusDanger =
     importActionError !== null ||
     importPollError !== null ||
@@ -203,14 +213,14 @@ export function EndpointsPage(): ReactElement {
       style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
     >
       <div style={{ padding: '14px 18px 0', color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>
-        接入点
+        {t('endpoints.title')}
       </div>
       <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '4px 18px 10px' }}>
-        四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在日志页右上角的「日志与保留」弹框。
+        {t('endpoints.intro')}
       </div>
       {error !== null ? (
         <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px 8px' }}>
-          统计读取失败：{error}
+          {t('endpoints.summaryError', { error })}
         </div>
       ) : null}
       <div style={{ display: 'flex', gap: 10, padding: '0 18px', flexWrap: 'wrap' }}>
@@ -224,18 +234,18 @@ export function EndpointsPage(): ReactElement {
           }, null);
           return (
             <div key={endpoint.kind} data-testid={`endpoint-card-${endpoint.kind}`} style={cardStyle}>
-              <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{endpoint.label}</div>
+              <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{t(endpoint.labelKey)}</div>
               <div style={{ fontSize: 20, color: 'var(--color-text-primary)', margin: '2px 0' }}>
                 {count}
-                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>次 / 24h</span>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>{t('endpoints.unit')}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
-                成功 {ok} · 最近 {fmtTime(last)}
+                {t('endpoints.card.ok', { ok, last: fmtTime(last) })}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{endpoint.desc}</div>
+              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{t(endpoint.descKey)}</div>
               {list.map((group) => (
                 <div key={`${group.caller_id}:${group.caller_kind}`} style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-                  {group.caller_id} · {group.count} 次 · P95{' '}
+                  {t('endpoints.card.row', { id: group.caller_id, n: group.count })}
                   {group.p95_ms === null ? '—' : `${String(Math.round(group.p95_ms))}ms`}
                 </div>
               ))}
@@ -246,9 +256,9 @@ export function EndpointsPage(): ReactElement {
 
       <div style={{ padding: '12px 18px 0' }}>
         <div data-testid="import-card" style={cardStyle}>
-          <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>历史会话导入</div>
+          <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{t('endpoints.import.title')}</div>
           <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            把已有会话记录扫描进记忆库（Claude Code / DSh）；后台执行，导入期间界面仍可用。
+            {t('endpoints.import.desc')}
           </div>
           <div
             data-testid="import-sources"
@@ -260,29 +270,31 @@ export function EndpointsPage(): ReactElement {
             }}
           >
             {sources === null
-              ? '来源状态读取中…'
+              ? t('endpoints.import.sources.loading')
               : sources.available
-                ? `可用来源：${sources.sources
-                    .filter((source) => source.available)
-                    .map((source) => source.id)
-                    .join('、')}`
-                : '没有可用的采集来源'}
+                ? t('endpoints.import.sources.available', {
+                    ids: sources.sources
+                      .filter((source) => source.available)
+                      .map((source) => source.id)
+                      .join('、'),
+                  })
+                : t('endpoints.import.sources.none')}
           </div>
           {sourcesError !== null ? (
             <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-danger, #f85149)' }}>
-              来源状态读取失败：{sourcesError}
+              {t('endpoints.import.sources.error', { error: sourcesError })}
             </div>
           ) : null}
           {sources !== null && !sources.available ? (
             <div data-testid="import-source-list" style={{ fontSize: 11, marginTop: 4 }}>
               {sources.sources.length === 0 ? (
-                <div style={{ color: 'var(--color-text-muted)' }}>未配置任何采集来源</div>
+                <div style={{ color: 'var(--color-text-muted)' }}>{t('endpoints.import.sources.unconfigured')}</div>
               ) : (
                 sources.sources.map((source) => (
                   <div key={source.id} style={{ color: 'var(--color-text-secondary)' }}>
                     {source.id} · {source.adapter} ·{' '}
                     <span style={{ color: source.available ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                      {source.available ? '可用' : '不可用'}
+                      {source.available ? t('endpoints.import.source.available') : t('endpoints.import.source.unavailable')}
                     </span>
                   </div>
                 ))
@@ -291,7 +303,7 @@ export function EndpointsPage(): ReactElement {
           ) : null}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
-              范围
+              {t('endpoints.import.range')}
               <select
                 data-testid="import-range"
                 value={range}
@@ -300,7 +312,7 @@ export function EndpointsPage(): ReactElement {
               >
                 {IMPORT_RANGES.map((item) => (
                   <option key={item.value} value={item.value}>
-                    {item.label}
+                    {t(item.labelKey)}
                   </option>
                 ))}
               </select>
@@ -310,12 +322,12 @@ export function EndpointsPage(): ReactElement {
               data-testid="import-run"
               style={{ ...importButtonStyle, opacity: importRunning || noSource ? 0.5 : 1 }}
               disabled={importRunning || noSource}
-              title={noSource ? '没有可用的采集来源' : undefined}
+              title={noSource ? t('endpoints.import.sources.none') : undefined}
               onClick={() => {
                 void startImport();
               }}
             >
-              {importRunning ? '导入中…' : '开始导入'}
+              {importRunning ? t('endpoints.import.running') : t('endpoints.import.run')}
             </button>
           </div>
           <div
@@ -332,7 +344,7 @@ export function EndpointsPage(): ReactElement {
       </div>
 
       <div style={{ padding: '16px 18px 6px', color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>
-        Magpie 插件
+        {t('endpoints.hook.title')}
       </div>
       <div style={{ padding: '0 18px 24px' }}>
         <AccessPage standalone={false} onboardResult={null} />

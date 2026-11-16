@@ -34,6 +34,7 @@ import {
   settingsHref,
   statusLights,
 } from '../../src/ui/shell/pure.js';
+import { translate } from '../../src/ui/i18n/index.js';
 
 describe('路由解析', () => {
   it('/ui 与 /ui/ 默认到 graph', () => {
@@ -260,7 +261,7 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(settings?.children?.map((child) => child.key)).toEqual(['config', 'maintain', 'privacy', 'diagnose']);
     const access = NAV.find((node) => node.key === 'access');
     expect(access?.children?.map((child) => child.key)).toEqual(['logs', 'endpoints']);
-    expect(access?.children?.map((child) => child.label)).toEqual(['日志', '接入点']);
+    expect(access?.children?.map((child) => translate('zh', child.labelKey))).toEqual(['日志', '接入点']);
     for (const node of NAV) {
       if (node.key !== 'settings' && node.key !== 'access') expect(node.children).toBeUndefined();
     }

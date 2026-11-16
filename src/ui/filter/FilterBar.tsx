@@ -16,6 +16,8 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { useFilter } from '../state/filter.js';
 import { FILTER_FTYPES, FILTER_STATUSES, filterToSearch } from './pure/filter.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
 
 declare global {
   interface Window {
@@ -85,6 +87,7 @@ function fromDateValue(v: string): string | null {
 }
 
 export function FilterBar(): JSX.Element {
+  const t = useT();
   const filter = useFilter((s) => s.filter);
   const active = useFilter((s) => s.active);
   const set = useFilter((s) => s.set);
@@ -140,15 +143,15 @@ export function FilterBar(): JSX.Element {
         ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 4, padding: '4px 8px' } : {}),
       }}
     >
-      <span style={labelStyle}>
-        筛选{active ? '（已筛选）' : ''}
+      <span style={labelStyle} data-testid="filter-label">
+        {t(active ? 'filter.titleActive' : 'filter.title')}
       </span>
 
       <label style={labelStyle}>scope</label>
       <input
         type="text"
         value={scopeInput}
-        placeholder="global / project:*（留空 = 不限）"
+        placeholder={t('filter.scopePlaceholder')}
         onChange={(e) => setScopeInput(e.target.value)}
         onBlur={commitScope}
         onKeyDown={(e) => {
@@ -157,7 +160,7 @@ export function FilterBar(): JSX.Element {
         style={textInputStyle}
       />
 
-      <span style={labelStyle}>类型</span>
+      <span style={labelStyle}>{t('filter.ftype')}</span>
       {FILTER_FTYPES.map((v) => (
         <button
           key={v}
@@ -166,11 +169,11 @@ export function FilterBar(): JSX.Element {
           onClick={() => toggleFtype(v)}
           style={filter.ftype.includes(v) ? chipOn : chipBase}
         >
-          {v}
+          {enumLabel('ftype', v)}
         </button>
       ))}
 
-      <span style={labelStyle}>状态</span>
+      <span style={labelStyle}>{t('filter.status')}</span>
       {FILTER_STATUSES.map((v) => (
         <button
           key={v}
@@ -179,18 +182,18 @@ export function FilterBar(): JSX.Element {
           onClick={() => toggleStatus(v)}
           style={filter.status.includes(v) ? chipOn : chipBase}
         >
-          {v}
+          {enumLabel('epistemic', v)}
         </button>
       ))}
 
-      <span style={labelStyle}>时间</span>
+      <span style={labelStyle}>{t('filter.time')}</span>
       <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} onBlur={commitFrom} style={dateInputStyle} />
       <span style={{ color: 'var(--color-text-faint)' }}>~</span>
       <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} onBlur={commitTo} style={dateInputStyle} />
 
       {active && (
         <button type="button" onClick={reset} style={{ ...chipBase, color: 'var(--color-warning)', borderColor: 'var(--color-warning-dim)' }}>
-          重置
+          {t('common.reset')}
         </button>
       )}
     </div>

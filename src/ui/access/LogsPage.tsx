@@ -10,6 +10,8 @@
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
 import { LogConfigModal } from './LogConfigModal.js';
+import { useT } from '../i18n/index.js';
+import { enumLabel } from '../i18n/enums.js';
 import {
   fetchLogs,
   fetchLogsSummary,
@@ -22,16 +24,6 @@ import {
 
 const REFRESH_MS = 10_000;
 const PAGE_SIZE = 20;
-
-const KIND_LABEL: Record<string, string> = {
-  gateway: '网关',
-  mcp: 'MCP',
-  cli: '命令行',
-  ui: '界面',
-  eval: '评测',
-  import: '导入',
-  unknown: '未标注',
-};
 
 const STATUS_COLOR: Record<string, string> = {
   ok: 'var(--color-success, #3fb950)',
@@ -60,7 +52,7 @@ function fmtMs(value: number | null): string {
 }
 
 function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind;
+  return enumLabel('logKind', kind);
 }
 
 /** 卡片右下角的小折线：12 段计数按最大值归一，纯 CSS 柱状（不引图表库） */
@@ -122,6 +114,7 @@ const tabStyle = (active: boolean): CSSProperties => ({
 });
 
 export function LogsPage(): ReactElement {
+  const t = useT();
   const [windowKey, setWindowKey] = useState<SummaryWindow>('24h');
   const [summary, setSummary] = useState<LogsSummary | null>(null);
   const [items, setItems] = useState<LogItem[]>([]);
@@ -201,18 +194,18 @@ export function LogsPage(): ReactElement {
     >
       {/* ① 顶部：只读状态条 + 时间窗 + 「日志与保留」弹框入口（唯一写入口不在本页） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 18px 0', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>日志</span>
+        <span style={{ color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>{t('logs.title')}</span>
         <span style={chipStyle} data-testid="logs-total">
-          请求 {totals?.count ?? 0}
+          {t('logs.total', { n: totals?.count ?? 0 })}
         </span>
         <span style={chipStyle} data-testid="logs-ok">
-          成功 {totals?.ok ?? 0}
+          {t('logs.ok', { n: totals?.ok ?? 0 })}
         </span>
         <span style={chipStyle} data-testid="logs-degraded">
-          降级 {totals?.degraded ?? 0}
+          {t('logs.degraded', { n: totals?.degraded ?? 0 })}
         </span>
         <span style={chipStyle} data-testid="logs-updated">
-          更新于 {updatedAt === null ? '—' : new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false })}
+          {t('logs.updatedAt', { time: updatedAt === null ? '—' : new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false }) })}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           {(['1h', '24h', '7d'] as const).map((key) => (
@@ -228,13 +221,13 @@ export function LogsPage(): ReactElement {
             </button>
           ))}
           <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => setConfigOpen(true)}>
-            日志与保留
+            {t('logs.config')}
           </button>
         </div>
       </div>
       {summaryError !== null ? (
         <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '6px 18px 0' }}>
-          统计读取失败：{summaryError}
+          {t('logs.summaryError', { error: summaryError })}
         </div>
       ) : null}
 
@@ -245,7 +238,7 @@ export function LogsPage(): ReactElement {
       >
         {groups.length === 0 ? (
           <div style={{ ...cardStyle, color: 'var(--color-text-muted)', fontSize: 12 }}>
-            这个时间窗还没有请求。
+            {t('logs.summaryEmpty')}
           </div>
         ) : (
           groups.map((group) => (
@@ -255,16 +248,16 @@ export function LogsPage(): ReactElement {
               </div>
               <div style={{ fontSize: 20, color: 'var(--color-text-primary)', margin: '2px 0' }}>
                 {group.count}
-                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>次</span>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>{t('logs.unit')}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span>命中 {hitRate(group)}</span>
+                <span>{t('logs.hit', { rate: hitRate(group) })}</span>
                 <span>P95 {fmtMs(group.p95_ms)}</span>
-                <span>入 {fmtBytes(group.in_bytes)}</span>
-                <span>出 {fmtBytes(group.out_bytes)}</span>
+                <span>{t('logs.in', { bytes: fmtBytes(group.in_bytes) })}</span>
+                <span>{t('logs.out', { bytes: fmtBytes(group.out_bytes) })}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                最近 {group.last_ts === null ? '—' : fmtTime(group.last_ts)}
+                {t('logs.last', { time: group.last_ts === null ? '—' : fmtTime(group.last_ts) })}
               </div>
               {sparkline(group.buckets)}
             </div>
@@ -280,9 +273,9 @@ export function LogsPage(): ReactElement {
           onChange={(event) => setSource(event.target.value as LogSourceFilter)}
           style={{ fontSize: 12, padding: '3px 6px' }}
         >
-          <option value="all">全部来源</option>
-          <option value="query">检索日志</option>
-          <option value="trace">插件运行日志</option>
+          <option value="all">{t('logs.filter.allSources')}</option>
+          <option value="query">{t('logs.filter.source.query')}</option>
+          <option value="trace">{t('logs.filter.source.trace')}</option>
         </select>
         <select
           value={status}
@@ -290,17 +283,17 @@ export function LogsPage(): ReactElement {
           onChange={(event) => setStatus(event.target.value)}
           style={{ fontSize: 12, padding: '3px 6px' }}
         >
-          <option value="">全部状态</option>
-          <option value="ok">ok</option>
-          <option value="degraded">degraded</option>
-          <option value="ready">ready</option>
-          <option value="empty">empty</option>
-          <option value="skipped">skipped</option>
+          <option value="">{t('logs.filter.allStatus')}</option>
+          {(['ok', 'degraded', 'ready', 'empty', 'skipped'] as const).map((value) => (
+            <option key={value} value={value}>
+              {enumLabel('logStatus', value)}
+            </option>
+          ))}
         </select>
         <input
           value={qInput}
           data-testid="logs-filter-q"
-          placeholder="搜 corr / 接入点 / 文本"
+          placeholder={t('logs.searchPlaceholder')}
           onChange={(event) => setQInput(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') setQ(qInput.trim());
@@ -308,21 +301,21 @@ export function LogsPage(): ReactElement {
           style={{ fontSize: 12, padding: '3px 6px', minWidth: 200 }}
         />
         <button type="button" style={tabStyle(false)} onClick={() => setQ(qInput.trim())}>
-          搜索
+          {t('logs.search')}
         </button>
         <button type="button" style={tabStyle(false)} data-testid="logs-refresh" onClick={() => loadFirstPage()}>
-          刷新
+          {t('logs.refresh')}
         </button>
       </div>
       {listError !== null ? (
         <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px' }}>
-          日志读取失败：{listError}
+          {t('logs.listError', { error: listError })}
         </div>
       ) : null}
 
       <div data-testid="logs-list" style={{ padding: '0 18px 24px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {items.length === 0 && !loading ? (
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>没有日志（或筛选条件下无匹配）。</div>
+          <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{t('logs.listEmpty')}</div>
         ) : null}
         {items.map((item) => {
           const isOpen = expanded === item.id;
@@ -359,7 +352,7 @@ export function LogsPage(): ReactElement {
                     color: item.source === 'trace' ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
                   }}
                 >
-                  {item.source === 'trace' ? '插件' : '检索'}
+                  {item.source === 'trace' ? t('logs.row.source.trace') : t('logs.row.source.query')}
                 </span>
                 <span style={{ color: 'var(--color-text-secondary)' }}>{kindLabel(item.caller_kind)}</span>
                 <span style={{ color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -368,7 +361,7 @@ export function LogsPage(): ReactElement {
                 <span style={{ color: 'var(--color-text-muted)' }}>{fmtBytes(item.in_bytes)}</span>
                 <span style={{ color: 'var(--color-text-muted)' }}>{fmtBytes(item.out_bytes)}</span>
                 <span style={{ color: STATUS_COLOR[item.status ?? ''] ?? 'var(--color-text-secondary)' }}>
-                  {item.status ?? '未标注'}
+                  {item.status === null || item.status === undefined ? enumLabel('logStatus', 'unknown') : enumLabel('logStatus', item.status)}
                 </span>
                 <span style={{ color: 'var(--color-text-muted)', display: 'flex', gap: 8 }}>
                   <span>{fmtTime(item.ts)}</span>
@@ -389,12 +382,10 @@ export function LogsPage(): ReactElement {
                   }}
                 >
                   <span>id {item.id}</span>
-                  <span>
-                    plugin {item.plugin_id ?? '—'} · 证据 {item.evidence ?? '—'} · corr {item.corr_id ?? '—'}
-                  </span>
+                  <span>{t('logs.row.meta', { plugin: item.plugin_id ?? '—', evidence: item.evidence ?? '—', corr: item.corr_id ?? '—' })}</span>
                   {item.text === null ? (
                     <span style={{ color: 'var(--color-text-muted)' }}>
-                      正文未记录（插件运行日志默认只记计数；full 档才带正文）。
+                      {t('logs.row.noBody')}
                     </span>
                   ) : (
                     <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 11 }}>{item.text}</pre>
@@ -406,7 +397,7 @@ export function LogsPage(): ReactElement {
         })}
         {cursor !== null ? (
           <button type="button" style={tabStyle(false)} data-testid="logs-load-more" onClick={loadMore} disabled={loading}>
-            {loading ? '加载中…' : '加载更多'}
+            {loading ? t('table.footer.loading') : t('logs.more')}
           </button>
         ) : null}
       </div>

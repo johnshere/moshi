@@ -10,6 +10,8 @@ import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { SearchBox } from './SearchBox.js';
 import { ScopeSwitcher } from './ScopeSwitcher.js';
+import { LocaleSwitch } from './LocaleSwitch.js';
+import { useT } from '../i18n/index.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
 import { FirstRun } from './FirstRun.js';
 import { OnboardModal } from './OnboardModal.js';
@@ -112,6 +114,7 @@ export interface ShellProps {
 }
 
 export function Shell({ route, section, accessSection, children }: ShellProps): ReactElement {
+  const t = useT();
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
   /** 首启弹窗开着时压掉首屏提示条：弹窗讲的正是同一件事，两条并排太吵 */
@@ -205,7 +208,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
       {onboardOpen ? null : <FirstRun />}
       <OnboardModal onOpenChange={setOnboardOpen} />
       <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
-        <div style={brandStyle}>默识</div>
+        <div style={brandStyle}>{t('app.brand')}</div>
         {NAV.map((node) => {
           const active = node.key === route;
           return (
@@ -223,9 +226,9 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                   event.preventDefault();
                   navigate(pageHref(node.key, window.location.search));
                 }}
-                title={node.title}
+                title={t(node.titleKey)}
               >
-                {node.label}
+                {t(node.labelKey)}
               </a>
               {node.children !== undefined && active
                 ? node.children.map((child) => {
@@ -247,7 +250,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                         }}
                       >
                         <span style={navTreeLineStyle} aria-hidden="true" />
-                        {child.label}
+                        {t(child.labelKey)}
                       </a>
                     );
                   })
@@ -256,7 +259,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
           );
         })}
         <div style={{ flex: 1 }} />
-        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>本地知识图谱</div>
+        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>{t('app.tagline')}</div>
       </aside>
 
       <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -264,13 +267,14 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
           <SearchBox />
           <div style={{ flex: 1 }} />
           <ScopeSwitcher />
+          <LocaleSwitch />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
             {lights.map((light) => (
               <span
                 key={light.key}
                 data-testid={`light-${light.key}`}
                 data-state={light.state}
-                title={light.text}
+                title={t(light.textKey, light.textVars)}
                 style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-text-secondary)' }}
               >
                 <span
@@ -284,7 +288,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
                     display: 'inline-block',
                   }}
                 />
-                {light.label}
+                {t(light.labelKey)}
               </span>
             ))}
           </div>
@@ -293,7 +297,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
             data-testid="inbox-badge"
             data-count={badgeCount > 0 ? 'active' : 'zero'}
             className="moshi-inbox-badge"
-            title="待办：消解确认 / 低置信 / 淘汰候选（按单页 200 条估算）"
+            title={t('topbar.inbox.title')}
             style={{
               color: badgeCount > 0 ? 'var(--color-warning-soft)' : 'var(--color-text-muted)',
               textDecoration: 'none',
@@ -309,7 +313,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
               navigatePage('inbox');
             }}
           >
-            待办 {badge === null ? '—' : badge.label}
+            {t('topbar.inbox.badge', { count: badge === null ? '—' : badge.label })}
           </a>
         </header>
         <main style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0 }}>{children}</main>
