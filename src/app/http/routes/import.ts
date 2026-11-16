@@ -130,7 +130,12 @@ function daemonEntry(): string | null {
 type SpawnProcess = (
   command: string,
   args: readonly string[],
-  options: { stdio: ['ignore', 'pipe', 'pipe']; env: NodeJS.ProcessEnv },
+  options: {
+    stdio: ['ignore', 'pipe', 'pipe'];
+    env: NodeJS.ProcessEnv;
+    windowsHide?: boolean;
+    creationFlags?: number;
+  },
 ) => ImportChild;
 
 /**
@@ -140,6 +145,11 @@ type SpawnProcess = (
  * 启动 daemon 时要加 `--config`，否则子进程会按默认配置解析 data_dir / 采集源，
  * 把数据写进 `~/.moshi` 而 daemon 在用的库根本没变。`defaultConfigPath()` 认的
  * 就是同一个环境变量，所以这份配置路径在两侧一致。
+ *
+ * **Windows 必须 `windowsHide`（+ `CREATE_NO_WINDOW`）**：daemon 自己是
+ * `DETACHED_PROCESS`、没有控制台，而 `node.exe` 是控制台子系统程序——不隐藏就会
+ * 给每次「界面点导入」弹一个黑窗（用户 m00778 实测）；同 `src/infra/sidecar/spawn.ts`
+ * 的既有写法，二者属同一类问题。
  */
 export function createDefaultSpawn(
   configFile: string,
@@ -149,6 +159,8 @@ export function createDefaultSpawn(
     spawnProcess(command, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, MOSHI_CONFIG: configFile },
+      windowsHide: true,
+      ...(process.platform === 'win32' ? { creationFlags: 0x08000000 /* CREATE_NO_WINDOW */ } : {}),
     });
 }
 

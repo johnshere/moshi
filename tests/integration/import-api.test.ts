@@ -205,12 +205,24 @@ describe('POST /api/import', () => {
     expect(result['promoted']).toBe(3);
   });
 
-  it('默认 spawn 工厂让子进程继承 daemon 配置（MOSHI_CONFIG）且参数不变', async () => {
+  it('默认 spawn 工厂让子进程继承 daemon 配置（MOSHI_CONFIG）且不弹控制台窗口', async () => {
     const configFile = path.join(tempDir(), 'daemon-config.yaml');
-    const captured: { command: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
+    const captured: {
+      command: string;
+      args: string[];
+      env: NodeJS.ProcessEnv;
+      windowsHide?: boolean;
+      creationFlags?: number;
+    }[] = [];
     // 用假进程实现替掉 child_process.spawn：断言工厂构造出的 env/stdio，不真的起进程
     const spawnFn = createDefaultSpawn(configFile, (command, args, options) => {
-      captured.push({ command, args: [...args], env: options.env });
+      captured.push({
+        command,
+        args: [...args],
+        env: options.env,
+        windowsHide: options.windowsHide,
+        creationFlags: options.creationFlags,
+      });
       return new FakeChild() as unknown as ImportChild;
     });
 
@@ -231,6 +243,9 @@ describe('POST /api/import', () => {
     expect(spawned.env['MOSHI_CONFIG']).toBe(configFile);
     // 是「继承 process.env 再覆盖」而不是只带一个变量
     expect(Object.keys(spawned.env).length).toBeGreaterThan(1);
+    // 用户 m00778：点界面导入不许弹黑窗——daemon 无控制台，node.exe 是控制台子系统
+    expect(spawned.windowsHide).toBe(true);
+    if (process.platform === 'win32') expect(spawned.creationFlags).toBe(0x08000000);
   });
 
   it('进度行只保留最近 50 条', async () => {

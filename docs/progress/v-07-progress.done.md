@@ -36,6 +36,14 @@
   - 并发：7 天导入运行中连打 15 次 MCP `memory_annotate`：**15/15 成功、0 错误、max 280ms、avg 88ms**；`/api/import/status` 全程正常。
   - 锁：daemon 日志 1646 行中 `SQLITE_BUSY` / `database is locked` 命中 **0**。
 
+## 补修：点导入弹黑窗（用户 m00778）
+
+- 现象：界面点「开始导入」时弹出一个命令行窗口，绝对不允许。
+- 根因：`createDefaultSpawn` 的 spawn 选项只有 `stdio`/`env`，**缺 `windowsHide`**。daemon 以 `DETACHED_PROCESS` 运行、自己没有控制台，而 `node.exe` 是控制台子系统程序——不隐藏就会为每次导入新开一个可见控制台。
+- 修复：`src/app/http/routes/import.ts:144-172` 的 spawn 选项补 `windowsHide: true` + Windows `creationFlags: 0x08000000`（`CREATE_NO_WINDOW`），与 `src/infra/sidecar/spawn.ts:73-82` 同一写法（那里注释已记录同类坑）。
+- 回归：`tests/integration/import-api.test.ts:208` 用例断言 `windowsHide === true`（win32 另断言 `creationFlags`）。
+- 证据：`pnpm build` 后重启 daemon；真机 7 天导入（233 会话）每 300ms 采样 `conhost.exe` 的父进程，导入子进程名下命中 **0**（无控制台 → 无可见窗口），导入 exit 0。
+
 ## 遗留
 
 - daemon 内**同步** harvest 事务仍可能长时间占住事件循环（最坏 attempts×(busy_timeout+退避)），未做分片改造。
