@@ -24,8 +24,8 @@ export const PAGES: readonly PageDef[] = [
   { key: 'memories', label: '记忆', path: '/ui/memories', title: '事实筛选、搜索与详情' },
   { key: 'inbox', label: '待办', path: '/ui/inbox', title: '消解确认 / 低置信 / 淘汰候选' },
   { key: 'archive', label: '归档', path: '/ui/archive', title: '归档主题与待合并提案' },
-  // 接入是**树节点**：日志 / 接入点 / 日志与保留三个二级（P4；用户 m00882 并入接入相关全部）
-  { key: 'access', label: '接入', path: '/ui/access', title: '日志 / 接入点 / 日志与保留' },
+  // 接入是**树节点**：日志 / 接入点两个二级（P4；用户 m00882 并入接入相关全部；用户 m01083 把「日志与保留」改成日志页弹框）
+  { key: 'access', label: '接入', path: '/ui/access', title: '日志 / 接入点' },
   // 设置是**树节点**：二级在 SETTINGS_SECTIONS（设计 §16.5.2 / §16.5.3）
   { key: 'settings', label: '设置', path: '/ui/settings', title: '配置 / 维护 / 隐私 / 诊断' },
 ];
@@ -59,14 +59,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDef[] = [
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSection = 'config';
 
-/**
- * 「日志与保留」整页路径。原来是设置里的「接入与日志」，用户 m00882 要求接入相关的
- * 全部并入一级「接入」，所以它成了接入的第三个二级（旧地址不再特判，按未知路由兜底）。
- */
-export const ACCESS_LOG_CONFIG_PATH = '/ui/access/log-config';
-
-/** 接入页的三个二级（P4；开发方案 §7） */
-export type AccessSection = 'logs' | 'endpoints' | 'log-config';
+/** 接入页的两个二级（P4；开发方案 §7）。「日志与保留」按用户 m01083 改成日志页弹框，不再是二级。 */
+export type AccessSection = 'logs' | 'endpoints';
 
 export interface AccessSectionDef {
   key: AccessSection;
@@ -79,12 +73,6 @@ export interface AccessSectionDef {
 export const ACCESS_SECTIONS: readonly AccessSectionDef[] = [
   { key: 'logs', label: '日志', path: '/ui/access/logs', title: '统一日志流 + 按接入点统计（只读）' },
   { key: 'endpoints', label: '接入点', path: '/ui/access/endpoints', title: 'Magpie 插件 / MCP / CLI / 界面 的状态与安装' },
-  {
-    key: 'log-config',
-    label: '日志与保留',
-    path: ACCESS_LOG_CONFIG_PATH,
-    title: '查询日志保留与清空、插件运行日志档位（唯一写入口）',
-  },
 ];
 
 export const DEFAULT_ACCESS_SECTION: AccessSection = 'logs';

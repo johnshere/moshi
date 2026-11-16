@@ -1,15 +1,15 @@
 /**
  * 统一日志页（P4；开发方案 §7「日志页三段」）。
  *
- * 三段：①顶部状态条（只读 chip + 时间窗 + 设置跳转）②按接入点统计卡片
+ * 三段：①顶部状态条（只读 chip + 时间窗 + 「日志与保留」弹框入口）②按接入点统计卡片
  * ③统一日志流（两源合并、可搜索、瀑布流加载）。
  *
- * **本页没有任何写入控件**：配置唯一写入口在接入 →「日志与保留」，这里的
- * 开关位只是跳转快捷入口（用户 m02743；用户 m00882 把它从设置挪进接入）。
+ * **本页没有任何写入控件**：配置唯一写入口是「日志与保留」弹框（`LogConfigModal` 里挂
+ * `AccessLogsPanel`），右上角按钮只是打开它的快捷入口（用户 m02743；用户 m00882 把配置
+ * 从设置挪进接入，用户 m01083 又把它从独立页改成弹框）。
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
-import { ACCESS_LOG_CONFIG_PATH, hrefForPath } from '../shell/pure.js';
-import { navigate } from '../shell/navigate.js';
+import { LogConfigModal } from './LogConfigModal.js';
 import {
   fetchLogs,
   fetchLogsSummary,
@@ -134,6 +134,7 @@ export function LogsPage(): ReactElement {
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [configOpen, setConfigOpen] = useState(false);
 
   const loadSummary = useCallback(
     (signal?: AbortSignal) => {
@@ -191,12 +192,6 @@ export function LogsPage(): ReactElement {
   const totals = summary?.totals;
   const updatedAt = summary?.generated_at ?? null;
 
-  // 用户 m00882：日志配置并入「接入」，跳同级的「日志与保留」
-  const openLogConfig = (hash: string): void => {
-    const target = `${hrefForPath(ACCESS_LOG_CONFIG_PATH, window.location.search)}#${hash}`;
-    navigate(target);
-  };
-
   const groups = useMemo(() => summary?.groups ?? [], [summary]);
 
   return (
@@ -204,7 +199,7 @@ export function LogsPage(): ReactElement {
       data-testid="logs-page"
       style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
     >
-      {/* ① 顶部：只读状态条 + 时间窗 + 设置跳转（唯一写入口不在这里） */}
+      {/* ① 顶部：只读状态条 + 时间窗 + 「日志与保留」弹框入口（唯一写入口不在本页） */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 18px 0', flexWrap: 'wrap' }}>
         <span style={{ color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>日志</span>
         <span style={chipStyle} data-testid="logs-total">
@@ -232,8 +227,8 @@ export function LogsPage(): ReactElement {
               {key}
             </button>
           ))}
-          <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => openLogConfig('query-log')}>
-            日志与保留 ↗
+          <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => setConfigOpen(true)}>
+            日志与保留
           </button>
         </div>
       </div>
@@ -415,6 +410,9 @@ export function LogsPage(): ReactElement {
           </button>
         ) : null}
       </div>
+
+      {/* 「日志与保留」弹框（用户 m01083：不再有独立菜单页） */}
+      <LogConfigModal open={configOpen} onClose={() => setConfigOpen(false)} initialSection="query-log" />
     </div>
   );
 }

@@ -206,7 +206,7 @@ export function EndpointsPage(): ReactElement {
         接入点
       </div>
       <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '4px 18px 10px' }}>
-        四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在接入 →「日志与保留」。
+        四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在日志页右上角的「日志与保留」弹框。
       </div>
       {error !== null ? (
         <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px 8px' }}>

@@ -9,7 +9,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  ACCESS_LOG_CONFIG_PATH,
   ACCESS_SECTIONS,
   DEFAULT_ACCESS_SECTION,
   DEFAULT_PAGE,
@@ -234,25 +233,25 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     expect(embedded.section).toBe('diagnose');
   });
 
-  it('接入页三个二级与默认项（日志 / 接入点 / 日志与保留）', () => {
-    expect(ACCESS_SECTIONS.map((s) => s.key)).toEqual(['logs', 'endpoints', 'log-config']);
+  it('接入页两个二级与默认项（日志 / 接入点）', () => {
+    // 用户 m01083：「日志与保留」不再是二级，改成日志页弹框
+    expect(ACCESS_SECTIONS.map((s) => s.key)).toEqual(['logs', 'endpoints']);
     expect(DEFAULT_ACCESS_SECTION).toBe('logs');
     expect(pageFromPath('/ui/access')).toBe('access');
     expect(pageFromPath('/ui/access/logs')).toBe('access');
-    expect(pageFromPath(ACCESS_LOG_CONFIG_PATH)).toBe('access');
     expect(accessSectionFromPath('/ui/access/logs')).toBe('logs');
     expect(accessSectionFromPath('/ui/access/endpoints')).toBe('endpoints');
-    expect(accessSectionFromPath(ACCESS_LOG_CONFIG_PATH)).toBe('log-config');
     expect(accessSectionFromPath('/ui/access/whatever')).toBe(DEFAULT_ACCESS_SECTION);
+    // 已删掉的旧二级当成未知二级，落到默认「日志」
+    expect(accessSectionFromPath('/ui/access/log-config')).toBe(DEFAULT_ACCESS_SECTION);
     expect(accessSectionFromPath('/ui/access')).toBeNull();
     expect(parseRoute('/ui/access', '').accessSection).toBe('logs');
     expect(parseRoute('/ui/access/endpoints', '').accessSection).toBe('endpoints');
-    expect(parseRoute(ACCESS_LOG_CONFIG_PATH, '').accessSection).toBe('log-config');
+    expect(parseRoute('/ui/access/log-config', '').accessSection).toBe('logs');
     // 非接入页不挂二级
     expect(parseRoute('/ui/graph', '').accessSection).toBeNull();
     expect(parseRoute('/ui/settings/config', '').section).toBe('config');
     expect(accessHref('endpoints', '?token=t&q=x')).toBe('/ui/access/endpoints?token=t');
-    expect(accessHref('log-config', '')).toBe('/ui/access/log-config');
   });
 
   it('菜单树：设置与接入各挂自己的二级，其余节点没有子项', () => {
@@ -260,8 +259,8 @@ describe('设置二级与接入页（Z-01C-g，设计 §16.8）', () => {
     const settings = NAV.find((node) => node.key === 'settings');
     expect(settings?.children?.map((child) => child.key)).toEqual(['config', 'maintain', 'privacy', 'diagnose']);
     const access = NAV.find((node) => node.key === 'access');
-    expect(access?.children?.map((child) => child.key)).toEqual(['logs', 'endpoints', 'log-config']);
-    expect(access?.children?.map((child) => child.label)).toEqual(['日志', '接入点', '日志与保留']);
+    expect(access?.children?.map((child) => child.key)).toEqual(['logs', 'endpoints']);
+    expect(access?.children?.map((child) => child.label)).toEqual(['日志', '接入点']);
     for (const node of NAV) {
       if (node.key !== 'settings' && node.key !== 'access') expect(node.children).toBeUndefined();
     }

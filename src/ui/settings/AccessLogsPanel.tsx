@@ -1,12 +1,13 @@
 /**
- * 接入 →「日志与保留」（P4；开发方案 §4 P4 / §7）。
+ * 「日志与保留」面板（P4；开发方案 §4 P4 / §7）。
  *
- * 组件放在 `settings/` 只是因为历史位置；用户 m00882 起它由
- * `src/ui/access/LogConfigPage.tsx` 挂在接入二级下（原 设置 › 接入与日志 已删）。
+ * 组件放在 `settings/` 只是因为历史位置；用户 m00882 起它归一级「接入」，用户 m01083
+ * 起由日志页的弹框 `src/ui/access/LogConfigModal.tsx` 挂载（原 设置 › 接入与日志 已删，
+ * 曾经短暂作为接入二级独立页也不再有菜单项）。
  *
  * **唯一写入口**：查询日志保留天数、插件运行日志档位/上限/保留，都经
  * `PUT /api/config`（白名单键，原子写回 YAML，daemon 收到后热应用档位）。
- * 日志页右上角的开关只是跳回这里的快捷入口（用户 m02743）。
+ * 日志页右上角的按钮只是打开这个弹框的快捷入口（用户 m02743）。
  */
 import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';

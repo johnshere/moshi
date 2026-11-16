@@ -9,8 +9,8 @@
  *   隐私 → PrivacyPanel（采集/脱敏/导出/清理）
  *   诊断 → DiagPanel（只读自检 I1–I10 / 图质量 / 模型归档）
  *
- * 分类边界（P4 起）：**日志与接入参数归「接入」一级页（日志 / 接入点 / 日志与保留），
- * 配置唯一写入口留在设置**。
+ * 分类边界（P4 起）：**日志与接入参数归「接入」一级页（日志 / 接入点；日志与保留
+ * 按用户 m01083 是日志页里的弹框），配置唯一写入口留在设置**。
  */
 import type { CSSProperties, ReactElement } from 'react';
 import { navigate } from '../shell/navigate.js';

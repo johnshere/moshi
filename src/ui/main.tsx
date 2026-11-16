@@ -4,7 +4,7 @@
  * 分派按 pathname（不引路由库，概设 §8.9，URL 是唯一真相源）：
  * - `/ui/graph|memories|inbox|archive` → 四个一级页；
  * - `/ui/settings` 与 `/ui/settings/<二级>` → `SettingsPage`（二级由 URL 决定，默认配置）；
- * - `/ui/access` → `LogsPage` / `EndpointsPage` / `LogConfigPage`（按二级；P4）；
+ * - `/ui/access` → `LogsPage` / `EndpointsPage`（按二级；P4；「日志与保留」按用户 m01083 改为日志页弹框，不再是二级）；
  *   `/ui/hook` → `AccessPage` 独立整页（设计 §16.5.5）。
  *
  * `Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
@@ -15,7 +15,6 @@ import { createRoot } from 'react-dom/client';
 import { fetchGraph, resolveToken, type GraphPayload } from './api.js';
 import { AccessPage } from './access/AccessPage.js';
 import { EndpointsPage } from './access/EndpointsPage.js';
-import { LogConfigPage } from './access/LogConfigPage.js';
 import { LogsPage } from './access/LogsPage.js';
 import { ArchivePage } from './archive/ArchivePage.js';
 import { MemoriesPage } from './memories/MemoriesPage.js';
@@ -625,7 +624,6 @@ function Root(): JSX.Element {
       {!standalone && route.page === 'inbox' ? <InboxPage /> : null}
       {!standalone && route.page === 'archive' ? <ArchivePage /> : null}
       {!standalone && route.page === 'access' && route.accessSection === 'endpoints' ? <EndpointsPage /> : null}
-      {!standalone && route.page === 'access' && route.accessSection === 'log-config' ? <LogConfigPage /> : null}
       {!standalone && route.page === 'access' && route.accessSection === 'logs' ? <LogsPage /> : null}
       {!standalone && route.page === 'settings' ? (
         <SettingsPage section={route.section ?? DEFAULT_SETTINGS_SECTION} />
