@@ -19,7 +19,7 @@ import { CursorStore } from '../../../core/adapters/cursor.js';
 import { ingestSession } from '../../../core/write/ingest.js';
 import { harvest } from '../../../core/write/harvest.js';
 import { runSchemaInfer } from '../../../core/lifecycle/schema-infer.js';
-import { openDb, closeDb } from '../../../infra/sqlite/db.js';
+import { openDb, closeDb, isBusyError } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { rebuildDegree, rebuildFts, tableCounts } from '../../../infra/sqlite/maintenance.js';
 import { dataPaths, resolveSources } from '../../config.js';
@@ -158,6 +158,45 @@ export interface RunImportDeps {
 }
 
 /**
+ * 批间让锁：daemon 的钩子 / MCP 写入与导入是同一个库的写者。
+ * 一片提交完主动歇 20ms，让等在锁上的写者插进来——否则导入会连着抢锁，
+ * 对方每次都得多等一轮（WAL 写者互斥，读不受影响）。
+ */
+const LOCK_YIELD_MS = 20;
+
+/** 一片 harvest 撞锁（事务级重试已用尽）时的额外重试次数 */
+const IMPORT_BUSY_ATTEMPTS = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+/**
+ * 导入侧单片 harvest。
+ *
+ * 事务级的撞锁重试在 `withTransaction` 里（整笔重来）；这里兜的是"重试也抢不到"的
+ * 极端情形：annotation 还在队列里（`harvested_at IS NULL`），所以这一片可以留给
+ * daemon 的 harvest 或下一次导入，不必让整次导入失败。返回 `null` 表示本轮放弃。
+ */
+async function harvestOneBatch(
+  db: RunImportDeps['db'],
+  opts: ImportOptions,
+): Promise<Awaited<ReturnType<typeof harvest>> | null> {
+  for (let attempt = 1; attempt <= IMPORT_BUSY_ATTEMPTS; attempt += 1) {
+    try {
+      return await harvest(db, { batchSize: opts.batchSize, maxBatches: 1 });
+    } catch (err) {
+      if (!isBusyError(err)) throw err;
+      if (attempt === IMPORT_BUSY_ATTEMPTS) return null;
+      await sleep(LOCK_YIELD_MS * 2 * attempt);
+    }
+  }
+  return null;
+}
+
+/**
  * 导入主流程。抽成函数而不是塞在命令里，是为了能在测试里直接调用
  * （命令层只负责解析参数、开库、打印）。
  */
@@ -211,7 +250,12 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
 
       // 一片一调用：限速与进度都有落点
       for (;;) {
-        const h = await harvest(db, { batchSize: opts.batchSize, maxBatches: 1 });
+        const h = await harvestOneBatch(db, opts);
+        if (h === null) {
+          // 抢不到写锁：剩下的条目留在 annotation 队列里，后台 harvest 会接着做
+          deps.onProgress?.('数据库持续被占用，剩余条目留给后台 harvest 处理\n');
+          break;
+        }
         if (h.scanned === 0) break;
         result.facts += h.created;
         result.refreshed += h.refreshed + h.recreated + h.superseded + h.coexist;
@@ -224,6 +268,7 @@ export async function runImport(deps: RunImportDeps): Promise<ImportResult> {
           )} quarantined\n`,
         );
         await limiter.take(h.created + h.refreshed);
+        await sleep(LOCK_YIELD_MS);
       }
     }
   }

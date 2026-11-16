@@ -172,7 +172,8 @@ describe('连接 PRAGMA（详设 §2.2 第 0 段）', () => {
   it('外键、busy_timeout、WAL 都设上了', () => {
     const { db } = tempDb();
     expect(db.pragma('foreign_keys', { simple: true })).toBe(1);
-    expect(db.pragma('busy_timeout', { simple: true })).toBe(5000);
+    // 10s：daemon 与导入子进程同时写同一文件，5s 不够一批事实的事务跑完（V-07B）
+    expect(db.pragma('busy_timeout', { simple: true })).toBe(10_000);
     expect(db.pragma('journal_mode', { simple: true })).toBe('wal');
     expect(db.pragma('synchronous', { simple: true })).toBe(1); // NORMAL
   });

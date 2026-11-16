@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { MoshiError } from '../../domain/errors.js';
 import { setMeta } from '../../infra/sqlite/metaRepo.js';
+import { retryBusyAsync } from '../../infra/sqlite/db.js';
 import { ANNOTATIONS, DESCRIPTIONS, TITLES, type ToolName } from './descriptions.js';
 import { annotateShape, correctShape, feedbackShape, queryShape } from './schemas.js';
 import { runMemoryQuery } from './query.js';
@@ -87,7 +88,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     description: DESCRIPTIONS.memory_annotate,
     annotations: ANNOTATIONS.memory_annotate,
     shape: annotateShape,
-    run: (deps, args) => jsonResult(runMemoryAnnotate(deps, z.object(annotateShape).parse(args))),
+    run: async (deps, args) =>
+      jsonResult(
+        await retryBusyAsync(() => runMemoryAnnotate(deps, z.object(annotateShape).parse(args))),
+      ),
   },
   {
     name: 'memory_feedback',
@@ -95,7 +99,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     description: DESCRIPTIONS.memory_feedback,
     annotations: ANNOTATIONS.memory_feedback,
     shape: feedbackShape,
-    run: (deps, args) => jsonResult(runMemoryFeedback(deps, z.object(feedbackShape).parse(args))),
+    run: async (deps, args) =>
+      jsonResult(
+        await retryBusyAsync(() => runMemoryFeedback(deps, z.object(feedbackShape).parse(args))),
+      ),
   },
   {
     name: 'memory_correct',
@@ -103,7 +110,10 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     description: DESCRIPTIONS.memory_correct,
     annotations: ANNOTATIONS.memory_correct,
     shape: correctShape,
-    run: (deps, args) => jsonResult(runMemoryCorrect(deps, z.object(correctShape).parse(args))),
+    run: async (deps, args) =>
+      jsonResult(
+        await retryBusyAsync(() => runMemoryCorrect(deps, z.object(correctShape).parse(args))),
+      ),
   },
 ];
 

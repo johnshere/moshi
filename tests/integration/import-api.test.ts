@@ -13,7 +13,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildHttpApp } from '../../src/app/http/server.js';
 import { loadConfig } from '../../src/app/config.js';
-import type { ImportChild, ImportSpawn } from '../../src/app/http/routes/import.js';
+import { createDefaultSpawn, type ImportChild, type ImportSpawn } from '../../src/app/http/routes/import.js';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 
@@ -76,7 +76,9 @@ function fakeSpawn(): { spawn: ImportSpawn; last: () => Spawned } {
   };
 }
 
-async function makeApp(opts: { spawn?: ImportSpawn | null } = {}): Promise<void> {
+async function makeApp(
+  opts: { spawn?: ImportSpawn | null; configFile?: string } = {},
+): Promise<void> {
   const home = tempDir();
   const cfg = loadConfig({ home });
   // 降级路径要确定性：不扫这台机器上真实的会话目录
@@ -87,7 +89,7 @@ async function makeApp(opts: { spawn?: ImportSpawn | null } = {}): Promise<void>
     token: TOKEN,
     uiDistDir: uiDist(home),
     home,
-    configFile: path.join(home, 'config.yaml'),
+    configFile: opts.configFile ?? path.join(home, 'config.yaml'),
     ...(opts.spawn === undefined ? {} : { importSpawn: opts.spawn }),
   });
   appRef.app = app;
@@ -201,6 +203,34 @@ describe('POST /api/import', () => {
     const result = done['result'] as Record<string, unknown>;
     expect(result['facts']).toBe(40);
     expect(result['promoted']).toBe(3);
+  });
+
+  it('默认 spawn 工厂让子进程继承 daemon 配置（MOSHI_CONFIG）且参数不变', async () => {
+    const configFile = path.join(tempDir(), 'daemon-config.yaml');
+    const captured: { command: string; args: string[]; env: NodeJS.ProcessEnv }[] = [];
+    // 用假进程实现替掉 child_process.spawn：断言工厂构造出的 env/stdio，不真的起进程
+    const spawnFn = createDefaultSpawn(configFile, (command, args, options) => {
+      captured.push({ command, args: [...args], env: options.env });
+      return new FakeChild() as unknown as ImportChild;
+    });
+
+    await makeApp({ spawn: spawnFn, configFile });
+    const res = await call('POST', '/api/import', { since: '2026-01-01' });
+    expect(res.statusCode).toBe(202);
+
+    const spawned = captured[0];
+    if (spawned === undefined) throw new Error('没有发生 spawn');
+    expect(spawned.command).toBe(process.execPath);
+    expect(spawned.args.slice(1)).toEqual([
+      'import',
+      '--since',
+      '2026-01-01T00:00:00.000Z',
+      '--json',
+    ]);
+    // 子进程无条件拿到 daemon 已解析的配置路径（客户不必知道启动时要加 --config）
+    expect(spawned.env['MOSHI_CONFIG']).toBe(configFile);
+    // 是「继承 process.env 再覆盖」而不是只带一个变量
+    expect(Object.keys(spawned.env).length).toBeGreaterThan(1);
   });
 
   it('进度行只保留最近 50 条', async () => {

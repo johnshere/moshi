@@ -70,6 +70,8 @@ export interface ImportRoutesOpts {
   home: string;
   /** `dataPaths(cfg)`：游标文件复用 CLI 那份 */
   paths: ReturnType<typeof dataPaths>;
+  /** daemon 已解析的配置文件路径：子进程靠 `MOSHI_CONFIG` 读同一份配置 */
+  configFile: string;
   /** spawn 注入；`null` = 强制进程内降级（测试用），`undefined` = 自动判定 */
   spawn?: ImportSpawn | null;
 }
@@ -124,9 +126,31 @@ function daemonEntry(): string | null {
   return resolved;
 }
 
-/** 默认 spawn：`execPath + [入口, ...args]`，等价于命令行 `moshi import ...` */
-const defaultSpawn: ImportSpawn = (command, args) =>
-  spawn(command, [...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+/** 默认 spawn 的进程实现：生产是 `child_process.spawn`，测试可注入假实现 */
+type SpawnProcess = (
+  command: string,
+  args: readonly string[],
+  options: { stdio: ['ignore', 'pipe', 'pipe']; env: NodeJS.ProcessEnv },
+) => ImportChild;
+
+/**
+ * 默认 spawn 工厂：`execPath + [入口, ...args]`，等价于命令行 `moshi import ...`。
+ *
+ * 子进程**无条件**带上 daemon 已解析的配置路径（`MOSHI_CONFIG`）：客户不该知道
+ * 启动 daemon 时要加 `--config`，否则子进程会按默认配置解析 data_dir / 采集源，
+ * 把数据写进 `~/.moshi` 而 daemon 在用的库根本没变。`defaultConfigPath()` 认的
+ * 就是同一个环境变量，所以这份配置路径在两侧一致。
+ */
+export function createDefaultSpawn(
+  configFile: string,
+  spawnProcess: SpawnProcess = (command, args, options) => spawn(command, [...args], options),
+): ImportSpawn {
+  return (command, args) =>
+    spawnProcess(command, args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, MOSHI_CONFIG: configFile },
+    });
+}
 
 /** stdout 末尾一行 JSON（CLI `--json` 的契约）；解析不出来就当失败 */
 function parseResult(raw: string): ImportResult | null {
@@ -229,7 +253,12 @@ export function importRoutes(app: FastifyInstance, opts: ImportRoutesOpts): void
     stderrBuf = '';
 
     const entry = daemonEntry();
-    const spawnFn = opts.spawn === undefined ? (entry === null ? null : defaultSpawn) : opts.spawn;
+    const spawnFn =
+      opts.spawn === undefined
+        ? entry === null
+          ? null
+          : createDefaultSpawn(opts.configFile)
+        : opts.spawn;
     if (spawnFn === null) {
       startInProcess(since);
       return;

@@ -215,6 +215,8 @@ export async function buildHttpApp(deps: HttpDeps) {
       : scoreWithBreaker(rawScore, breaker, () => sidecar?.status().state === 'failed');
   const encode = sidecar === undefined ? undefined : encodeViaSidecar(sidecar);
 
+  // 配置文件路径：hook 写配置与导入子进程继承配置共用同一个已解析值
+  const configFile = deps.configFile ?? defaultConfigPath();
   // ── 钩子服务面（Z-01C）：`/hook/api/*` 与 `/ui/hook` ──
   // 钩子台账是**另一个** ring buffer（默认只记计数与枚举），与证据链那份分开；
   // 落盘档位由 `hook_plugin_trace.level` 决定（off 不写盘，summary/full 见 traceSink）。
@@ -236,7 +238,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     deps: hookDeps,
     trace: hookTrace,
     sink: hookTraceSink,
-    configFile: deps.configFile ?? defaultConfigPath(),
+    configFile,
     token: deps.token,
     connection,
   });
@@ -267,6 +269,7 @@ export async function buildHttpApp(deps: HttpDeps) {
     cfg: deps.cfg,
     home: deps.home ?? os.homedir(),
     paths: dataPaths(deps.cfg),
+    configFile,
     ...(deps.importSpawn === undefined ? {} : { spawn: deps.importSpawn }),
   });
 
