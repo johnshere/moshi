@@ -35,6 +35,8 @@ import { HistoryPanel } from './history/HistoryPanel.js';
 import { InboxPage } from './inbox/InboxPage.js';
 import { useActivity } from './state/activity.js';
 import { refreshLatestTrace, useTrace } from './state/trace.js';
+import { resetPaletteCache } from './graph/pure/palette.js';
+import { applyMode, storedMode, subscribeMode, watchSystem } from './theme.js';
 import { useFilter } from './state/filter.js';
 import { useSelection } from './state/selection.js';
 import { FilterBar } from './filter/FilterBar.js';
@@ -114,13 +116,16 @@ function Badge({ label, value }: { label: string; value: string }): JSX.Element 
 
 function switchStyle(active: boolean): CSSProperties {
   return {
-    background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-    border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
-    borderRadius: 4,
-    padding: '2px 10px',
+    background: active ? 'var(--color-bg-raised)' : 'transparent',
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+    border: 'none',
+    borderRadius: 999,
+    padding: '3px 12px',
     cursor: active ? 'default' : 'pointer',
     font: 'inherit',
+    fontWeight: active ? 600 : 400,
+    boxShadow: active ? 'var(--shadow-menu)' : 'none',
+    transition: 'background-color 140ms ease, color 140ms ease',
   };
 }
 
@@ -128,7 +133,7 @@ const buttonStyle: CSSProperties = {
   background: 'var(--color-bg-overlay)',
   color: 'var(--color-text-secondary)',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 4,
+  borderRadius: 8,
   padding: '2px 10px',
   cursor: 'pointer',
   font: 'inherit',
@@ -312,6 +317,8 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
   const [stats3d, setStats3d] = useState<GraphStats | null>(null);
   const [stats2d, setStats2d] = useState<Graph2DStats | null>(null);
   const [view, setView] = useState<View>(initialView);
+  /** 主题每次切换自增：画布里的颜色是建场景时取的，得重建才跟上新主题 */
+  const [themeTick, setThemeTick] = useState(0);
   const [limit, setLimit] = useState<number>(initialLimit);
   const abortRef = useRef<AbortController | null>(null);
   /**
@@ -357,6 +364,15 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  // 主题切换：清掉 palette 的进程内缓存，并让画布重建一次（不动数据、不动筛选）
+  useEffect(() => {
+    const off = subscribeMode(() => {
+      resetPaletteCache();
+      setThemeTick((v) => v + 1);
+    });
+    return off;
   }, []);
 
   useEffect(() => {
@@ -476,7 +492,11 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
     <div style={{ position: 'absolute', inset: 0 }}>
       {/* 表格是第三态：切过去时图整体卸载（不保留 3D 场景、也不保留表格的分页状态） */}
       {isTable && <FactsTable />}
-      {!isTable && data !== null && (is2d ? <Graph2D data={data} onStats={setStats2d} /> : <Graph3D data={data} onStats={setStats3d} />)}
+      {!isTable && data !== null && (is2d ? (
+        <Graph2D key={themeTick} data={data} onStats={setStats2d} />
+      ) : (
+        <Graph3D key={themeTick} data={data} onStats={setStats3d} />
+      ))}
 
       {/* 检查器（P2-06）：右侧抽屉，三视图共用 focusId（表格行 / 3D / 2D 点选都写同一个 store） */}
       <Inspector />
@@ -486,26 +506,36 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
 
       <div
         className="moshi-hud"
+        data-plain={isTable ? 'true' : 'false'}
         style={{
           position: 'absolute',
           top: 0,
           left: 0,
           right: 0,
-          padding: '10px 14px',
-          background: isTable
-            ? 'transparent'
-            : 'linear-gradient(180deg, color-mix(in srgb, var(--color-bg-overlay) 58%, transparent), color-mix(in srgb, var(--color-bg-base) 34%, transparent))',
+          padding: '16px 22px 12px',
+          // 底色见 app.css 的 .moshi-hud：亮色主题下画布是深场，HUD 需要更实的底才读得清
           pointerEvents: 'none',
           fontSize: 12,
           lineHeight: 1.7,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 14, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
+          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--color-text-primary)', letterSpacing: '-0.01em' }}>
             {t('graph.title')}{' '}
-            <span style={{ color: 'var(--color-text-faint)', fontSize: 12 }}>{t(tagKey)}</span>
+            <span style={{ color: 'var(--color-text-faint)', fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{t(tagKey)}</span>
           </div>
-          <span style={{ pointerEvents: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+          <span
+            style={{
+              pointerEvents: 'auto',
+              display: 'inline-flex',
+              gap: 2,
+              alignItems: 'center',
+              padding: 2,
+              borderRadius: 999,
+              border: '1px solid var(--color-border-subtle)',
+              background: 'var(--color-bg-overlay)',
+            }}
+          >
             {VIEWS.map((item) => (
               <button
                 key={item.v}
@@ -525,7 +555,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           </span>
         </div>
         {/* 筛选条：三视图共享同一份状态（详设 §10.2），URL 是唯一真相源，写 URL 可分享可回退 */}
-        <div style={{ pointerEvents: 'auto', marginTop: 6 }}>
+        <div style={{ pointerEvents: 'auto', marginTop: 10 }}>
           <FilterBar />
         </div>
         {/* 表格态的状态栏在表格自己的底栏里（行数 / 请求数 / fps 钩子），HUD 不再重复 */}
@@ -587,11 +617,11 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
       {/* 表格态的操作提示由表格自己的底栏承担（那边还有行数/请求数），这里不再叠一层 */}
       {!isTable && (
         <div
+          className="moshi-stage-note"
           style={{
             position: 'absolute',
             bottom: 8,
             left: 14,
-            color: 'var(--color-text-faint)',
             fontSize: 11,
             pointerEvents: 'none',
           }}
@@ -660,4 +690,8 @@ function onboardResultOf(search: string): 'ok' | 'fail' | null {
 
 const host = document.getElementById('root');
 if (host === null) throw new Error('#root not found');
+// 首屏把主题落到 <html> 上（index.html 已经先做过一次，这里接管系统偏好变化）
+applyMode(storedMode());
+watchSystem();
+
 createRoot(host).render(<Root />);

@@ -10,6 +10,7 @@ import { NAV, hrefForPath, lightColor, pageHref, queueBadge, statusLights, type 
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { LocaleSwitch } from './LocaleSwitch.js';
+import { ThemeSwitch } from './ThemeSwitch.js';
 import { useT } from '../i18n/index.js';
 import { fetchQueueCounts, fetchStatus } from './api.js';
 import { FirstRun } from './FirstRun.js';
@@ -27,34 +28,59 @@ const shellStyle: CSSProperties = {
   overflow: 'hidden',
   background: 'var(--color-bg-base)',
   color: 'var(--color-text-secondary)',
-  fontFamily: 'ui-sans-serif, system-ui, "Segoe UI", sans-serif',
+  fontFamily:
+    "'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
 };
 
 const navStyle: CSSProperties = {
-  width: 172,
-  flex: '0 0 172px',
+  width: 208,
+  flex: '0 0 208px',
   display: 'flex',
   flexDirection: 'column',
   boxSizing: 'border-box',
-  padding: '10px 8px',
-  gap: 2,
+  padding: '14px 12px',
+  gap: 4,
 };
 
 const brandStyle: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
   color: 'var(--color-text-primary)',
-  fontSize: 15,
+  fontSize: 14,
   fontWeight: 600,
-  letterSpacing: 1,
-  padding: '4px 10px 12px',
+  letterSpacing: '.02em',
+  padding: '4px 10px 14px',
+};
+
+/** 品牌标记：一个小方块 + 一个强调色圆点，成本极低但让左栏有「头」 */
+const brandMarkStyle: CSSProperties = {
+  width: 22,
+  height: 22,
+  borderRadius: 7,
+  border: '1px solid var(--color-border-subtle)',
+  background: 'var(--color-bg-overlay)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  position: 'relative',
+  flex: 'none',
+};
+
+const brandDotStyle: CSSProperties = {
+  width: 6,
+  height: 6,
+  borderRadius: '50%',
+  background: 'var(--color-accent)',
 };
 
 const topbarStyle: CSSProperties = {
-  height: 46,
-  flex: '0 0 46px',
+  height: 56,
+  flex: '0 0 56px',
   display: 'flex',
   alignItems: 'center',
-  gap: 12,
-  padding: '0 12px',
+  gap: 14,
+  padding: '0 16px',
   background: 'var(--color-bg-raised)',
   borderBottom: '1px solid var(--color-border-subtle)',
   boxSizing: 'border-box',
@@ -65,11 +91,12 @@ function navItemStyle(active: boolean): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    padding: '7px 10px',
-    borderRadius: 5,
+    padding: '8px 10px',
+    borderRadius: 8,
     color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
     textDecoration: 'none',
     fontSize: 13,
+    fontWeight: active ? 600 : 400,
     cursor: 'pointer',
   };
 }
@@ -80,8 +107,8 @@ function navChildStyle(active: boolean): CSSProperties {
     display: 'flex',
     alignItems: 'center',
     padding: '5px 10px 5px 24px',
-    borderRadius: 5,
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
+    borderRadius: 7,
+    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
     textDecoration: 'none',
     fontSize: 12,
     cursor: 'pointer',
@@ -226,7 +253,12 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
       {onboardOpen ? null : <FirstRun />}
       <OnboardModal onOpenChange={setOnboardOpen} />
       <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
-        <div style={brandStyle}>{t('app.brand')}</div>
+        <div style={brandStyle}>
+          <span style={brandMarkStyle} aria-hidden="true">
+            <span style={brandDotStyle} />
+          </span>
+          {t('app.brand')}
+        </div>
         {NAV.map((node) => {
           const active = node.key === route;
           return (
@@ -284,6 +316,7 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
         <header style={topbarStyle}>
           <div style={{ flex: 1 }} />
           <LocaleSwitch />
+          <ThemeSwitch />
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
             {lights.map((light) => (
               <span

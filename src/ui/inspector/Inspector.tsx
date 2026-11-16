@@ -111,7 +111,7 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
             background: 'var(--color-bg-raised)',
             color: 'var(--color-text-primary)',
             border: '1px solid var(--color-border-subtle)',
-            borderRadius: 4,
+            borderRadius: 8,
             padding: '2px 6px',
             width: 72,
             font: 'inherit',
@@ -125,7 +125,7 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
             background: 'var(--color-bg-hover)',
             color: 'var(--color-text-secondary)',
             border: '1px solid var(--color-border-strong)',
-            borderRadius: 4,
+            borderRadius: 8,
             padding: '2px 8px',
             cursor: 'pointer',
             font: 'inherit',
@@ -181,7 +181,7 @@ function SectionCard({
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 6, marginBottom: 8, background: 'var(--color-bg-overlay)' }}>
+    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, marginBottom: 8, background: 'var(--color-bg-overlay)' }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -391,7 +391,7 @@ export function Inspector(): JSX.Element {
       {error !== null && (
         <div style={{ padding: 12, color: 'var(--color-danger)' }}>
           {t('inspector.loadFailed', { error })}
-          <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: 'var(--color-text-secondary)', background: 'transparent', border: '1px solid var(--color-border-subtle)', borderRadius: 4, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
+          <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: 'var(--color-text-secondary)', background: 'transparent', border: '1px solid var(--color-border-subtle)', borderRadius: 8, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
             {t('common.close')}
           </button>
         </div>

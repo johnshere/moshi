@@ -8,7 +8,7 @@ const groupStyle: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   border: '1px solid var(--color-border-subtle)',
-  borderRadius: 4,
+  borderRadius: 8,
   overflow: 'hidden',
 };
 
