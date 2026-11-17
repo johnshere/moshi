@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>默识（moshi）系统架构 · 总图 v3 · 数据流转 / 模块依赖</title>
+<style>
+:root{
+  --bg:#0A0F14; --panel:#0F1922; --panel2:#0C151D; --line:#22303C;
+  --tx:#E6EDF5; --sub:#93A3B4; --mut:#6C7C8C;
+  --amber:#E0A63C; --teal:#35C2B0; --violet:#9A7BE8; --blue:#5B8FB9; --red:#E0625C;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--tx);
+  font-family:"Noto Sans SC","Microsoft YaHei","PingFang SC",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1640px;margin:0 auto;padding:0 28px 96px}
+.kicker{display:flex;gap:14px;align-items:center;padding:30px 0 6px;font:500 12px/1.6 ui-monospace,Consolas,monospace;color:var(--mut);letter-spacing:.06em}
+.kicker b{color:var(--teal);font-weight:600}
+h1{font-family:"Noto Serif SC",Songti SC,serif;font-weight:600;font-size:46px;line-height:1.15;margin:8px 0 14px;letter-spacing:.01em}
+h1 em{font-style:normal;color:var(--teal)}
+.lede{max-width:1080px;color:var(--sub);font-size:16px;line-height:1.85;margin:0 0 22px}
+.lede b{color:var(--tx);font-weight:600}
+.lede code{font:13px/1 ui-monospace,Consolas,monospace;color:var(--teal)}
+.meta{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:0 0 44px}
+.meta div{background:var(--panel2);padding:14px 18px}
+.meta span{display:block;font:500 11px/1.6 ui-monospace,Consolas,monospace;color:var(--mut);letter-spacing:.08em;text-transform:uppercase}
+.meta b{display:block;font-size:14px;font-weight:500;margin-top:6px;color:var(--tx)}
+.sec{margin:0 0 56px}
+.sechead{display:flex;align-items:baseline;gap:14px;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:18px}
+.sechead .no{font:600 12px/1 ui-monospace,monospace;color:var(--mut);letter-spacing:.1em}
+.sechead h2{font-family:"Noto Serif SC",Songti SC,serif;font-size:26px;font-weight:600;margin:0}
+.sechead .tip{margin-left:auto;font-size:12.5px;color:var(--mut)}
+.fig{max-width:720px;margin:0 auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}
+.figbar{display:flex;align-items:center;gap:12px;padding:11px 16px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.figbar .t{font-size:13px;font-weight:600;color:var(--tx)}
+.figbar .tag{font:500 10.5px/1 ui-monospace,monospace;letter-spacing:.1em;color:var(--mut);border:1px solid var(--line);border-radius:4px;padding:4px 7px}
+.figbar .sp{flex:1}
+.figbar .hint{font-size:11.5px;color:var(--mut)}
+.fig .mermaid{display:flex;justify-content:center;padding:22px 10px 12px;overflow:auto}
+.fig .mermaid svg{max-width:100%;height:auto}
+.fig .mermaid:not(:has(svg)){color:var(--mut);font:12px/1.8 ui-monospace,monospace;white-space:pre}
+.legend{display:flex;flex-wrap:wrap;gap:22px;padding:12px 18px 16px;font-size:12.5px;color:var(--sub);border-top:1px solid var(--line)}
+.legend i{display:inline-block;width:22px;height:3px;border-radius:2px;vertical-align:middle;margin-right:7px}
+.legend .w i{background:var(--amber)} .legend .r i{background:var(--teal)} .legend .m i{background:var(--violet)} .legend .x i{background:var(--red)}
+.legend code{font:12px/1 ui-monospace,Consolas,monospace;color:var(--teal)}
+.read3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin:0 0 40px}
+.read3 div{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:16px 18px}
+.read3 h3{margin:0 0 8px;font-size:14px;font-weight:600}
+.read3 p{margin:0;font-size:13px;line-height:1.75;color:var(--sub)}
+.read3 b{color:var(--tx)}
+.redlines{border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:6px 20px 14px}
+.redlines li{font-size:13px;line-height:1.85;color:var(--sub)}
+.redlines li b{color:var(--tx)}
+.redlines code{font:12px/1 ui-monospace,Consolas,monospace;color:var(--teal)}
+.foot{border-top:1px solid var(--line);margin-top:40px;padding-top:18px;color:var(--mut);font-size:12px;line-height:1.9}
+.foot b{color:var(--sub);font-weight:500}
+.foot code{font:11.5px/1 ui-monospace,Consolas,monospace;color:var(--teal)}
+#offscreen{display:none;border:1px solid var(--red);border-radius:8px;padding:12px 16px;margin:0 0 20px;color:#F2B8B5;font-size:13px;background:#1a1012}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker"><span>ARCH-V3</span><span>·</span><span>基线 2026-11-17</span><span>·</span><span>目标形态（编号沿用 v2 的 WR / RD）</span><span>·</span><span><b>只画两件事：数据怎么走 / 模块谁依赖谁</b></span></div>
+  <h1>默识（moshi）<em>总图 v3</em></h1>
+  <p class="lede">v3 用 <b>Mermaid Flowchart</b>（jsDelivr CDN 加载）画，不再手绘 SVG：布局交给引擎，人只管「节点是谁、边指向谁」。<b>流转与依赖分开画</b>：图 1 只回答「一次对话怎么变成事实、又怎么回到上下文」，图 2 只回答「哪些模块能依赖哪些模块」。算法细节、SLO、现状差距都不在图上。</p>
+
+  <div id="offscreen">未加载到 Mermaid（浏览器处于离线或 CDN 被拦）。页面结构仍在，但两张图需要联网渲染：<code>cdn.jsdelivr.net/npm/mermaid@10</code></div>
+
+  <div class="meta">
+    <div><span>PROCESS</span><b>1 Node daemon + 0/1 Python sidecar</b></div>
+    <div><span>STORE</span><b>SQLite WAL · FTS5 · vec0 512</b></div>
+    <div><span>HOT PATH</span><b>写 &lt; 5ms 落缓冲 · 读 P95 80ms</b></div>
+    <div><span>WRITE GATE</span><b>唯一写入口 harvest（直写也先进缓冲）</b></div>
+  </div>
+
+  <div class="read3">
+    <div><h3>横看 · 流转（图 1）</h3><p>橙色是写入：五面接入 → 装配 → 五个写能力 → WR0–WR8 → 落盘。青色是读取：落盘 → 三路召回 → … → 注入。两条流<b>只在存储交汇</b>，代码路径永不交叉。</p></div>
+    <div><h3>竖看 · 依赖（图 2）</h3><p>箭头一律指向被依赖方，<b>越往下越纯</b>。上层认识下层，下层永远不知道上层；红色 ✕ 是三条硬红线。</p></div>
+    <div><h3>只看两件事</h3><p>这张图回答「数据怎么走」「模块谁依赖谁」。<b>判断支路</b>（GAT → Attention → FFN）挂在读取链路最后一米，是可缺席依赖。</p></div>
+  </div>
+
+  <section class="sec">
+    <div class="sechead"><span class="no">01</span><h2>数据流转：一条去，一条回</h2><span class="tip">写入向下 → 存储 → 读取向上 → 注入 · 交汇点只有存储</span></div>
+    <div class="fig">
+      <div class="figbar"><span class="t">图 1 · 数据流转总图</span><span class="tag">FLOWCHART</span><span class="sp"></span><span class="hint">WR = 写入环节 · RD = 读取环节</span></div>
+<pre class="mermaid">
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 26, "rankSpacing": 40, "padding": 10}}}%%
+flowchart TD
+  subgraph W["写入 · 一次对话变成一条事实"]
+    direction TB
+    A["五面接入<br/>hook · MCP · REST · CLI · UI"]
+    B["装配 · 唯一开门人<br/>caps × mode 矩阵 · 矩阵外直接拒绝"]
+    C["五个写能力<br/>capture / collect / import / annotate / correct"]
+    D["WR0–WR4<br/>扫块 · 脱敏 · 隔离 · 留档 · 抽取"]
+    E["WR5–WR8<br/>消解 · 幂等 · 冲突 · 落库生边 · 投影"]
+    A --> B --> C --> D --> E
+  end
+
+  S["存储 · 唯一写者<br/>fact · edge · entity · alias ｜ episode · annotation<br/>索引 FTS5 · vec0 ｜ 归档 · 审计 · 日志 ｜ query_log · training_sample"]
+  E -->|写入| S
+
+  subgraph R["读取 · 一条事实图回到上下文"]
+    direction TB
+    R1["RD3 三路召回<br/>向量 KNN · BM25 · PPR"]
+    R2["RD4 RRF 融合<br/>k=60 + 实体命中 + 时序"]
+    R3["RD5 子图装载<br/>1–2 跳 · 64 节点 · 192 边"]
+    R4["RD6 GAT 前向<br/>GAT → 交叉 Attn → FFN"]
+    R5["RD7 五步裁决<br/>时态 · 互斥 · 低置信 · 身份"]
+    R6["RD8 双池装箱<br/>1500 token · utility 7 : floor 3"]
+    R7["RD9 证据包<br/>moshi-evidence/1 · M# · 置信 · 依赖链"]
+    R8["注入 / 返回<br/>§HOOK-MAIL · MCP · REST · 空结果也合法"]
+    R1 --> R2 --> R3 --> R4 --> R5 --> R6 --> R7 --> R8
+  end
+  S -->|读取| R1
+
+  subgraph G["自成长回路 · 埋点 → 训练 → 权重热加载"]
+    direction TB
+    K["埋点 · 反馈<br/>采纳 / 否定 / 修正"]
+    T["训练<br/>train.py · 子图样本 · 双头 δ / overturn"]
+    Wt["权重<br/>gat-v1.pt · model_version"]
+    K --> T --> Wt
+  end
+
+  SB["Sidecar · 可选依赖 · 被 RD3 调 /encode、RD6 调 /score<br/>GAT + 交叉 Attention + FFN<br/>缺席即 no_sidecar，退化为纯符号"]
+
+  R8 -.-> K
+  R1 -.-> SB
+  R4 -.-> SB
+  Wt -.-> SB
+
+  classDef w fill:#191410,stroke:#E0A63C,color:#F2DCA8,stroke-width:1.2px
+  classDef r fill:#0D1A19,stroke:#35C2B0,color:#BFEDE6,stroke-width:1.2px
+  classDef m fill:#141122,stroke:#9A7BE8,color:#DCCFF7,stroke-width:1.4px
+  classDef s fill:#0B1621,stroke:#5B8FB9,color:#D6E7F3,stroke-width:2.2px
+  class A,B,C,D,E w
+  class R1,R2,R3,R4,R5,R6,R7,R8 r
+  class K,T,Wt,SB m
+  class S s
+  linkStyle 4,5 stroke:#5B8FB9,stroke-width:2.4px
+  linkStyle 15,16,17,18 stroke:#9A7BE8,stroke-dasharray:4 3
+</pre>
+      <div class="legend">
+        <span class="w"><i></i>写入链路</span>
+        <span class="s"><i></i>存储 · 唯一交汇点</span>
+        <span class="r"><i></i>读取链路</span>
+        <span class="m"><i></i>判断支路与训练闭环</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sechead"><span class="no">02</span><h2>模块依赖：谁认识谁</h2><span class="tip">依赖方向 = 代码 import 方向，不是数据方向</span></div>
+    <div class="fig">
+      <div class="figbar"><span class="t">图 2 · 七层依赖</span><span class="tag">FLOWCHART</span><span class="sp"></span><span class="hint">层内顺序 = 同层职责，不表示调用顺序</span></div>
+<pre class="mermaid">
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 20, "rankSpacing": 40, "padding": 10}}}%%
+flowchart TD
+  L1["① 宿主 · 进程外 · 对话发生地<br/>Magpie ｜ Claude Code ｜ DSH ｜ moshi CLI ｜ 浏览器 /ui"]
+  L2["② 接入 · 方言胶水，只翻译，不判断<br/>hook 适配器 · MCP 面 · REST 面 · CLI 面 · UI 面 · 入驻探测"]
+  L3["③ 组装 app · 唯一同时握两支的地方<br/>main · 5 条 Runner · jobs · hook/service · http/server"]
+  L4["④ 领域 core · 不懂 HTTP；read 与 write 不互引<br/>write · read · lifecycle · archive · collect · parse · hook · diag/ops · adapters"]
+  L5["⑤ 类型 domain · 纯函数 · 不变量<br/>types/enums · identity · subgraph"]
+  L6["⑥ 适配 infra · 一切 IO 都在这层<br/>sqlite · vec · sidecar · fs · log · proc"]
+  L7["⑦ 进程外 · 可缺席<br/>moshi.db · 归档目录 · 会话文件 · Python sidecar"]
+
+  L1 --> L2 --> L3 --> L4
+  L4 --> L5
+  L4 --> L6 --> L7
+  L4 -.->|✕ core 不 import app| L3
+  L5 -.->|✕ 类型层不碰 IO| L6
+
+  classDef l1 fill:#101B24,stroke:#3B4A63,color:#DCE6F0,stroke-width:1.2px
+  classDef l2 fill:#0E1C22,stroke:#2F5A57,color:#CDE8E4,stroke-width:1.2px
+  classDef l3 fill:#0E1A24,stroke:#3A5670,color:#D3E2EE,stroke-width:1.2px
+  classDef l4 fill:#1A1610,stroke:#8A6A2A,color:#EBDFC6,stroke-width:2px
+  classDef l5 fill:#0E1826,stroke:#3A4A5E,color:#D3DEEA,stroke-width:1.2px
+  classDef l6 fill:#0E1A1C,stroke:#3E4A52,color:#CFDDE2,stroke-width:1.2px
+  classDef l7 fill:#0E1720,stroke:#33424E,color:#CBD8E2,stroke-width:1.2px
+  class L1 l1
+  class L2 l2
+  class L3 l3
+  class L4 l4
+  class L5 l5
+  class L6 l6
+  class L7 l7
+  linkStyle 0,1,2,3,4,5 stroke:#5F7A8C,stroke-width:2.2px
+  linkStyle 6,7 stroke:#E0625C,stroke-width:1.6px
+</pre>
+      <div class="legend">
+        <span class="r"><i></i>依赖只能向下</span>
+        <span class="x"><i></i>硬红线（禁止边）</span>
+        <span>app 是唯一同时 import <code>core/read</code> 与 <code>core/write</code> 的地方；两者共享的东西只能下沉到 domain</span>
+      </div>
+    </div>
+  </section>
+
+  <div class="redlines">
+    <ul>
+      <li><b>read ↛ write</b>：两条正交支路，禁止互相 import；运行时都碰同一个 SQLite，那是数据交汇，不是代码耦合。</li>
+      <li><b>core ↛ app / http</b>：领域层不认识接入与组装，只接收已归一化的调用。</li>
+      <li><b>domain ↛ infra</b>：类型层不碰 IO；业务代码拿不到裸 SQL，一律经 <code>infra/sqlite</code> 的专用方法。</li>
+      <li><b>Sidecar 可缺席</b>：它是唯一允许「不在」的依赖——缺席即 <code>no_sidecar</code>，读取退化为纯符号，不阻塞主链路。</li>
+    </ul>
+  </div>
+
+  <div class="foot">
+    <b>渲染</b>：Mermaid 10（CDN <code>cdn.jsdelivr.net/npm/mermaid@10</code>）在浏览器里生成 SVG，图源就是上面两段 flowchart 文本，改图 = 改文本。<br>
+    <b>口径</b>：目标形态；步骤编号（WR0–WR8 / RD1–RD9）沿用 v2，模块名与目录以代码为准。RD1（入口）与 RD2（分流）折叠在图 1 的「五面接入 · 装配」里，不在读链上重复画。<br>
+    <b>不在本图</b>：算法细节（RRF 权重、GAT 结构、裁决五步的实现）、SLO 明细、现状差距——分别见《调研-数据来源与存储矩阵》与详设。
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+(function () {
+  if (!window.mermaid) { document.getElementById('offscreen').style.display = 'block'; return; }
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    securityLevel: 'loose',
+    themeVariables: {
+      darkMode: true,
+      background: '#0F1922',
+      primaryColor: '#141C24',
+      primaryTextColor: '#E6EDF5',
+      primaryBorderColor: '#3A4E60',
+      lineColor: '#4E6577',
+      textColor: '#D5E1EC',
+      mainBkg: '#141C24',
+      clusterBkg: '#0C1622',
+      clusterBorder: '#2D4459',
+      titleColor: '#A9BACA',
+      edgeLabelBackground: '#0F1922',
+      fontFamily: '"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif',
+      fontSize: '13px'
+    },
+    flowchart: { curve: 'basis', htmlLabels: true, useMaxWidth: true, nodeSpacing: 22, rankSpacing: 44, padding: 12 }
+  });
+  setTimeout(function () {
+    var bad = [].slice.call(document.querySelectorAll('.mermaid')).every(function (n) { return !n.querySelector('svg'); });
+    if (bad) document.getElementById('offscreen').style.display = 'block';
+  }, 4000);
+})();
+</script>
+</body>
+</html>
