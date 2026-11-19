@@ -7,7 +7,7 @@
  * 约定：
  * - 带 Ctrl/Alt/Meta 的一律不接（浏览器/系统快捷键优先）；
  * - 焦点在 input/textarea/select/contenteditable 里时一律不接（`/`、j/k、g 都不抢字符）；
- * - `g` 前缀序列 600ms 内有效：`g m`/`g i`/`g g`/`g a`/`g s` 分别跳五个页面；
+ * - `g` 前缀序列 600ms 内有效：`g m`/`g r`/`g i`/`g g`/`g a`/`g s` 分别跳六个页面；
  * - j/k 只在列表上下文（`ctx.listNav === true`）里生效，无列表时静默忽略；
  * - Esc 交给调用方做「收起搜索 / 清空选中」，不在这里判断 Inspector 是否打开。
  */
@@ -19,6 +19,7 @@ export const G_SEQUENCE_TIMEOUT_MS = 600;
 /** `g` 序列第二键 → 页面（`g g` 回图谱）。 */
 export const G_TARGET_PAGES: Readonly<Record<string, PageKey>> = {
   g: 'graph',
+  r: 'recall',
   m: 'memories',
   i: 'inbox',
   a: 'archive',

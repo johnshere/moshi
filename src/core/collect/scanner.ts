@@ -15,13 +15,12 @@ import { nowIso } from '../../domain/time.js';
 import { writeFileAtomic } from '../../infra/fs/atomic.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import * as annotationRepo from '../../infra/sqlite/annotationRepo.js';
-import * as episodeRepo from '../../infra/sqlite/episodeRepo.js';
 import { getMeta, setMeta } from '../../infra/sqlite/metaRepo.js';
 import * as quarantine from '../../core/write/quarantine.js';
 import type { Cursor } from '../adapters/cursor.js';
 import { createSourceFor, type ResolvedSource } from '../adapters/index.js';
 import type { SessionRef, SessionSource } from '../adapters/session-source.js';
-import { summaryOf } from '../write/ingest.js';
+import { ingestEvent } from '../write/ingest.js';
 import type { AnnotatePayload } from '../write/harvest.js';
 import {
   findMoshiBlocks,
@@ -97,6 +96,10 @@ export interface ScanOptions {
 
 export interface ScanStats {
   turns: number;
+  /** 本次扫描新建的 episode 数（既有 import 线已落过的不会重复计） */
+  episodesCreated: number;
+  /** 本次扫描经 `ingestEvent` 新建的 `tool_parse` annotation 数 */
+  toolAnnotationsCreated: number;
   blocksFound: number;
   blockAnnotationsCreated: number;
   blockAnnotationsDuplicate: number;
@@ -116,6 +119,8 @@ export interface ScanSessionResult extends ScanStats {
 function emptyStats(): ScanStats {
   return {
     turns: 0,
+    episodesCreated: 0,
+    toolAnnotationsCreated: 0,
     blocksFound: 0,
     blockAnnotationsCreated: 0,
     blockAnnotationsDuplicate: 0,
@@ -136,6 +141,8 @@ function notice(stats: ScanStats, code: ScanNotice): void {
 
 function mergeStats(into: ScanStats, from: ScanStats): void {
   into.turns += from.turns;
+  into.episodesCreated += from.episodesCreated;
+  into.toolAnnotationsCreated += from.toolAnnotationsCreated;
   into.blocksFound += from.blocksFound;
   into.blockAnnotationsCreated += from.blockAnnotationsCreated;
   into.blockAnnotationsDuplicate += from.blockAnnotationsDuplicate;
@@ -462,11 +469,15 @@ export class BlockCursorStore {
 // ---------------------------------------------------------------- 会话级扫描
 
 /**
- * 扫描单个会话文件。读 `RawEvent`、写 `episode`、再跑两阶段扫描。
+ * 扫描单个会话文件。读 `RawEvent`、经 `ingestEvent` 写 episode/annotation、再跑两阶段扫描。
  *
  * 顺序不可交换（详设 §5.2.3 最后一句）：episode 是"这句话存在"的唯一证据，
  * 游标是"我看到哪了"的备忘。崩溃在两者之间时，宁可重读一遍（幂等键挡重复），
  * 也不能让游标越过一条没落库的事件。
+ *
+ * 走 `ingestEvent` 而不是裸写 episode：适配器产出的 `ev.tool` 只有它认得，
+ * 工具回合要在写 episode 的同一处落 `channel='tool_parse'` 的 annotation，
+ * 否则扫描线永远不给标注引擎供料（P1①）。
  */
 export async function scanSessionSource(
   db: Db,
@@ -487,15 +498,9 @@ export async function scanSessionSource(
     let step = await gen.next();
     while (!step.done) {
       const ev = step.value;
-      const ep = episodeRepo.insertIfAbsent(db, {
-        ts: ev.ts,
-        rawHash: ev.rawHash,
-        session: ev.sessionId,
-        rawPath: ev.rawPath,
-        summary: summaryOf(ev),
-        agent: ev.agent,
-        cwd: ev.cwd,
-      });
+      const res = ingestEvent(db, ev);
+      if (res.episodeCreated) stats.episodesCreated += 1;
+      if (res.annotationCreated) stats.toolAnnotationsCreated += 1;
       if (ev.text !== undefined && ev.text.length > 0) {
         turns.push({
           index: baseTurn + turns.length,
@@ -503,7 +508,7 @@ export async function scanSessionSource(
           sessionId: ev.sessionId,
           rawHash: ev.rawHash,
           text: ev.text,
-          episodeId: ep.id,
+          episodeId: res.episodeId,
         });
       }
       step = await gen.next();

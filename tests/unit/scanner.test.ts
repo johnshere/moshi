@@ -264,6 +264,56 @@ describe('P2-21 块游标与文件扫描', () => {
     expect(count(db, 'annotation')).toBe(1);
   });
 
+  function toolEv(i: number, command: string, output: string): RawEvent {
+    return {
+      ts: `2026-11-02T02:00:0${String(i)}.000Z`,
+      sessionId: 's1',
+      cwd: null,
+      agent: 'fake',
+      rawHash: `raw${String(i)}`,
+      rawPath: '/tmp/fake/s1.jsonl',
+      role: 'tool',
+      tool: { name: 'Bash', input: { command }, output },
+    };
+  }
+
+  it('工具回合经 ingest 落 episode + tool_parse annotation，重扫不翻倍', async () => {
+    const db = freshDb();
+    const source = fakeSource([ev('纯聊天', 0), toolEv(1, 'node -v', 'v22.9.0')]);
+    const ref: SessionRef = {
+      source: 'fake',
+      path: '/tmp/fake/s1.jsonl',
+      sessionId: 's1',
+      size: 2,
+      mtimeMs: 0,
+    };
+
+    const first = await scanSessionSource(db, source, ref, null, { cfg: cfgOf({ llmScan: false }) });
+
+    expect(first.turns).toBe(1);
+    expect(first.episodesCreated).toBe(2);
+    expect(first.toolAnnotationsCreated).toBe(1);
+    expect(count(db, 'episode')).toBe(2);
+    expect(count(db, 'annotation')).toBe(1);
+    const row = db.prepare('SELECT channel, payload_json FROM annotation').get() as {
+      channel: string;
+      payload_json: string;
+    };
+    expect(row.channel).toBe('tool_parse');
+    expect((JSON.parse(row.payload_json) as { cmd: string; output: string }).cmd).toBe('node -v');
+    expect((JSON.parse(row.payload_json) as { cmd: string; output: string }).output).toBe('v22.9.0');
+
+    // 游标丢失后从头重读：episode 的 (raw_hash, session) 与 annotation 的
+    // dedup_key 都挡住重复，计数不涨
+    const replay = await scanSessionSource(db, source, ref, null, {
+      cfg: cfgOf({ llmScan: false }),
+    });
+    expect(replay.episodesCreated).toBe(0);
+    expect(replay.toolAnnotationsCreated).toBe(0);
+    expect(count(db, 'episode')).toBe(2);
+    expect(count(db, 'annotation')).toBe(1);
+  });
+
   it('块游标文件损坏时重建为空游标而不是抛错', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'moshi-cursor-'));
     dirs.push(dir);

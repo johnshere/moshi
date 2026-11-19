@@ -335,6 +335,7 @@ export function signalForHook(deps: HookDeps, envelope: HookEnvelope): HookSigna
   const outcome = captureSignal(deps.db, captured, {
     redact: { enabled: deps.cfg.redact.enabled, privateIp: deps.cfg.redact.private_ip },
     projectRoot: project.root,
+    captureToolOutput: deps.cfg.hook.capture_tool_output,
   });
   if (!outcome.captured) {
     return {

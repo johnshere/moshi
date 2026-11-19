@@ -9,8 +9,13 @@
  */
 import type { DictKey } from '../i18n/dict.js';
 
-/** 六个一级页面（概设 §8.1；P4 新增「接入」）。顺序即左侧导航顺序。 */
-export type PageKey = 'graph' | 'memories' | 'inbox' | 'archive' | 'access' | 'settings';
+/**
+ * 七个一级页面（概设 §8.1；P4 新增「接入」；P2① 新增「召回」）。顺序即左侧导航顺序。
+ *
+ * 「召回」放在图谱之后、记忆之前：它是**唯一读取链**的入口，记忆页是管理面直读，
+ * 两者的先后顺序就是在告诉用户「问问题走召回，翻事实才走记忆」。
+ */
+export type PageKey = 'graph' | 'recall' | 'memories' | 'inbox' | 'archive' | 'access' | 'settings';
 
 export interface PageDef {
   key: PageKey;
@@ -23,6 +28,8 @@ export interface PageDef {
 
 export const PAGES: readonly PageDef[] = [
   { key: 'graph', labelKey: 'nav.graph', path: '/ui/graph', titleKey: 'nav.graph.title' },
+  // 召回是唯一读取链的界面入口（P2①）：内部走 POST /api/recall → runMemoryQuery
+  { key: 'recall', labelKey: 'nav.recall', path: '/ui/recall', titleKey: 'nav.recall.title' },
   { key: 'memories', labelKey: 'nav.memories', path: '/ui/memories', titleKey: 'nav.memories.title' },
   { key: 'inbox', labelKey: 'nav.inbox', path: '/ui/inbox', titleKey: 'nav.inbox.title' },
   { key: 'archive', labelKey: 'nav.archive', path: '/ui/archive', titleKey: 'nav.archive.title' },

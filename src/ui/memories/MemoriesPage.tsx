@@ -17,6 +17,7 @@ import type { RouteInfo } from '../shell/pure.js';
 import { EntityMergePanel } from './EntityMergePanel.js';
 import { SearchBox } from '../shell/SearchBox.js';
 import { ScopeSwitcher } from '../shell/ScopeSwitcher.js';
+import { AdminDirectBadge } from '../shell/AdminDirectBadge.js';
 
 const overlayStyle: CSSProperties = {
   position: 'absolute',
@@ -102,6 +103,7 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
         <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, padding: '4px 2px', whiteSpace: 'nowrap' }}>
           {t('memories.title')}
         </div>
+        <AdminDirectBadge />
         {/* 全局搜索与作用域下拉从顶栏下移到这里（V-10，用户 m01201）：顶栏只留 语言+三灯+角标 */}
         <SearchBox />
         <ScopeSwitcher />

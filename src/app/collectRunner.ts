@@ -104,7 +104,12 @@ export function startCollectRunner(opts: CollectRunnerOptions): CollectRunner {
       st.lastError = null;
       st.lastStats = res.stats;
 
-      const enqueued = res.stats.blockAnnotationsCreated + res.stats.llmCalls;
+      // 工具 annotation 与块/LLM annotation 一样，都是 harvest 的输入：
+      // 本轮真落了新活就立刻唤醒，不必等轮询周期
+      const enqueued =
+        res.stats.blockAnnotationsCreated +
+        res.stats.toolAnnotationsCreated +
+        res.stats.llmCalls;
       if (enqueued > 0) opts.onEnqueued?.();
       if (res.stats.blocksFound > 0 || res.stats.malformed > 0 || res.stats.notices.length > 0) {
         log?.info(

@@ -162,4 +162,74 @@ describe('captureSignal（信号落库）', () => {
     const b = hookRawHash('magpie', null, 'response', 'assistant', '同一句');
     expect(a).toBe(b);
   });
+
+  it('post_tool 带 tool 落 tool_parse annotation，重试不重复', () => {
+    const d = open();
+    const opts = {
+      redact: { enabled: true, privateIp: false },
+      projectRoot: null,
+      captureToolOutput: true,
+    };
+    const env = (output: string): HookEnvelope =>
+      envelope({
+        turn: 'post_tool',
+        payload: { tool: { name: 'Bash', input: { command: 'node -v' }, output } },
+      });
+
+    const first = captureSignal(d, env('v22.9.0'), opts);
+    expect(first.captured).toBe(true);
+    expect(first.result?.annotationCreated).toBe(true);
+    const row = d.prepare('SELECT channel, payload_json FROM annotation').get() as {
+      channel: string;
+      payload_json: string;
+    };
+    expect(row.channel).toBe('tool_parse');
+    const payload = JSON.parse(row.payload_json) as { tool: string; cmd: string; output: string };
+    expect(payload.tool).toBe('bash');
+    expect(payload.cmd).toBe('node -v');
+    expect(payload.output).toBe('v22.9.0');
+
+    // 重试时 ts 与 output 都可能变，但工具身份（name + input）不变 → 仍是同一条
+    const retry = captureSignal(d, env('v22.9.1'), opts);
+    expect(retry.result?.duplicate).toBe(true);
+    expect((d.prepare('SELECT COUNT(*) AS n FROM annotation').get() as { n: number }).n).toBe(1);
+    expect((d.prepare('SELECT COUNT(*) AS n FROM episode').get() as { n: number }).n).toBe(1);
+  });
+
+  it('同一轮次的不同工具各落一条（幂等键含 name + input）', () => {
+    const d = open();
+    const opts = {
+      redact: { enabled: true, privateIp: false },
+      projectRoot: null,
+      captureToolOutput: true,
+    };
+    const call = (command: string): HookEnvelope =>
+      envelope({
+        turn: 'post_tool',
+        payload: { tool: { name: 'Bash', input: { command }, output: 'ok' } },
+      });
+
+    const a = captureSignal(d, call('node -v'), opts);
+    const b = captureSignal(d, call('pnpm test'), opts);
+    expect(a.result?.episodeId).not.toBe(b.result?.episodeId);
+    expect((d.prepare('SELECT COUNT(*) AS n FROM annotation').get() as { n: number }).n).toBe(2);
+  });
+
+  it('capture_tool_output 关时保留工具身份，但不写输出正文', () => {
+    const d = open();
+    const out = captureSignal(
+      d,
+      envelope({
+        turn: 'post_tool',
+        payload: { tool: { name: 'Bash', input: { command: 'node -v' }, output: 'v22.9.0' } },
+      }),
+      { redact: { enabled: true, privateIp: false }, projectRoot: null },
+    );
+    expect(out.captured).toBe(true);
+    expect(out.result?.annotationCreated).toBe(true);
+    const row = d.prepare('SELECT payload_json FROM annotation').get() as { payload_json: string };
+    const payload = JSON.parse(row.payload_json) as { cmd: string; output: string };
+    expect(payload.cmd).toBe('node -v');
+    expect(payload.output).toBe('');
+  });
 });

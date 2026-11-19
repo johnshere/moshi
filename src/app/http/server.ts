@@ -35,6 +35,7 @@ import { queueRoutes } from './routes/queues.js';
 import { diagRoutes } from './routes/diag.js';
 import { archiveRoutes } from './routes/archive.js';
 import { searchRoutes } from './routes/search.js';
+import { recallRoutes } from './routes/recall.js';
 import { entitiesRoutes } from './routes/entities.js';
 import { privacyRoutes, exportRoutes } from './routes/privacy.js';
 import { evalRoutes } from './routes/eval.js';
@@ -335,6 +336,10 @@ export async function buildHttpApp(deps: HttpDeps) {
     cache: buildEvidenceCache(deps.db, deps.cfg),
   };
   const mcpHandler = createMcpHttpHandler(mcpDeps);
+  // ── 召回面（P2①）：`POST /api/recall` 与 MCP 共用同一份 deps ——
+  // 证据缓存与 trace ring buffer 都只有一份，UI 的召回结果因此能和 MCP 的查询在
+  // `/api/trace/:query_id` 里回放到同一条证据链。`/api/search` 仍是管理面直查。
+  await app.register(recallRoutes, { prefix: '/api/recall', deps: mcpDeps });
   app.post('/mcp', async (req, reply) => {
     await new Promise<void>((resolve) => {
       mcpHandler(req.raw, reply.raw, req.body);

@@ -18,8 +18,10 @@ import { EndpointsPage } from './access/EndpointsPage.js';
 import { LogsPage } from './access/LogsPage.js';
 import { ArchivePage } from './archive/ArchivePage.js';
 import { MemoriesPage } from './memories/MemoriesPage.js';
+import { RecallPage } from './recall/RecallPage.js';
 import { SettingsPage } from './settings/SettingsPage.js';
 import { Shell } from './shell/Shell.js';
+import { AdminDirectBadge } from './shell/AdminDirectBadge.js';
 import {
   DEFAULT_SETTINGS_SECTION,
   focusHref,
@@ -550,6 +552,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
               </button>
             ))}
           </span>
+          <AdminDirectBadge />
           <span style={{ marginLeft: 'auto' }}>
             {loading && <span className="moshi-spinner" data-testid="hud-spinner" role="status" aria-label={t('common.loading')} />}
           </span>
@@ -668,6 +671,7 @@ function Root(): JSX.Element {
     <Shell route={route.page} section={route.section} accessSection={route.accessSection}>
       {standalone ? <AccessPage standalone onboardResult={onboardResult} /> : null}
       {!standalone && route.page === 'graph' ? <App route={route} /> : null}
+      {!standalone && route.page === 'recall' ? <RecallPage /> : null}
       {!standalone && route.page === 'memories' ? <MemoriesPage route={route} /> : null}
       {!standalone && route.page === 'inbox' ? <InboxPage /> : null}
       {!standalone && route.page === 'archive' ? <ArchivePage /> : null}
