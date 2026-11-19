@@ -138,6 +138,18 @@ export function resolveMIds(
   return rows.map((r) => ({ mId: r.m_id, factId: r.fact_id }));
 }
 
+/**
+ * 该事实是否仍被历史查询引用：`evidence_log` 行随 query_log 的保留期一起清，
+ * 所以"行还在"就等于"这条证据还在保留窗口内、还能按 m_id 回放"（详设 §6.12）。
+ * 复检用它判断"仍有未失效的 evidence"。
+ */
+export function hasEvidenceForFact(db: Db, factId: string): boolean {
+  return (
+    db.prepare('SELECT 1 AS hit FROM evidence_log WHERE fact_id = ? LIMIT 1').get(factId) !==
+    undefined
+  );
+}
+
 export function getQueryLog(db: Db, queryId: string): { id: string; ts: string; route: Route } | null {
   const row = db
     .prepare('SELECT id, ts, route FROM query_log WHERE id = ?')

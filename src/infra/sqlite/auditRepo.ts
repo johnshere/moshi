@@ -232,7 +232,24 @@ export function deletePrivacyData(db: Db, scope: PurgeScope): PrivacyTableCounts
   }
 
   if (scope === 'all' || scope === 'facts') {
+    // 回放链（详设 §6.12）：`evidence_log.m_id` 指向 query_log 里那一轮证据包的编号，
+    // 而证据包里引用的是 fact_id。事实被硬删后，这些查询的 fused/packed 里已经全是
+    // 悬空 id，留着它只会得到一条"按 m_id 回放必然断链"的历史记录。所以 facts 范围
+    // 必须连同**引用过事实的查询**一起删；没有证据行的查询与事实无关，保留。
+    // （scope=all 走下面 sessions 分支的整表删除，这里不必重复。）
+    const evidencedQueries =
+      scope === 'facts'
+        ? (
+            db.prepare('SELECT DISTINCT query_id AS id FROM evidence_log').all() as { id: string }[]
+          ).map((r) => r.id)
+        : [];
     run('DELETE FROM evidence_log');
+    // SQLite 默认变量上限 999，按 400 切块
+    for (let i = 0; i < evidencedQueries.length; i += 400) {
+      const chunk = evidencedQueries.slice(i, i + 400);
+      const marks = chunk.map(() => '?').join(', ');
+      db.prepare(`DELETE FROM query_log WHERE id IN (${marks})`).run(...chunk);
+    }
     run('DELETE FROM feedback');
     run('DELETE FROM layout');
     deleteFtsRows(db);

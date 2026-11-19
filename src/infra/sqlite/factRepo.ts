@@ -10,7 +10,7 @@ import { MoshiError } from '../../domain/errors.js';
 import type { Epistemic, Ftype, Pool } from '../../domain/enums.js';
 import type { Fact } from '../../domain/types.js';
 import { nowIso } from '../../domain/time.js';
-import { applyStrength as computeStrength, type StrengthEvent } from '../../core/lifecycle/strength.js';
+import { applyStrength as computeStrength, VALIDATE_FLOOR, type StrengthEvent } from '../../core/lifecycle/strength.js';
 import { appendAudit } from './auditRepo.js';
 import type { Db } from './db.js';
 import { syncFtsRow } from './ftsRepo.js';
@@ -55,6 +55,36 @@ export function listByIdentityKey(db: Db, canonicalKey: string, scope: string): 
   const rows = db
     .prepare('SELECT * FROM fact WHERE canonical_key = ? AND scope = ? ORDER BY valid_at DESC')
     .all(canonicalKey, scope) as Record<string, unknown>[];
+  return rows.map(rowToFact);
+}
+
+/**
+ * 同一身份键当前是否已有活跃行（复检的"已被重新观测到"判据）。
+ *
+ * 口径是 `canonical_key + scope` 而不是再加 `value_hash`：身份唯一索引
+ * `(canonical_key, scope, value_hash) WHERE valid_to IS NULL` 只约束"同值"，
+ * 而"同身份已有活跃取值"就已经说明旧行被取代（详设 §2.8 情形 C/D）——
+ * 再复活旧行会让同一身份同时有两个有效取值，违反"单一身份单一活跃事实"。
+ */
+export function hasActiveByIdentity(db: Db, canonicalKey: string, scope: string): boolean {
+  const row = db
+    .prepare(
+      'SELECT 1 AS hit FROM fact WHERE canonical_key = ? AND scope = ? AND valid_to IS NULL LIMIT 1',
+    )
+    .get(canonicalKey, scope);
+  return row !== undefined;
+}
+
+/**
+ * 已失效（`valid_to` 非空）的事实行，按 id 升序取前 `limit` 条。
+ *
+ * `limit <= 0` = 不限（SQLite 的 `LIMIT -1`）。`afterId` 供分批扫描用游标翻页，
+ * 不用 OFFSET：翻页期间有行被复活时，OFFSET 会整段漂移、漏扫。
+ */
+export function listExpiredFacts(db: Db, limit: number, afterId = ''): Fact[] {
+  const rows = db
+    .prepare('SELECT * FROM fact WHERE valid_to IS NOT NULL AND id > ? ORDER BY id ASC LIMIT ?')
+    .all(afterId, limit <= 0 ? -1 : limit) as Record<string, unknown>[];
   return rows.map(rowToFact);
 }
 
@@ -298,6 +328,128 @@ export function setEpistemicStatus(db: Db, id: string, status: Epistemic): void 
     nowIso(),
     id,
   );
+}
+
+export interface ReactivateOptions {
+  ts?: string;
+  /**
+   * 复活后的强度下限（概设 §5.5.1「独立验证：s ← max(s, floor)」，floor 初值 0.60）。
+   * 失效事实的强度按约定已被算成 0，直接复活会让它以"刚衰减完"的状态回到读路径。
+   */
+  strengthFloor?: number;
+  /** 审计来源；默认 `rule:recheck`，与人工撤销失效区分 */
+  source?: string;
+  reason?: string | null;
+}
+
+/**
+ * 复活的唯一写入口：清 `valid_to`、回到 `active`。
+ *
+ * 与 `invalidate` 互逆，但**不是**写入路径的"情形 C"（详设 §2.8 情形 C 要求插新行 +
+ * `supersedes` 边）。本方法只用于**撤销一次失效判定**（概设 §3.6.3 第 4 条：
+ * "回滚 = 撤销失效：把 valid_to 清回 NULL 即可"），因此：
+ *
+ * - 只收口过（`valid_to` 非空）的行能复活，活跃行调用抛 `E_IMMUTABLE`；
+ * - 同身份已有活跃行时抛 `E_CONFLICT_IDENTITY`——否则同一身份会有两个有效取值，
+ *   且同值时会直接撞 `idx_fact_identity`；
+ * - `content` / `attrs` / `canonical_key` 一个字节都不动；`superseded_by` 保留
+ *   （取代链是历史事实，由 audit 与 `supersedes` 边承载），审计行必写。
+ */
+export function reactivate(db: Db, id: string, opts: ReactivateOptions = {}): void {
+  const ts = opts.ts ?? nowIso();
+  const floor = opts.strengthFloor ?? VALIDATE_FLOOR;
+  const source = opts.source ?? 'rule:recheck';
+
+  withTransaction(db, () => {
+    const before = db
+      .prepare(
+        `SELECT canonical_key, scope, valid_to, epistemic_status, strength
+           FROM fact WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          canonical_key: string;
+          scope: string;
+          valid_to: string | null;
+          epistemic_status: string;
+          strength: number;
+        }
+      | undefined;
+    if (before === undefined) throw new MoshiError('E_NOT_FOUND', `fact 不存在：${id}`, { id });
+    if (before.valid_to === null) {
+      throw new MoshiError('E_IMMUTABLE', `fact 未失效，不能复活：${id}`, { id });
+    }
+    if (hasActiveByIdentity(db, before.canonical_key, before.scope)) {
+      throw new MoshiError('E_CONFLICT_IDENTITY', `同身份已有活跃事实，不能复活旧行：${id}`, {
+        id,
+        canonicalKey: before.canonical_key,
+      });
+    }
+
+    const strength = Math.max(before.strength, floor);
+    db.prepare(
+      `UPDATE fact
+          SET valid_to = NULL, epistemic_status = 'active', strength = ?,
+              expired_at = NULL, last_decay_at = ?, updated_at = ?
+        WHERE id = ? AND valid_to IS NOT NULL`,
+    ).run(strength, ts, ts, id);
+
+    appendAudit(db, {
+      tbl: 'fact',
+      rowId: id,
+      field: 'valid_to',
+      before: {
+        valid_to: before.valid_to,
+        epistemic_status: before.epistemic_status,
+        strength: before.strength,
+      },
+      after: { valid_to: null, epistemic_status: 'active', strength },
+      source,
+      reason: opts.reason ?? null,
+      ts,
+    });
+  });
+}
+
+/**
+ * 复检"待审"标记：写进 `attrs.ext.recheck`（`ext` 是 schema 预留的 JSON 扩展槽，
+ * 详设 §2.1），不新增列、不改枚举，普通读路径完全看不见它。
+ *
+ * 只写 `ext` 而不写 `attrs` 顶层，是因为 `parseAttrs`（mappers.ts:52-62）只回传
+ * `{frozen, ext}`——顶层自定义键读不回来，等于标记写丢。
+ *
+ * 待审 ≠ 剪枝：概设 §5.5.1 第 3 条与详设 §8.3.4 都要求淘汰只出候选清单、
+ * **不自动删**，所以这里只留标记与审计。
+ */
+export function markRecheckPending(db: Db, id: string, opts: { reason: string; ts?: string }): void {
+  const ts = opts.ts ?? nowIso();
+  withTransaction(db, () => {
+    const row = db.prepare('SELECT attrs FROM fact WHERE id = ?').get(id) as
+      | { attrs: string | null }
+      | undefined;
+    if (row === undefined) throw new MoshiError('E_NOT_FOUND', `fact 不存在：${id}`, { id });
+    const attrs = row.attrs === null ? {} : (JSON.parse(row.attrs) as Record<string, unknown>);
+    const ext = (attrs['ext'] ?? {}) as Record<string, unknown>;
+    const before = ext['recheck'] ?? null;
+    const after = { verdict: 'pending_review', reason: opts.reason, at: ts };
+    ext['recheck'] = after;
+    attrs['ext'] = ext;
+    db.prepare('UPDATE fact SET attrs = ?, updated_at = ? WHERE id = ?').run(
+      JSON.stringify(attrs),
+      ts,
+      id,
+    );
+    appendAudit(db, {
+      tbl: 'fact',
+      rowId: id,
+      field: 'attrs.ext.recheck',
+      before,
+      after,
+      source: 'rule:recheck',
+      reason: opts.reason,
+      ts,
+    });
+  });
 }
 
 export function setCommunity(db: Db, id: string, communityId: number | null): void {

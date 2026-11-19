@@ -14,6 +14,7 @@ import { schemaCommand } from './commands/schema.js';
 import { samplesCommand } from './commands/samples.js';
 import { doctorCommand } from './commands/doctor.js';
 import { hookCommand } from './commands/hook.js';
+import { lifecycleCommand } from './commands/lifecycle.js';
 import type { Command, CommandContext } from './types.js';
 
 export type { Command, CommandContext };
@@ -31,6 +32,7 @@ export const COMMANDS: readonly Command[] = [
   samplesCommand,
   doctorCommand,
   hookCommand,
+  lifecycleCommand,
 ];
 
 export function usage(): string {
