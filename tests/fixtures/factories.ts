@@ -39,6 +39,13 @@ export interface FactSeed {
   supersededBy?: string | null;
   /** 惰性衰减的起点；不传即「刚刚」（dt ≈ 0，强度不动）。P2-08 的强度用例靠它造历史 */
   lastDecayAt?: string;
+  /** 来源 episode（撤回路径的选择器；P2-23 起 fact 上有该列） */
+  sourceEpisode?: string | null;
+  /** 直写批次（`moshi revoke <batch>` / `lifecycle withdraw --batch` 的选择器） */
+  batchId?: string | null;
+  /** 写入通道（`observation` / `mcp_direct` / …） */
+  origin?: string | null;
+  sessionId?: string | null;
 }
 
 export function makeEntity(db: Db, name: string, etype = 'pkg'): string {
@@ -67,6 +74,7 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
        epistemic_status, attrs, canonical_key, value_hash, scope, superseded_by,
        valid_at, valid_to, recorded_at, community_id, degree, access_count,
        last_access_at, last_decay_at, source_episode, span_start, span_end,
+       origin, session_id, batch_id,
        created_at, updated_at
      ) VALUES (
        @id, @content, @ftype, @retention_class, @volatility, @admission_reason, @ttl_seconds,
@@ -74,7 +82,8 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
        @confidence, @confidence_source, @strength, @importance, @pool,
        @epistemic_status, @attrs, @canonical_key, @value_hash, @scope, @superseded_by,
        @valid_at, @valid_to, @recorded_at, NULL, 0, 0,
-       NULL, @last_decay_at, NULL, NULL, NULL,
+       NULL, @last_decay_at, @source_episode, NULL, NULL,
+       @origin, @session_id, @batch_id,
        @created_at, @updated_at
      )`,
   ).run({
@@ -103,6 +112,10 @@ export function insertFact(db: Db, seed: FactSeed = {}): string {
     valid_to: seed.validTo ?? null,
     recorded_at: ts,
     last_decay_at: seed.lastDecayAt ?? ts,
+    source_episode: seed.sourceEpisode ?? null,
+    origin: seed.origin ?? null,
+    session_id: seed.sessionId ?? null,
+    batch_id: seed.batchId ?? null,
     created_at: ts,
     updated_at: ts,
   });

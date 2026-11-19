@@ -790,7 +790,7 @@ flowchart BT
   F --> SG
   SG --> G
   G --> AD
-  G -.->|"off / 超时 120ms"| AD
+  G -.->|"off / 超时 首调 5s、稳态 120ms"| AD
   AD --> PK
   PK --> EV
   EV --> OUT
@@ -1204,7 +1204,7 @@ flowchart TD
     D_SG:{k:"类型",t:"subgraph / layout / edgeFeatures",d:"子图装载上限、GAT 节点 522 维 / 边 16 维特征定义、3D 布局输入结构。",m:{"上限":"64 节点 / 192 边","特征":"生命周期字段禁入"}},
     I_SQL:{k:"适配 · IO",t:"sqlite",d:"连接、迁移、事务、31 个仓储文件、FTS5 与视图。业务层拿不到裸 SQL。",m:{"模式":"WAL","迁移":"001–007","表":"19 张（001_init）"}},
     I_VEC:{k:"适配 · IO",t:"vec",d:"sqlite-vec 虚拟表，512 维；不可用时整条向量路降级。",m:{"降级码":"no_vector"}},
-    I_SC:{k:"适配 · 进程",t:"sidecar client",d:"懒启动 Python 子进程、HTTP/stdio 调用、encode 2s / score 120ms 超时、熔断与空闲卸载。",m:{"生命周期":"5min 卸权重 / 30min 退进程","降级":"no_sidecar"}},
+    I_SC:{k:"适配 · 进程",t:"sidecar client",d:"懒启动 Python 子进程、HTTP/stdio 调用、encode 2s / score 首调 5s、稳态 120ms 超时、熔断与空闲卸载；sidecar 就绪前预热 encode+score。",m:{"生命周期":"5min 卸权重 / 30min 退进程","降级":"no_sidecar"}},
     I_FS:{k:"适配 · IO",t:"fs / safeWrite / atomic",d:"所有写盘的白名单闸门：只允许 ~/.moshi/ 与用户指定目录，原子替换。",m:{"越界":"直接抛错"}},
     I_LOG:{k:"适配 · 观测",t:"log / metrics",d:"JSONL 结构化日志与计数；hook trace 三档：off / summary / full。",m:{"默认":"只记计数与枚举"}},
     X_PY:{k:"进程外",t:"Python sidecar",d:"torch 推理：/encode 出 512 维向量，/score 跑 GAT 前向，空闲卸载权重。",m:{"模块":"server · encode · features · model","参数":"≈26 万","缺席":"不影响主链路"}},

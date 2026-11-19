@@ -151,10 +151,17 @@ const LifecycleSchema = z
 const RetrievalSchema = z
   .object({
     vector_topk: positiveInt.default(20),
-    // 向量召回地板：低于该 cos 的邻居不进候选（P1-29；实测拒答句对库内事实最高 0.445，
-    // 相关问句 0.73~0.89，0.5 是两者之间的自然分界）
-    // 地板按真模型标定（D-148）：torch 原版权重下拒答负例最高 cos 0.520、正例最低 0.692
-    vector_min_sim: prob.default(0.6),
+    // 向量召回相关性地板（w6 重标）。注意：它比的是 `knn()` 的 similarity，
+    // 不是余弦——`similarity = 1 - L2/2`，归一向量下 cos 0.68 ↔ similarity 0.60，
+    // 所以这个数看起来比余弦更"挤"。
+    // 实测（1584 条事实的真实库 + bge-small-zh-v1.5，w6 calib.py）：
+    //   真实查询 top1 similarity 分位 min/p50/max = 0.485/0.612/0.684；
+    //   黄金集正例 min 0.538、拒答负例 max 0.498、16 条无关问句 max 0.570。
+    // 0.60 会挡掉 18/37 条真实查询（向量通道恒空 → queryWithVector 为 0），
+    // 0.535 让 27/37 条真实查询至少留 1 条、黄金正例 24/24 全中，
+    // 拒答负例仍 0/8，无关问句只有 4/16 漏进且平均 1.8 条。
+    // ⚠️ 该值绑定编码器（模型/权重/归一方式任一变化都必须重标）。
+    vector_min_sim: prob.default(0.535),
     bm25_topk: positiveInt.default(20),
     ppr_topk: positiveInt.default(20),
     ppr_damping: prob.default(0.85),
@@ -202,10 +209,19 @@ const SidecarSchema = z
     socket_path: z.string().default('~/.moshi/sidecar.sock'),
     idle_unload_min: z.number().min(0).default(5),
     idle_exit_min: z.number().min(0).default(30),
-    // 首次拉起要 import torch 栈（实测 ~11.3s，D-147）；放宽到 20s 才等得到就绪文件
-    startup_timeout_ms: positiveInt.default(20_000),
+    // 首次拉起要 import torch 栈（实测 ~11.3s，D-147）；就绪前还会跑一遍编码 + 最小子图
+    // 打分预热（w6 breakdown：ensure_scorer 1.06s + 首个 encode 0.02s，即就绪多 ~1.1s；
+    // 不预热时这段 2.81s 会砸在首调上）。m1 单机冷启实测到 19.8s，20s 在并行 verify
+    // 下会被挤爆 → 放宽到 30s。
+    startup_timeout_ms: positiveInt.default(30_000),
     encode_timeout_ms: positiveInt.default(2000),
-    score_timeout_ms: positiveInt.default(120),
+    // 冷启动首调 /score 的预算。就绪前已预热，正常情况首调就是稳态（w6 实测 4~6ms）；
+    // 预热没覆盖到的路径（权重晚到 / 预热失败）实测 0.75~0.96s，稳态 2.6~4.9ms，
+    // 取 5000 留 ~5x 余量。
+    score_timeout_ms: positiveInt.default(5_000),
+    // 首次成功 /score 后回落的稳态预算（沿用原 120ms）。只在进程重启后重新抬回
+    // score_timeout_ms —— 预热/重连都不重置，避免稳态查询被冷启预算拖住。
+    score_steady_timeout_ms: positiveInt.default(120),
     max_restarts_per_hour: positiveInt.default(3),
   })
   .strict();

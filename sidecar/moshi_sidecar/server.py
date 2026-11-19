@@ -18,6 +18,7 @@ code ∈ {E_MODEL_NOT_LOADED, E_INPUT_SHAPE, E_OOM, E_INTERNAL}。
 import argparse
 import gc
 import json
+import logging
 import os
 import sys
 import threading
@@ -25,6 +26,8 @@ import time
 
 from .encode import Encoder
 from .features import build_batch
+
+logger = logging.getLogger("moshi.sidecar")
 
 try:
     import pywintypes
@@ -36,6 +39,26 @@ except ImportError:  # 非 Windows：用 AF_UNIX（unix 平台）
 
 PIPE_BUFSIZE = 1 << 20
 READ_CHUNK = 1 << 16
+
+# 预热用的最小子图：1 节点 / 0 边 / 无 embedding 与 query_vector，
+# 只要求能把张量化 → 模型前向整条路径跑通（不依赖编码器产物）。
+WARMUP_TEXT = "warmup"
+WARMUP_PAYLOAD = {
+    "schema": "moshi-subgraph/2",
+    "nodes": [
+        {
+            "fact_id": "warmup",
+            "embedding": None,
+            "ftype": "semantic",
+            "confidence": 0.0,
+            "importance": 0.0,
+            "epistemic_status": "active",
+            "degree": 0,
+        }
+    ],
+    "edges": [],
+    "query_vector": None,
+}
 
 
 def now_iso() -> str:
@@ -76,15 +99,26 @@ class State:
         self.lock = threading.Lock()
 
     def warmup(self) -> None:
-        """启动时把权重读进来：就绪文件写出去之后，第一个查询不该还在付冷启。
+        """启动/重载后把编码器与打分器都走一遍，让「就绪」等于「稳态延迟」。
 
-        模型缺失不是致命错——记进 model_error，/encode 会返回 E_MODEL_NOT_LOADED，
-        Node 侧按 no_sidecar/no_model 降级（详设 §6.13：查失败绝不报 ok+空）。
+        只 load 编码器不够：`/score` 的首调大头是 `import torch_geometric` +
+        `torch.load` + 首帧前向（w6 实测 2.81s），不预热的话 daemon 冷启动后的
+        第一次真实查询必然撞超时（默认 120ms）。
+
+        每一步都独立 try：权重缺失/张量不合法只记日志，绝不能拖住就绪文件——
+        模型缺失时 `/score` 仍按 E_MODEL_NOT_LOADED 走既有降级路径。
         """
         try:
             self.encoder.load()
+            self.encoder.encode([WARMUP_TEXT])
         except Exception as e:  # noqa: BLE001
             self.model_error = str(e)
+            logger.warning("编码器预热失败（继续就绪）：%s", e, exc_info=True)
+        try:
+            # dispatch 内部会取 self.lock；warmup 不能在持锁时调它（Lock 不可重入）
+            dispatch(self, "/score", WARMUP_PAYLOAD)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("打分器预热失败（继续就绪）：%s", e, exc_info=True)
 
     def health(self) -> dict:
         # loaded = 权重真的在内存里（P1-28 起以 Encoder 为准，不再是"进程活着就算就绪"）
@@ -134,6 +168,8 @@ class State:
             self.encoder.unload()
             gc.collect()
             self.unloaded = False
+        # 重载后同样预热：否则下一次真实 encode/score 又要付一次冷启
+        self.warmup()
 
 
 def dispatch(state: State, path: str, body: dict) -> dict:

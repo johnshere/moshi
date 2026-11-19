@@ -322,6 +322,236 @@ export function invalidate(
   ).run(opts.validTo, opts.supersededBy ?? null, opts.status ?? 'invalidated', nowIso(), id);
 }
 
+// ── 「无后继失效」的两条产出路径：TTL 到期 / 来源撤回 ──
+//
+// 与 `invalidate` 的分工：`invalidate` 是**写入路径**的收口（情形 C：先插新行，
+// 再收口旧行，`superseded_by` 指向新行），本节的 `closeFactWithAudit` 是**无后继**
+// 收口——不插新行、不建 `supersedes` 边，`superseded_by` 保持 NULL，可追溯性落在
+// audit 行（`source` + `reason` + before/after 快照）。两者都只写
+// `valid_to` / `epistemic_status` / `updated_at`，**不改 content、不删行**
+// （概设 §5.5.4 红线，详设 §8.1 第 2 条）。
+
+export interface ArmTtlOptions {
+  /** 有效期时长（秒），落 `ttl_seconds`（详设 §3.3 的 V-05 字段，无需迁移） */
+  ttlSeconds: number;
+  /** 采用期结束时刻（ISO），落 `expired_at`；到期扫描以它为界 */
+  expiresAt: string;
+  /** 审计来源（core 传 `rule:ttl`） */
+  source: string;
+  reason?: string | null;
+  /** 设期时刻（测试注入；默认当前时刻），也用作"到期必须晚于设期"的基准 */
+  ts?: string;
+}
+
+/**
+ * 设有效期（TTL arm）：写 `ttl_seconds` + `expired_at`，不动 `valid_at/valid_to`。
+ *
+ * 只接受**活跃**行：已收口的行再设期没有语义（它已经不参与采用了），直接抛
+ * `E_IMMUTABLE`，让调用方把它算进 skipped 而不是静默改历史行。
+ */
+export function armTtl(db: Db, id: string, opts: ArmTtlOptions): void {
+  const ts = opts.ts ?? nowIso();
+  withTransaction(db, () => {
+    const row = db
+      .prepare('SELECT valid_at, valid_to, ttl_seconds, expired_at FROM fact WHERE id = ?')
+      .get(id) as
+      | { valid_at: string; valid_to: string | null; ttl_seconds: number | null; expired_at: string | null }
+      | undefined;
+    if (row === undefined) throw new MoshiError('E_NOT_FOUND', `fact 不存在：${id}`, { id });
+    if (row.valid_to !== null) {
+      throw new MoshiError('E_IMMUTABLE', `fact 已失效，不能再设有效期：${id}`, { id });
+    }
+    if (!Number.isInteger(opts.ttlSeconds) || opts.ttlSeconds <= 0) {
+      throw new MoshiError('E_INPUT', `ttlSeconds 必须是正整数：${opts.ttlSeconds}`, {
+        id,
+        ttlSeconds: opts.ttlSeconds,
+      });
+    }
+    if (!(opts.expiresAt > ts)) {
+      throw new MoshiError('E_INPUT', `到期时刻必须晚于设期时刻：${opts.expiresAt} <= ${ts}`, {
+        id,
+        expiresAt: opts.expiresAt,
+        now: ts,
+      });
+    }
+    db.prepare(
+      'UPDATE fact SET ttl_seconds = ?, expired_at = ?, updated_at = ? WHERE id = ? AND valid_to IS NULL',
+    ).run(opts.ttlSeconds, opts.expiresAt, ts, id);
+    appendAudit(db, {
+      tbl: 'fact',
+      rowId: id,
+      field: 'expired_at',
+      before: { ttl_seconds: row.ttl_seconds, expired_at: row.expired_at },
+      after: { ttl_seconds: opts.ttlSeconds, expired_at: opts.expiresAt },
+      source: opts.source,
+      reason: opts.reason ?? null,
+      ts,
+    });
+  });
+}
+
+/**
+ * 已到期但仍活跃的事实（TTL 扫描的输入）：`expired_at <= now AND valid_to IS NULL`。
+ *
+ * 走 `idx_fact_expires`（`ON fact(expired_at) WHERE expired_at IS NOT NULL`）的前缀；
+ * `id > afterId` 是 keyset 游标，翻页期间有行被收口也不会漂移（同 `listExpiredFacts`）。
+ */
+export function listDueTtlFacts(db: Db, now: string, limit: number, afterId = ''): Fact[] {
+  const rows = db
+    .prepare(
+      `SELECT * FROM fact
+        WHERE valid_to IS NULL AND expired_at IS NOT NULL AND expired_at <= ? AND id > ?
+        ORDER BY id ASC LIMIT ?`,
+    )
+    .all(now, afterId, limit <= 0 ? -1 : limit) as Record<string, unknown>[];
+  return rows.map(rowToFact);
+}
+
+/** 撤回选择器的来源键：按来源 episode 或直写批次（二者互斥） */
+export interface FactSourceKey {
+  episodeId?: string;
+  batchId?: string;
+}
+
+/**
+ * 某来源下的**活跃**事实（撤回路径的输入）。
+ *
+ * 只返回 `valid_to IS NULL` 的行：已收口的行重复撤回没有意义，也保证第二次执行
+ * 同一撤回指令时命中 0 条（幂等）。`id > afterId` 供分批。
+ */
+export function listActiveBySource(
+  db: Db,
+  source: FactSourceKey,
+  limit: number,
+  afterId = '',
+): Fact[] {
+  const column =
+    source.episodeId !== undefined ? 'source_episode' : source.batchId !== undefined ? 'batch_id' : null;
+  if (column === null) {
+    throw new MoshiError('E_INPUT', '撤回来源必须指定 episodeId 或 batchId');
+  }
+  const value = source.episodeId ?? source.batchId;
+  const rows = db
+    .prepare(
+      `SELECT * FROM fact
+        WHERE valid_to IS NULL AND ${column} = ? AND id > ?
+        ORDER BY id ASC LIMIT ?`,
+    )
+    .all(value, afterId, limit <= 0 ? -1 : limit) as Record<string, unknown>[];
+  return rows.map(rowToFact);
+}
+
+/** 撤回墓碑（落 `attrs.ext.withdrawn`）：撤回是**人的决定**，复检不能再把它翻回来 */
+export interface FactTombstone {
+  /** 撤回者：`human` 或规则来源（`rule:source_withdraw`） */
+  by: string;
+  /** 撤回时刻（ISO） */
+  ts: string;
+  /** 撤回依据（选择器 + 备注） */
+  reason: string;
+}
+
+export interface CloseFactOptions {
+  /** 收口时刻（落 `valid_to`）；必须晚于 `valid_at` */
+  validTo: string;
+  /** 收口后的状态标签；默认 `invalidated`（详设 §2.4 I6：valid_to 非空 ⇒ invalidated） */
+  status?: Epistemic;
+  /** 无后继收口显式传 null；只有写入路径的情形 C 才指向新行 */
+  supersededBy?: string | null;
+  /** 审计来源（core 传 `rule:ttl` / `rule:source_withdraw` / `human`） */
+  source: string;
+  reason?: string | null;
+  ts?: string;
+  /**
+   * 撤回墓碑（只有来源撤回传；TTL 到期不传）。写进 `attrs.ext.withdrawn`——
+   * `ext` 是 schema 预留的 JSON 扩展槽（详设 §2.1），不加列、不改 content。
+   * 复检看到墓碑一律维持（见 `core/lifecycle/recheck.ts` 的判据第 4 条）。
+   */
+  tombstone?: FactTombstone;
+}
+
+/**
+ * 无后继失效的收口写入口（TTL 到期 / 来源撤回共用）。
+ *
+ * 返回 `true` = 本次真的收了口；`false` = 行已被收口（并发或重复执行），调用方应
+ * 计为"跳过"而不是错误——重复跑同一批 TTL/撤回是**幂等**的，不产生第二条审计。
+ */
+export function closeFactWithAudit(db: Db, id: string, opts: CloseFactOptions): boolean {
+  const ts = opts.ts ?? nowIso();
+  return withTransaction(db, () => {
+    const before = db
+      .prepare(
+        `SELECT valid_at, valid_to, epistemic_status, superseded_by, expired_at, attrs
+           FROM fact WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          valid_at: string;
+          valid_to: string | null;
+          epistemic_status: string;
+          superseded_by: string | null;
+          expired_at: string | null;
+          attrs: string | null;
+        }
+      | undefined;
+    if (before === undefined) throw new MoshiError('E_NOT_FOUND', `fact 不存在：${id}`, { id });
+    if (before.valid_to !== null) return false;
+    if (!(opts.validTo > before.valid_at)) {
+      throw new MoshiError('E_INPUT', `valid_to 必须晚于 valid_at：${opts.validTo} <= ${before.valid_at}`, {
+        id,
+        validTo: opts.validTo,
+        validAt: before.valid_at,
+      });
+    }
+    const status = opts.status ?? 'invalidated';
+    const supersededBy = opts.supersededBy ?? null;
+
+    // 墓碑与收口同一事务：要么"收口 + 墓碑"都落，要么都不落（不留没有墓碑的撤回）
+    let attrsJson = before.attrs;
+    let priorTombstone: unknown = null;
+    if (opts.tombstone !== undefined) {
+      const attrs =
+        before.attrs === null ? {} : (JSON.parse(before.attrs) as Record<string, unknown>);
+      const ext = (attrs['ext'] ?? {}) as Record<string, unknown>;
+      priorTombstone = ext['withdrawn'] ?? null;
+      ext['withdrawn'] = opts.tombstone;
+      attrs['ext'] = ext;
+      attrsJson = JSON.stringify(attrs);
+    }
+
+    const changed = db
+      .prepare(
+        `UPDATE fact SET valid_to = ?, superseded_by = ?, epistemic_status = ?, attrs = ?, updated_at = ?
+          WHERE id = ? AND valid_to IS NULL`,
+      )
+      .run(opts.validTo, supersededBy, status, attrsJson, ts, id).changes;
+    if (changed === 0) return false;
+    appendAudit(db, {
+      tbl: 'fact',
+      rowId: id,
+      field: 'valid_to',
+      before: {
+        valid_to: null,
+        epistemic_status: before.epistemic_status,
+        superseded_by: before.superseded_by,
+        expired_at: before.expired_at,
+        withdrawn: priorTombstone,
+      },
+      after: {
+        valid_to: opts.validTo,
+        epistemic_status: status,
+        superseded_by: supersededBy,
+        expired_at: before.expired_at,
+        withdrawn: opts.tombstone ?? null,
+      },
+      source: opts.source,
+      reason: opts.reason ?? null,
+      ts,
+    });
+    return true;
+  });
+}
+
 export function setEpistemicStatus(db: Db, id: string, status: Epistemic): void {
   db.prepare('UPDATE fact SET epistemic_status = ?, updated_at = ? WHERE id = ?').run(
     status,

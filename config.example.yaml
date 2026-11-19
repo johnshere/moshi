@@ -76,7 +76,9 @@ retrieval:
   ppr_iters: 20
   ppr_max_nodes: 400
   rrf_k: 60
-  vector_min_sim: 0.6        # 向量召回相关性地板（真模型标定：拒答负例上限 0.520、正例下限 0.692）
+  vector_min_sim: 0.535      # 向量召回相关性地板，比的是 knn 的 similarity（1-L2/2），不是余弦；
+                             # 绑定编码器：bge-small-zh-v1.5 实测正例≥0.538、拒答≤0.498。
+                             # 换 encoder / 权重 / 归一方式必须重标（w6 calib.py）
   entity_bonus: 0.25
   temporal_bonus: 0.20
 
@@ -102,9 +104,10 @@ sidecar:
   socket_path: "~/.moshi/sidecar.sock"
   idle_unload_min: 5
   idle_exit_min: 30
-  startup_timeout_ms: 20000  # 首次拉起要 import torch 栈（实测 ~11.3s）
+  startup_timeout_ms: 30000  # 就绪等待：import torch 栈 ~11.3s + 就绪前预热（encode+score）~1.1s
   encode_timeout_ms: 2000
-  score_timeout_ms: 120
+  score_timeout_ms: 5000     # 首调预算（冷启）：正常预热后首调 ~5ms；权重晚到/预热失败实测 0.75~0.96s
+  score_steady_timeout_ms: 120  # 稳态回落：首次成功打分后生效（实测 3~8ms）
   max_restarts_per_hour: 3
 
 model:

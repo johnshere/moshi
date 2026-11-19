@@ -341,6 +341,39 @@ describe('searchWithPipeline · 向量相关性地板（P1-29）', () => {
     expect(out.pack.evidence).toEqual([]);
     expect(out.pack.degraded).toContain('no_vector');
   });
+
+  /**
+   * w6 校准回归：地板 0.535 是按真实库 similarity 分布重标的，这里锁住"地板两侧"的行为。
+   * knn 的 similarity = 1 - L2/2，所以想造 similarity=s 的邻居，取 cos c = 1 - 2(1-s)²。
+   */
+  function vecWithSim(s: number): Float32Array {
+    const c = 1 - 2 * (1 - s) * (1 - s);
+    const v = new Float32Array(VEC_DIM);
+    v[0] = c;
+    v[1] = Math.sqrt(1 - c * c);
+    return v;
+  }
+
+  it('地板 0.535 之上（similarity 0.57）召回', async () => {
+    const db = freshDb();
+    const id = insertFact(db, { content: 'clash 端口 7890 代理配置' });
+    upsertVec(db, id, basis(0));
+    const rt = runtime(db, { params: { vectorMinSim: 0.535 }, encode: async () => vecWithSim(0.57) });
+    const out = await searchWithPipeline(rt, { query: 'clash proxy', scope: 'global' });
+    expect(out.pack.evidence.map((e) => e.fact_id)).toEqual([id]);
+    expect(out.pack.degraded).not.toContain('no_vector');
+  });
+
+  it('地板 0.535 之下（similarity 0.50）不召回，且不污染裁决', async () => {
+    const db = freshDb();
+    const id = insertFact(db, { content: 'clash 端口 7890 代理配置' });
+    upsertVec(db, id, basis(0));
+    const rt = runtime(db, { params: { vectorMinSim: 0.535 }, encode: async () => vecWithSim(0.5) });
+    const out = await searchWithPipeline(rt, { query: 'clash proxy', scope: 'global' });
+    expect(out.pack.evidence).toEqual([]);
+    expect(out.pack.degraded).toContain('no_vector');
+    expect(out.pack.status).toBe('degraded');
+  });
 });
 
 describe('searchWithPipeline · 读路径惰性衰减（P2-08）', () => {

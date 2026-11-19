@@ -113,7 +113,12 @@ describe('配置加载（详设 §3.6）', () => {
     const cfg = loadConfig({ file: example, home: HOME });
     expect(cfg.server.host).toBe('127.0.0.1');
     expect(cfg.storage.backup_keep).toBe(7);
-    expect(cfg.sidecar.score_timeout_ms).toBe(120);
+    // w6：示例文件与默认口径必须一致（首调 5s / 稳态 120ms / 就绪 30s）
+    expect(cfg.sidecar.startup_timeout_ms).toBe(30_000);
+    expect(cfg.sidecar.score_timeout_ms).toBe(5_000);
+    expect(cfg.sidecar.score_steady_timeout_ms).toBe(120);
+    // w6 向量地板重标：示例文件与默认口径一致（绑定编码器，换模型必须重标）
+    expect(cfg.retrieval.vector_min_sim).toBe(0.535);
     expect(cfg.archive.include_raw).toBe(false);
     expect(cfg.ui.theme).toBe('system');
     expect(cfg.log.keep_days).toBe(7);
@@ -134,6 +139,22 @@ describe('配置加载（详设 §3.6）', () => {
     expect(cfg.layout.jitter_radius).toBe(5);
     expect(cfg.layout.extent).toBe(100);
     expect(cfg.layout.displacement_threshold).toBe(15);
+  });
+
+  it('sidecar 超时默认值：冷启首调 5000、成功后稳态 120、启动 30s（w6 实测）', () => {
+    // 冷启首调实测 0.75~0.96s（权重晚到、预热没覆盖时；breakdown 里 ensure_scorer 1.06s），
+    // 稳态 2.6~4.9ms；启动 = import torch 栈 ~11.3s + 预热 ~1.1s，20s 上限不够
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'sidecar.yaml'), home: HOME });
+    expect(cfg.sidecar.startup_timeout_ms).toBe(30_000);
+    expect(cfg.sidecar.score_timeout_ms).toBe(5_000);
+    expect(cfg.sidecar.score_steady_timeout_ms).toBe(120);
+  });
+
+  it('向量地板默认 0.535：比 knn similarity 不比 cos（w6 用真实库重标）', () => {
+    // 真实库 1584 条事实 + bge-small-zh：真实查询 top1 sim p50 0.612、黄金正例 min 0.538、
+    // 拒答 max 0.498；0.6 会挡掉 18/37 条真实查询，0.535 保住全部正例且拒答仍全挡
+    const cfg = loadConfig({ file: path.join(tmpdir(), 'nope', 'floor.yaml'), home: HOME });
+    expect(cfg.retrieval.vector_min_sim).toBe(0.535);
   });
 
   it('dataPaths 落在 data_dir 之下', () => {

@@ -31,17 +31,26 @@ function tempHome(): string {
 class FakeTransport implements SidecarTransport {
   fail = false;
   scoreTimeout = false;
+  closed = 0;
+  /** 每次 /score 收到的超时预算（w6：冷启/稳态区分） */
+  scoreTimeouts: number[] = [];
+  onDiscard?: (reason: 'timeout') => void;
   scoreResponse: unknown = {
     scores: [{ fact_id: 'f1', delta: 0.01, overturn_prob: 0.2 }],
     model_version: 'v1',
     ms: 1.5,
   };
   requests: Array<{ path: string; body: unknown }> = [];
-  request(path: string, body: unknown, _timeoutMs: number): Promise<unknown> {
+  request(path: string, body: unknown, timeoutMs: number): Promise<unknown> {
     this.requests.push({ path, body });
+    if (path === '/score') this.scoreTimeouts.push(timeoutMs);
     if (this.fail) return Promise.reject(new Error('sidecar 连接已关闭'));
     if (path === '/score') {
-      if (this.scoreTimeout) return Promise.reject(new SidecarTimeoutError('/score'));
+      if (this.scoreTimeout) {
+        // 真传输：超时先通知上层摘掉连接，再拒绝
+        this.onDiscard?.('timeout');
+        return Promise.reject(new SidecarTimeoutError('/score'));
+      }
       return Promise.resolve(this.scoreResponse);
     }
     if (path === '/health') return Promise.resolve({ status: 'ready', rss_mb: 42, loaded: true, pid: 777 });
@@ -49,7 +58,9 @@ class FakeTransport implements SidecarTransport {
     if (path === '/unload' || path === '/shutdown' || path === '/reload') return Promise.resolve({ ok: true });
     return Promise.resolve({ ok: true });
   }
-  close(): void {}
+  close(): void {
+    this.closed += 1;
+  }
 }
 
 interface FakeSpawnRec {
@@ -244,6 +255,88 @@ describe('SidecarClient /score（P3-04）', () => {
     expect(out).toEqual({ scores: null, modelVersion: null, ms: null, degraded: ['timeout'] });
     expect(spawnRec.kills).toBe(0);
     expect(c.status().restartsThisHour).toBe(0);
+    await c.terminate();
+  });
+
+  it('冷启首调用 score_timeout_ms，首次成功后回落 score_steady_timeout_ms', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+
+    await c.score({});
+    await c.score({});
+    await c.score({});
+    // 默认 5000（冷启，w6 实测首调 2.81s）→ 成功后 120（稳态 3~8ms）
+    expect(t.scoreTimeouts).toEqual([5000, 120, 120]);
+    await c.terminate();
+  });
+
+  it('超时后丢弃半死连接、后台重连可复用，且不计崩溃重启', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps, spawnRec } = makeDeps(home, t);
+    let creates = 0;
+    const baseCreate = deps.createTransport!;
+    deps.createTransport = (target) => {
+      creates += 1;
+      return baseCreate(target);
+    };
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+    expect(creates).toBe(1);
+
+    t.scoreTimeout = true;
+    const out = await c.score({});
+    expect(out.degraded).toEqual(['timeout']);
+    expect(c.status().state).toBe('ready'); // 进程还活着
+    expect(c.status().restartsThisHour).toBe(0);
+    expect(spawnRec.kills).toBe(0);
+    expect(t.closed).toBeGreaterThanOrEqual(1); // 半死连接被关掉
+
+    t.scoreTimeout = false;
+    await c.ensureStarted(); // 后台重连完成
+    expect(creates).toBe(2);
+    const ok = await c.score({});
+    expect(ok.degraded).toEqual([]);
+    expect(c.status().restartsThisHour).toBe(0);
+    // 还没成功跑过一帧：重连不重置冷启预算
+    expect(t.scoreTimeouts).toEqual([5000, 5000]);
+    await c.terminate();
+  });
+
+  it('空闲卸载后首调重新取冷启预算（打分器要重新加载）', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps, clock } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+    await c.score({}); // 5000 → 成功，转稳态
+    await c.score({}); // 120
+    clock.t += 6 * 60_000;
+    await c.checkIdle(); // /unload
+    expect(c.status().state).toBe('unloaded');
+    await c.score({}); // 卸载后重新按冷启预算
+    expect(t.scoreTimeouts).toEqual([5000, 120, 5000]);
+    await c.terminate();
+  });
+
+  it('进程重启后首调重新取冷启预算（scoreWarm 复位）', async () => {
+    const home = tempHome();
+    const t = new FakeTransport();
+    const { deps } = makeDeps(home, t);
+    const c = new SidecarClient(deps);
+    await c.ensureStarted();
+    await c.score({}); // 冷启 5000，成功 → 稳态
+
+    t.fail = true;
+    await c.encode(['x']); // 断开 → 崩溃计数 + 重拉
+    t.fail = false;
+    await c.ensureStarted();
+    await c.score({}); // 新进程：重新 5000
+    expect(t.scoreTimeouts).toEqual([5000, 5000]);
+    expect(c.status().restartsThisHour).toBe(1);
     await c.terminate();
   });
 

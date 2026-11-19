@@ -17,23 +17,29 @@
  *               （概设 §5.5.2"进 UI 待确认"）。
  * 3. `on_read` → 维持（reason=`on_read_lazy`）。它的复检时机是**读时**（惰性），
  *               不是后台任务。
- * 4. **身份已有活跃行** → 维持（reason=`has_active_successor`）。这是硬约束而非偏好：
+ * 4. **有撤回墓碑**（`attrs.ext.withdrawn` 非空）→ 维持（reason=`withdrawn`）。
+ *    墓碑是来源撤回（`lifecycle withdraw`）写的：撤回是**人或规则的明确决定**，
+ *    不是"当时判错了"，复检不许替撤回者翻案。判据必须排在 `evidence_alive` **之前**
+ *    ——撤回的事实若曾进过历史查询的证据包，`evidence_log` 行还在，只按证据判就会
+ *    把它捞回来，等于撤回无效。`ext` 是 schema 预留的 JSON 扩展槽（详设 §2.1），
+ *    墓碑不改 content、不加列。
+ * 5. **身份已有活跃行** → 维持（reason=`has_active_successor`）。这是硬约束而非偏好：
  *    复活旧行会让同一身份同时有两个有效取值，同值时更会直接撞
  *    `idx_fact_identity`（`(canonical_key, scope, value_hash) WHERE valid_to IS NULL`）；
  *    而"同身份又有活跃取值"本身就说明旧行已被取代（详设 §2.8 情形 C/D）。
- * 5. **`valid_to` 在未来** → 复活（reason=`valid_to_in_future`）。双时态里 `valid_to`
+ * 6. **`valid_to` 在未来** → 复活（reason=`valid_to_in_future`）。双时态里 `valid_to`
  *    是**世界的**失效时刻（详设 §2.1）：未来时刻意味着"失效还没发生"，是提前写入的
  *    收口，撤销它不改变任何已发生的事实。
- * 6. **仍有未失效 evidence** → 复活（reason=`evidence_alive`）。`evidence_log` 行随
+ * 7. **仍有未失效 evidence** → 复活（reason=`evidence_alive`）。`evidence_log` 行随
  *    query_log 保留期一起清（详设 §6.12 回放链），行还在就说明这条事实仍被历史查询
  *    当作证据包的一部分引用；复活时把强度抬到 `VALIDATE_FLOOR`（概设 §5.5.1
  *    "独立验证 s ← max(s, floor)"，初值 0.60），否则失效期间被算成 0 的强度会让它
  *    一复活就沉底。
- * 7. **淘汰候选** → 待审（reason=`idle_prune_candidate`）。口径取自详设 §8.3.4
+ * 8. **淘汰候选** → 待审（reason=`idle_prune_candidate`）。口径取自详设 §8.3.4
  *    淘汰候选 SQL 的闲置条件（`last_access_at` 早于 60 天前）：失效后不再被读，
  *    所以以 `valid_to` 作闲置起点。候选**只标记不删**（概设 §5.5.1 第 3 条 /
  *    详设 §8.3.4"产出候选清单，不自动删"），标记落在 `attrs.ext.recheck`。
- * 8. 其余 → 维持（reason=`no_evidence`）。
+ * 9. 其余 → 维持（reason=`no_evidence`）。
  *
  * **不作为判据的一项**：`confidence` 回升。置信只在写入/校准路径变化（详设 §5.8），
  * 不随时间衰减，所以"回升"不是可观测状态；拿绝对置信阈值当复活条件等于自造口径。
@@ -69,6 +75,7 @@ export type RecheckReason =
   | 'recheck_none'
   | 'manual_pending'
   | 'on_read_lazy'
+  | 'withdrawn'
   | 'has_active_successor'
   | 'valid_to_in_future'
   | 'evidence_alive'
@@ -97,12 +104,19 @@ export function isIdleExpired(fact: Fact, now: string): boolean {
   return parseTs(now) - parseTs(fact.validTo) > RECHECK_IDLE_DAYS * 864e5;
 }
 
+/** 是否带撤回墓碑（`attrs.ext.withdrawn`，由 `lifecycle withdraw` 写） */
+export function hasWithdrawnTombstone(fact: Fact): boolean {
+  const tombstone = fact.attrs.ext['withdrawn'];
+  return tombstone !== undefined && tombstone !== null;
+}
+
 /** 单条已失效事实的判定（纯函数；判据顺序见文件头，顺序不可换） */
 export function judgeExpiredFact(fact: Fact, probe: RecheckProbe): RecheckJudgement {
   if (fact.validTo === null) return { verdict: 'maintain', reason: 'no_evidence' };
   if (fact.recheckKind === 'none') return { verdict: 'maintain', reason: 'recheck_none' };
   if (fact.recheckKind === 'manual') return { verdict: 'maintain', reason: 'manual_pending' };
   if (fact.recheckKind === 'on_read') return { verdict: 'maintain', reason: 'on_read_lazy' };
+  if (hasWithdrawnTombstone(fact)) return { verdict: 'maintain', reason: 'withdrawn' };
   if (probe.hasActiveSuccessor()) {
     return { verdict: 'maintain', reason: 'has_active_successor' };
   }

@@ -10,6 +10,11 @@ import net from 'node:net';
 export interface SidecarTransport {
   request(path: string, body: unknown, timeoutMs: number): Promise<unknown>;
   close(): void;
+  /**
+   * 传输层因单请求超时主动丢弃整条连接时同步回调（早于拒绝在途/排队请求）。
+   * 客户端据此立刻把这条连接从池里摘掉，下一条请求就不会落到半死连接上被误判成崩溃。
+   */
+  onDiscard?: (reason: 'timeout') => void;
 }
 
 /**
@@ -57,6 +62,7 @@ export function connectTransport(target: TransportTarget): Promise<SidecarTransp
 }
 
 class PipeTransport implements SidecarTransport {
+  onDiscard?: (reason: 'timeout') => void;
   private buffer = '';
   private queue: {
     path: string;
@@ -96,6 +102,8 @@ class PipeTransport implements SidecarTransport {
   }
 
   private onClosed(): void {
+    // 连接已死：残留的半行/迟到响应不能留到下一次请求（否则会错配给新请求）
+    this.buffer = '';
     if (this.active !== null) {
       const p = this.active;
       this.active = null;
@@ -124,7 +132,10 @@ class PipeTransport implements SidecarTransport {
     if (this.active !== null || this.queue.length === 0) return;
     const item = this.queue.shift()!;
     const timer = setTimeout(() => {
-      // 超时：当前请求失败；销毁连接会让 onClosed 连带拒绝排队的后续请求
+      // 超时：连接必须整条丢弃——服务端可能还在算这条请求，迟到响应会错配给下一条。
+      // 先同步通知上层摘掉引用（onClosed 随后连带拒绝排队请求），再销毁连接。
+      this.buffer = '';
+      this.onDiscard?.('timeout');
       this.sock.destroy();
       if (this.active !== null) {
         const p = this.active;

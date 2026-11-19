@@ -88,6 +88,24 @@ export interface SidecarClientDeps {
 }
 
 const HOUR_MS = 3_600_000;
+/**
+ * 连接被超时丢弃后的重连退避。服务端单连接串行：旧连接上那条在途请求要先算完、
+ * 写响应失败后才会建下一个管道实例，这段窗口里 connect 会 EBUSY/ENOENT，故短暂重试。
+ * 窗口上限 ~2.3s，覆盖「首调真冷时被打断」的 ensure_scorer（w6 实测最慢 2.8s 前的
+ * torch_geometric import 段也在其中）；重连在后台跑，不阻塞调用方。
+ */
+const RECONNECT_BACKOFF_MS = [0, 20, 40, 80, 160, 320, 640, 1000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref();
+  });
+}
+
+/** 超时判定：instanceof 在跨 realm/降级编译时可能失效，名字兜底 */
+function isTimeoutError(err: unknown): boolean {
+  return err instanceof SidecarTimeoutError || (err as Error).name === 'SidecarTimeoutError';
+}
 
 function scoreFailure(reason: ScoreDegraded): ScoreOutcome {
   return { scores: null, modelVersion: null, ms: null, degraded: [reason] };
@@ -103,6 +121,9 @@ export class SidecarClient {
   private restartWindowStart = 0;
   private lastActivityAt: number | null = null;
   private startingPromise: Promise<void> | null = null;
+  private reconnecting: Promise<SidecarTransport | null> | null = null;
+  /** 这个 sidecar 进程是否成功跑过一帧 /score；false 用冷启预算，true 回落稳态预算 */
+  private scoreWarm = false;
   private resolvedPython: string | null = null;
   private readonly idleTimer: NodeJS.Timeout;
 
@@ -130,7 +151,11 @@ export class SidecarClient {
       this.state = 'failed';
       return;
     }
-    if (this.state === 'ready' || this.state === 'unloaded') return;
+    if (this.state === 'ready' || this.state === 'unloaded') {
+      // 进程活着但连接被超时丢弃：只重建连接（不重新 spawn、不计崩溃）
+      if (this.transport === null) await this.ensureTransport();
+      return;
+    }
     if (this.startingPromise !== null) return this.startingPromise;
     this.state = 'starting';
     const now = this.now();
@@ -150,11 +175,10 @@ export class SidecarClient {
       this.spawned = s;
       const ready = await s.waitReady();
       this.ready = ready;
-      this.transport = await this.createTransport({
-        pipeName: process.platform === 'win32' ? this.deps.cfg.sidecar.pipe_name : null,
-        socketPath: process.platform === 'win32' ? null : this.deps.cfg.sidecar.pipe_name,
-      });
+      this.transport = this.attachTransport(await this.createTransport(this.transportTarget()));
       this.state = 'ready';
+      // 新进程：还没跑过 /score，首调走冷启预算
+      this.scoreWarm = false;
       this.deps.logger.info(
         { event: 'sidecar.ready', pid: ready.pid, model: ready.embedModel },
         'sidecar ready',
@@ -170,6 +194,77 @@ export class SidecarClient {
     }
   }
 
+  private transportTarget(): TransportTarget {
+    return {
+      pipeName: process.platform === 'win32' ? this.deps.cfg.sidecar.pipe_name : null,
+      socketPath: process.platform === 'win32' ? null : this.deps.cfg.sidecar.pipe_name,
+    };
+  }
+
+  /** 注册「连接被传输层丢弃」回调：超时发生时立刻摘掉引用，避免并发请求落到半死连接上 */
+  private attachTransport(transport: SidecarTransport): SidecarTransport {
+    transport.onDiscard = (): void => {
+      if (this.transport === transport) this.transport = null;
+    };
+    return transport;
+  }
+
+  /**
+   * 重建传输（进程还活着，只重连）。失败重试覆盖服务端「写旧连接失败 → 建新管道实例」
+   * 的窗口；全部失败才按崩溃处理（先杀可能还占着管道名的旧进程，避免两个 sidecar 抢名）。
+   */
+  private async reconnectTransport(): Promise<SidecarTransport | null> {
+    const target = this.transportTarget();
+    for (const delayMs of RECONNECT_BACKOFF_MS) {
+      if (this.transport !== null) return this.transport;
+      if (delayMs > 0) await sleep(delayMs);
+      try {
+        const t = this.attachTransport(await this.createTransport(target));
+        if (this.state !== 'ready' && this.state !== 'unloaded') {
+          // 期间已 shutdown/terminate：不要把连接塞回状态机
+          t.close();
+          return null;
+        }
+        this.transport = t;
+        this.deps.logger.info({ event: 'sidecar.reconnected' }, 'sidecar 连接已重建');
+        return t;
+      } catch {
+        // 管道实例还没建好：退避后重试
+      }
+    }
+    this.deps.logger.warn({ event: 'sidecar.reconnect_failed' }, 'sidecar 连接重建失败，按崩溃重拉');
+    try {
+      this.spawned?.kill();
+    } catch {
+      /* 尽力而为 */
+    }
+    this.handleFailure();
+    return null;
+  }
+
+  private ensureTransport(): Promise<SidecarTransport | null> {
+    if (this.transport !== null) return Promise.resolve(this.transport);
+    if (this.reconnecting !== null) return this.reconnecting;
+    this.reconnecting = this.reconnectTransport().finally(() => {
+      this.reconnecting = null;
+    });
+    return this.reconnecting;
+  }
+
+  /** 丢弃一条连接（超时后必须整条丢：迟到响应会错配给下一条请求），下次请求按需重连 */
+  private discardTransport(transport: SidecarTransport): void {
+    if (this.transport === transport) this.transport = null;
+    transport.close();
+    void this.ensureTransport();
+  }
+
+  /** 首调（进程没跑过 /score）用冷启预算；跑过一帧后回落稳态预算 */
+  private scoreTimeoutMs(): number {
+    return this.scoreWarm
+      ? this.deps.cfg.sidecar.score_steady_timeout_ms
+      : this.deps.cfg.sidecar.score_timeout_ms;
+  }
+
   /**
    * 编码一批文本。不可用（未启动/启动中/已停用/请求失败）一律返回 null，
    * 调用方标 `degraded:["no_sidecar"]`。永不抛错、永不阻塞超过 timeout。
@@ -181,12 +276,13 @@ export class SidecarClient {
       void this.ensureStarted();
       return null;
     }
-    if (this.transport === null) {
+    const transport = this.transport;
+    if (transport === null) {
       void this.ensureStarted();
       return null;
     }
     try {
-      const res = (await this.transport.request(
+      const res = (await transport.request(
         '/encode',
         { texts },
         this.deps.cfg.sidecar.encode_timeout_ms,
@@ -194,6 +290,19 @@ export class SidecarClient {
       if (res.error !== undefined) return null;
       return res.vectors ?? null;
     } catch (err) {
+      if (isTimeoutError(err)) {
+        // 与 /score 同理：超时后服务端可能还在算，连接不能复用
+        this.deps.logger.warn(
+          { event: 'sidecar.encode_timeout' },
+          'encode 超时，丢弃连接（不计崩溃）',
+        );
+        this.discardTransport(transport);
+        return null;
+      }
+      if (this.transport !== transport) {
+        // 并发的超时已把这条连接摘掉（排队请求被连带拒绝）：本次降级，不计崩溃
+        return null;
+      }
       this.deps.logger.warn(
         { event: 'sidecar.encode_failed', err: (err as Error).message },
         'encode 失败',
@@ -206,9 +315,10 @@ export class SidecarClient {
   /**
    * 给子图打分（详设 §4.6）。**永不抛错**，降级原因直接返回给调用方：
    * - 未启动/启动中/停用 → `no_sidecar`（触发异步 ensureStarted，本次不阻塞）
-   * - 超过 `score_timeout_ms`（默认 120ms）→ `timeout`
+   * - 超过超时预算 → `timeout`：首调用 `score_timeout_ms`（冷启，默认 5000ms），
+   *   首次成功后回落 `score_steady_timeout_ms`（默认 120ms）
    * - 服务端 `E_INPUT_SHAPE` / `E_MODEL_NOT_LOADED` → 对应原因
-   * 超时由传输层销毁连接，不计入崩溃重启次数（那是熔断器 P3-10 的事）。
+   * 超时由传输层销毁连接、客户端摘掉连接并在后台重连，不计入崩溃重启次数。
    */
   async score(payload: unknown): Promise<ScoreOutcome> {
     this.lastActivityAt = this.now();
@@ -217,16 +327,14 @@ export class SidecarClient {
       void this.ensureStarted();
       return scoreFailure('no_sidecar');
     }
-    if (this.transport === null) {
+    const transport = this.transport;
+    if (transport === null) {
+      // 连接被上次超时丢弃（进程还活着）：本次降级，后台重建连接
       void this.ensureStarted();
       return scoreFailure('no_sidecar');
     }
     try {
-      const res = (await this.transport.request(
-        '/score',
-        payload,
-        this.deps.cfg.sidecar.score_timeout_ms,
-      )) as {
+      const res = (await transport.request('/score', payload, this.scoreTimeoutMs())) as {
         scores?: ScoreEntry[];
         model_version?: string;
         ms?: number;
@@ -238,6 +346,7 @@ export class SidecarClient {
         return scoreFailure('error');
       }
       if (!Array.isArray(res.scores)) return scoreFailure('error');
+      this.scoreWarm = true;
       return {
         scores: res.scores,
         modelVersion: res.model_version ?? null,
@@ -245,9 +354,14 @@ export class SidecarClient {
         degraded: [],
       };
     } catch (err) {
-      // instanceof 在跨 realm/降级编译时可能失效，名字兜底
-      if (err instanceof SidecarTimeoutError || (err as Error).name === 'SidecarTimeoutError') {
+      if (isTimeoutError(err)) {
+        // 服务端可能还在算这条请求：迟到响应会错配给下一条，连接必须整条丢弃
+        this.discardTransport(transport);
         return scoreFailure('timeout');
+      }
+      if (this.transport !== transport) {
+        // 并发的超时已把这条连接摘掉（排队请求被连带拒绝）：本次降级，不计崩溃
+        return scoreFailure('no_sidecar');
       }
       this.deps.logger.warn(
         { event: 'sidecar.score_failed', err: (err as Error).message },
@@ -403,6 +517,8 @@ export class SidecarClient {
     this.transport = null;
     this.spawned = null;
     this.ready = null;
+    // 崩溃后重拉的是新进程：首调重新走冷启预算
+    this.scoreWarm = false;
   }
 
   /**
@@ -423,6 +539,9 @@ export class SidecarClient {
       try {
         await this.transport.request('/unload', {}, 1000);
         this.state = 'unloaded';
+        // 卸载后打分器要重新 torch.load：页缓存热时 ~13ms，冷盘可到 1s，
+        // 不能拿稳态 120ms 去赌，下一次打分重新按冷启预算
+        this.scoreWarm = false;
         this.deps.logger.info({ event: 'sidecar.idle_unload' }, 'sidecar 空闲卸载权重');
       } catch {
         /* 卸载失败不致命 */
