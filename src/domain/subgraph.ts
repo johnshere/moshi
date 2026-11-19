@@ -35,6 +35,20 @@ export const MAX_NODES = 64;
 /** 子图边上限（详设 §6.6）；与边特征 padding 上限同源。 */
 export const MAX_EDGES = EDGE_PAD_MAX;
 
+/**
+ * 子图种子上限（详设 §6.6）：**训练导出与查询读路径共用这一个值**。
+ *
+ * 种子 = 融合结果里「必定入图」的那几条，其余名额（`MAX_NODES - 种子数`）交给
+ * 1~2 跳邻居扩展。两侧用同一个常量，避免「一处传参、一处吃默认」的口径漂移。
+ *
+ * 注意两个实测事实（W5）：(1) `isSeed` 只是排序键，payload 的 522 维节点特征里
+ * **没有**种子一热位（features.py 只拼 ftype/epistemic/confidence/importance/degree）——
+ * 种子数改变的是**节点组成**，不是特征里的一格；(2) 训练样本的 `fact_ids` 恒为 2 条，
+ * 所以训练侧实际是「2 种子 + 2 跳扩展」（avg 54.5 节点），本常量对训练不生效。
+ * 密度上不去时不要靠调大种子掩盖：那是改输入组成，不是修召回。
+ */
+export const SUBGRAPH_SEED_LIMIT = 8;
+
 export interface SubgraphNodeInput {
   readonly factId: string;
   /** `null` 表示缺 embedding（Python 侧零向量 + confidence 折半）。 */

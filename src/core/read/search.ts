@@ -42,6 +42,7 @@ import { buildSubgraph } from './subgraph.js';
 import { buildPayloadFromSubgraph } from './subgraph-payload.js';
 import { GLOBAL_SCOPE, normalizeScope, scopeCandidates } from '../../domain/scope.js';
 import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
+import { SUBGRAPH_SEED_LIMIT } from '../../domain/subgraph.js';
 import { adjudicate, type AdjudicateResult, type AdjudicatedFact } from './adjudicate.js';
 import { applyNeuralDeltas } from './gate-delta.js';
 import { packFacts, type PackItem } from './pack.js';
@@ -87,6 +88,19 @@ export const DEFAULT_PARAMS: SearchParams = {
   maxFactTokens: 80,
   globalTopicLimit: 5,
 };
+
+/**
+ * 召回超取倍数（W5 密度修复）。
+ *
+ * 三路召回先按 `topK × RECALL_OVERFETCH` 取，过 `passFilters`（scope / cache /
+ * history / 时间窗）**之后**再截断回 topK。此前是「先截断后过滤」：BM25 的
+ * top-20 里常混着十几条 `retention_class=cache` / `epistemic_status=invalidated`
+ * 的事实，过滤完只剩 1~3 条，融合池与子图种子一起塌陷（活动库实测 query_log
+ * 平均子图 0.6 节点）。超取让过滤有富余量。
+ *
+ * `1` = 关闭（旧行为），单测与消融用它对齐历史读数。
+ */
+export const RECALL_OVERFETCH = 5;
 
 export interface SearchInput {
   query: string;
@@ -137,6 +151,11 @@ export interface SearchRuntime {
    * 也如实体现在 `flags_json` 里（消融数据要能按开关归组）。
    */
   channels?: { vector?: boolean; bm25?: boolean; ppr?: boolean };
+  /**
+   * 召回超取倍数（见 `RECALL_OVERFETCH`）：缺省用它，`1` = 关闭超取。
+   * 单测/消融用它把读数对齐到「先截断后过滤」的旧行为。
+   */
+  recallOverfetch?: number;
   /** 模型结构开关（P4-02 消融）：缺省 self_attn=off、cross_attn=on */
   modelOptions?: { selfAttn?: boolean; crossAttn?: boolean };
   /**
@@ -216,9 +235,19 @@ function passFilters(fact: Fact, input: SearchInput, scopes: readonly string[]):
   return true;
 }
 
-/** 只保留过滤后仍在候选集里的通道 id（召回通道不知道 scope） */
-function restrict(ids: readonly string[], allowed: ReadonlySet<string>): string[] {
-  return ids.filter((id) => allowed.has(id));
+/**
+ * 通道内「过滤 → 截断」：先剔掉 passFilters 不认的 id，再按通道原始顺序取前
+ * `limit` 条。截断放在过滤之后是密度修复的关键——超取进来的 cache/invalidated
+ * 事实被过滤掉后，名额要让给后面的合法候选，而不是跟着 topK 一起消失。
+ */
+function restrictTop(ids: readonly string[], allowed: ReadonlySet<string>, limit: number): string[] {
+  const out: string[] = [];
+  for (const id of ids) {
+    if (!allowed.has(id)) continue;
+    out.push(id);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 function toConflicts(kept: readonly AdjudicatedFact[]): ConflictEntry[] {
@@ -513,6 +542,9 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   }
 
   // ── 4) 三路召回（§6.4）──
+  // 通道内先超取（见 RECALL_OVERFETCH），过滤后再截断回 topK：截断必须发生在
+  // passFilters 之后，否则被过滤掉的 cache/history 事实会白白吃掉 topK 名额。
+  const overfetch = Math.max(1, Math.floor(rt.recallOverfetch ?? RECALL_OVERFETCH));
   let vectorIds: string[] = [];
   if (rt.channels?.vector === false) {
     // 消融显式关闭：不编向量、不出结果，也不标降级（这是预期行为）
@@ -526,7 +558,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
       if (vec === null) signals.push('sidecar_unavailable');
       else if (vec.length !== VEC_DIM) signals.push('vector_error');
       else {
-        const hits = knn(db, vec, params.vectorTopK);
+        const hits = knn(db, vec, params.vectorTopK * overfetch);
         const kept = hits.filter((h) => h.similarity >= params.vectorMinSim);
         // 有命中但全低于地板 = 问题不在库里，是问句与所有事实都不相关（拒答要的就是这个）
         if (hits.length > 0 && kept.length === 0) signals.push('vector_low_similarity');
@@ -541,7 +573,7 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   let bm25Ids: string[] = [];
   if (rt.channels?.bm25 !== false) {
     try {
-      bm25Ids = recallBm25(db, input.query, params.bm25TopK).map((h) => h.fact_id);
+      bm25Ids = recallBm25(db, input.query, params.bm25TopK * overfetch).map((h) => h.fact_id);
     } catch {
       signals.push('bm25_error');
     }
@@ -559,9 +591,10 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
         maxNodes: params.pprMaxNodes,
         maxIter: params.pprIters,
         d: params.pprDamping,
+        k: params.pprTopK * overfetch,
       });
       pprResult = ppr;
-      pprIds = ppr.ids.slice(0, params.pprTopK);
+      pprIds = ppr.ids.slice(0, params.pprTopK * overfetch);
       if (ppr.timedOut) signals.push('ppr_timeout');
     } catch {
       signals.push('ppr_error');
@@ -581,10 +614,15 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   mark('load');
 
   // ── 6) 融合（§6.5）：RRF + 实体信号 + 时序信号 ──
+  // 每条通道在**过滤之后**截断到配置的 topK（restrictTop）：超取只用来换过滤
+  // 富余量，通道贡献的上限仍是 topK，RRF 的名次语义不变。
   const channels: { vector?: RecallChannel; bm25?: RecallChannel; ppr?: RecallChannel } = {};
-  if (vectorIds.length > 0) channels.vector = { ids: restrict(vectorIds, allowed) };
-  if (bm25Ids.length > 0) channels.bm25 = { ids: restrict(bm25Ids, allowed) };
-  if (pprIds.length > 0) channels.ppr = { ids: restrict(pprIds, allowed) };
+  const vIds = restrictTop(vectorIds, allowed, params.vectorTopK);
+  if (vIds.length > 0) channels.vector = { ids: vIds };
+  const bIds = restrictTop(bm25Ids, allowed, params.bm25TopK);
+  if (bIds.length > 0) channels.bm25 = { ids: bIds };
+  const pIds = restrictTop(pprIds, allowed, params.pprTopK);
+  if (pIds.length > 0) channels.ppr = { ids: pIds };
   const fused: FusedItem[] = fuseRank(channels, factsById, {
     entities,
     query: input.query,
@@ -595,9 +633,15 @@ export async function searchWithPipeline(rt: SearchRuntime, input: SearchInput):
   mark('fuse');
 
   // ── 7) 子图（§6.6）──
+  // 种子上限与训练导出共用 SUBGRAPH_SEED_LIMIT（8）：种子里放多少条，决定「哪几条
+  // 候选必定入图」，剩下 `maxNodes - 种子数` 个名额交给 2 跳扩展。放宽到 maxNodes
+  // 会让候选把名额吃满、2 跳归零，那是改输入组成而不是修召回（W5 实测：种子 64 时
+  // 密度虚高到 21.98，同批查询换成 8 种子是 12）。密度靠「召回超取 + 过滤后截断」
+  // 把候选喂满，再由图扩展补足。
   const sub = buildSubgraph(db, fused.map((f) => f.fact_id), {
     maxNodes: params.subgraphMaxNodes,
     maxEdges: params.subgraphMaxEdges,
+    seedLimit: SUBGRAPH_SEED_LIMIT,
   });
   // 门槛 2 的密度口径（详设 §7.6）：复用 stage_ms_json，不改表结构
   stageMs['subgraph_nodes'] = sub.nodes.length;

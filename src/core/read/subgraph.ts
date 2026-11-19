@@ -1,20 +1,27 @@
 /**
  * 子图构建与预算裁剪（详设 §6.6）。
  *
- * 从融合结果取前 8 条做种子，BFS 2 跳扩展（上限 64 节点），边上限 192
+ * 从融合结果取前 `seedLimit` 条做种子（缺省 `SUBGRAPH_SEED_LIMIT` = 8；读路径
+ * `src/core/read/search.ts` 与训练导出 `src/core/lifecycle/train-export.ts` **都显式传
+ * 同一常量**，不许一处传参一处吃默认），BFS 2 跳扩展（上限 64 节点），边上限 192
  * （两端都在集合内优先）。邻居扩展优先级（硬顺序）：
  * `mutually_exclusive > depends_on > supersedes > logic > co_occur > derived_from`，
  * 同级按 edge.confidence 降序。节点排序全序：
  * `(isSeed desc, fusedRank asc, degree desc, id asc)`——稳定性硬要求（§6.6 原话），
  * 同一输入两次运行产出必须一致。
  *
- * 本模块只产节点/边集合；§4.5 的 394 维特征拼接（embedding/one-hot）是
- * 子图 JSON 组装层的事（P2/P3 GAT 用），不在这里做。
+ * 教训（W5）：种子占满 `maxNodes` 名额会让 1~2 跳扩展归零，密度虚高且输入组成
+ * 偏离训练分布（训练样本是 2 种子 + 2 跳扩展，avg 54.5 节点）。种子数决定「哪几条
+ * 必定入图」，不是密度旋钮。
+ *
+ * 本模块只产节点/边集合；§4.5 的 522 维特征拼接（512 embedding + 10 标量/one-hot）
+ * 是子图 JSON 组装层的事（P2/P3 GAT 用），不在这里做。
  */
 import type { Db } from '../../infra/sqlite/db.js';
 import { neighbors } from '../../infra/sqlite/edgeRepo.js';
 import { getFact } from '../../infra/sqlite/factRepo.js';
 import type { Etype } from '../../domain/enums.js';
+import { SUBGRAPH_SEED_LIMIT } from '../../domain/subgraph.js';
 
 export interface SubgraphNode {
   fact_id: string;
@@ -41,7 +48,8 @@ export interface Subgraph {
 
 const MAX_NODES = 64;
 const MAX_EDGES = 192;
-const SEED_LIMIT = 8;
+/** 种子上限与训练导出口径同源（domain/subgraph.ts 的 SUBGRAPH_SEED_LIMIT）。 */
+const SEED_LIMIT = SUBGRAPH_SEED_LIMIT;
 
 /** 邻居扩展优先级（§6.6 硬顺序） */
 const ETYPE_ORDER: readonly Etype[] = ['mutually_exclusive', 'depends_on', 'supersedes', 'logic', 'co_occur', 'derived_from'];

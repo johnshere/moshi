@@ -3,7 +3,8 @@
  *
  * 只在**候选子图内**跑（概设 §4.5 硬约束）：从种子 fact_id 出发 BFS 2 跳
  * 收集节点（上限 ppr_max_nodes=400，边只走活跃 valid_to IS NULL），在收集到的
- * 节点上做 Personalized PageRank。返回 p 的 top-20（排除种子）。
+ * 节点上做 Personalized PageRank。返回 p 的 top-k（缺省 20，排除种子；读路径按
+ * 召回超取倍数放大，见 search.ts RECALL_OVERFETCH）。
  *
  * 性能预算 7ms：超时返回**当前结果**（已迭代部分收敛的 p）+ `timedOut:true`，
  * 由上层标 `degraded:["no_ppr"]`。绝不抛错中断整条查询链。
@@ -29,10 +30,12 @@ export interface PprOptions {
   d?: number;
   eps?: number;
   now?: () => number;
+  /** 返回条数上限（默认 20）。读路径按召回超取倍数放大，过滤后再截断。 */
+  k?: number;
 }
 
 export interface PprResult {
-  /** 非种子节点，按 p 降序，最多 20 条 */
+  /** 非种子节点，按 p 降序，最多 k 条（默认 20） */
   ids: string[];
   scores: number[];
   /** 超预算：调用方应标 degraded:["no_ppr"]（结果仍可用） */
@@ -41,7 +44,7 @@ export interface PprResult {
   nodes: number;
 }
 
-const DEFAULT = { maxNodes: 400, maxIter: 20, timeoutMs: 7, d: 0.85, eps: 1e-4 };
+const DEFAULT = { maxNodes: 400, maxIter: 20, timeoutMs: 7, d: 0.85, eps: 1e-4, k: 20 };
 
 export function recallPpr(db: Db, seedIds: readonly string[], opts: PprOptions = {}): PprResult {
   const maxNodes = opts.maxNodes ?? DEFAULT.maxNodes;
@@ -49,6 +52,7 @@ export function recallPpr(db: Db, seedIds: readonly string[], opts: PprOptions =
   const timeoutMs = opts.timeoutMs ?? DEFAULT.timeoutMs;
   const d = opts.d ?? DEFAULT.d;
   const eps = opts.eps ?? DEFAULT.eps;
+  const k = opts.k ?? DEFAULT.k;
   const now = opts.now ?? Date.now;
 
   const t0 = now();
@@ -152,12 +156,12 @@ export function recallPpr(db: Db, seedIds: readonly string[], opts: PprOptions =
     if (diff < eps) break;
   }
 
-  // ── 5) top-20（排除种子）──
+  // ── 5) top-k（排除种子；k 缺省 20，读路径按超取放大）──
   const nonSeed: { id: string; score: number }[] = [];
   for (let i = seedIds.length; i < n; i += 1) {
     if (p[i]! > 0) nonSeed.push({ id: order[i]!, score: p[i]! });
   }
   nonSeed.sort((a, b) => b.score - a.score);
-  const top = nonSeed.slice(0, 20);
+  const top = nonSeed.slice(0, k);
   return { ids: top.map((x) => x.id), scores: top.map((x) => x.score), timedOut, nodes: n };
 }

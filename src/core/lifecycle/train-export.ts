@@ -10,6 +10,7 @@
  * `/encode` 现场补（`queryVectors` 注入）。补不上的样本 `query_vector=null`，
  * 模型侧会跳过交叉注意力（`model.py` 支持 None），不会污染其它样本。
  */
+import { SUBGRAPH_SEED_LIMIT } from '../../domain/subgraph.js';
 import type { MoshiSubgraphPayload } from '../../domain/subgraph.js';
 import { buildPayloadFromSubgraph } from '../read/subgraph-payload.js';
 import type { LabelKind, SampleSource } from '../../domain/enums.js';
@@ -107,7 +108,8 @@ export async function exportTrainingPayloads(db: Db, opts: ExportOptions = {}): 
       stats.skipped.noNodes += 1;
       continue;
     }
-    const subgraph = buildSubgraph(db, nodeIds);
+    // 种子上限显式传入，与查询读路径共用同一常量（禁止吃默认值造成口径漂移）。
+    const subgraph = buildSubgraph(db, nodeIds, { seedLimit: SUBGRAPH_SEED_LIMIT });
     let payload: MoshiSubgraphPayload;
     try {
       const bridged = buildPayloadFromSubgraph(
