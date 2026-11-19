@@ -19,12 +19,14 @@ import { archiveAll } from '../../core/archive/index.js';
 import { writeArchiveLedger } from '../../core/archive/topic.js';
 import { consolidate } from '../../core/lifecycle/consolidate.js';
 import { runSchemaInfer } from '../../core/lifecycle/schema-infer.js';
+import { buildTrainingSamples } from '../../core/lifecycle/train-samples.js';
 import { harvest } from '../../core/write/harvest.js';
 import { nowIso } from '../../domain/time.js';
 import type { Db } from '../../infra/sqlite/db.js';
 import { countUnlaidFacts } from '../../infra/sqlite/layoutRepo.js';
 import { countEdges } from '../../infra/sqlite/edgeRepo.js';
 import { schemaRev, setMeta } from '../../infra/sqlite/metaRepo.js';
+import { countSamplesByKind } from '../../infra/sqlite/trainingSampleRepo.js';
 import { safeEnsureDir, safeRemoveFile } from '../../infra/fs/safeWrite.js';
 import { dataPaths, type Config } from '../config.js';
 import { runCommunityOnce } from '../communityRunner.js';
@@ -36,6 +38,14 @@ export const DEFAULT_JOB_TIMEOUT_MS = 10 * 60_000;
 export const RATE_LIMIT_PER_SECOND = 20;
 /** 调度器自身 tick 周期：15s 足够命中分钟粒度的 cron，又不至于空转 */
 export const SCHEDULER_TICK_MS = 15_000;
+/**
+ * 训练样本每日回填（P1②）：只 build 不 export。
+ *
+ * export 要把每条样本展开成完整子图（64 节点 × 522 维）再补 query 向量，900 条约 566 MB、
+ * 一分钟起步，属于「要训练时才跑」的动作，不能挂在每日调度上。build 是幂等小事务，
+ * 每天把新增裁决/反馈转成 `training_sample` 即可，导出与训练走 `pnpm train:gat`。
+ */
+export const SAMPLES_CRON = '30 3 * * *';
 
 export interface SchedulerLog {
   info(obj: Record<string, unknown>, msg: string): void;
@@ -300,6 +310,18 @@ function buildDefaultJobs(
       priority: 30,
       async run({ db }) {
         return runSchemaInfer(db);
+      },
+    },
+    {
+      // P1②：每天把新增的裁决/反馈回填成训练样本（幂等，只补新行）。
+      // 不挂 after:infer——样本只依赖 adjudication/feedback，跟 harvest 链没有先后约束，
+      // 独立 cron 也不会把一天的 harvest 链拖长。
+      name: 'samples',
+      cron: SAMPLES_CRON,
+      priority: 35,
+      async run({ db }) {
+        const res = buildTrainingSamples(db);
+        return { created: res.created, counts: countSamplesByKind(db) };
       },
     },
     {

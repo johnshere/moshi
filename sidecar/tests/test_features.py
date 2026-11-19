@@ -87,6 +87,18 @@ def test_node_layout_on_fixture():
         assert np.isclose(x[i, F.DEGREE_IDX], expected_degree)
 
 
+def test_procedural_ftype_folds_into_semantic_slot():
+    """V-05 新增的 `procedural` 不在详设 §7.2 的三桶里，暂归 semantic（522 维不变）。"""
+    payload = copy.deepcopy(load_payload())
+    payload["nodes"][0]["ftype"] = "procedural"
+
+    x = F.build_node_features(payload)
+
+    assert x.shape == (3, 522)
+    assert x[0, F.FTYPE_START + F.FTYPE_ORDER.index("semantic")] == 1.0
+    assert np.count_nonzero(x[0, F.FTYPE_START : F.FTYPE_START + len(F.FTYPE_ORDER)]) == 1
+
+
 def test_missing_embedding_is_zero_vector_and_halves_confidence():
     payload = copy.deepcopy(load_payload())
     original = payload["nodes"][1]["confidence"]

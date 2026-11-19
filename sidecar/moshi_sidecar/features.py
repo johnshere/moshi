@@ -13,7 +13,8 @@ payload；本模块**只做**节点 522 维拼接、embedding L2 重归一、pad
 - `edge_attr`  `(1, 192, 16)` float32
 
 节点 522 维布局与 TS 侧 `domain/subgraph.ts` 的 `NODE_FEAT_DIM` 同源：
-`[0,512)` embedding（L2 归一）；`[512,515)` ftype one-hot；`[515]` confidence；
+`[0,512)` embedding（L2 归一）；`[512,515)` ftype one-hot（`procedural` 暂归 `semantic`，
+见 `FTYPE_ALIASES`）；`[515]` confidence；
 `[516]` importance；`[517,521)` epistemic one-hot（`disputed` 归入 `active`）；
 `[521]` `log1p(degree)/log1p(64)` clamp 到 1。缺 embedding → 零向量 +
 confidence 折半。
@@ -30,6 +31,13 @@ MAX_EDGES = 192
 EDGE_FEAT_DIM = 16
 
 FTYPE_ORDER = ("semantic", "episodic", "conditional")
+# V-05 把 `ftype` 扩到四值（+`procedural`），但详设 §7.2 的 522 维契约只定义了三个桶
+# （docs/详设.md「节点 522 维布局」）。为了不打破既有契约（TS `NODE_FEAT_DIM`、
+# 契约测试 fixture 都是 522），这里把 `procedural` 归入 `semantic` 桶：过程记忆
+# 本质仍是"怎么做"的语义知识，不是按时间发生的 episode。训练与推理共用同一份
+# payload（`src/core/read/subgraph-payload.ts`），所以两侧口径一致、不会静默失准。
+# 待 P3 特征规范把 procedural 补成第 4 个桶（522→523）后删掉这条别名。
+FTYPE_ALIASES = {"procedural": "semantic"}
 EPISTEMIC_ORDER = ("active", "archived", "invalidated", "pruned")
 
 FTYPE_START = EMBED_DIM  # [512,515)
@@ -97,8 +105,9 @@ def build_node_features(payload: dict) -> np.ndarray:
             x[i, :EMBED_DIM] = _l2_normalize(vector)
 
         ftype = node.get("ftype")
+        ftype = FTYPE_ALIASES.get(ftype, ftype)
         if ftype not in FTYPE_ORDER:
-            raise FeatureError(f"nodes[{i}].ftype 未知：{ftype!r}")
+            raise FeatureError(f"nodes[{i}].ftype 未知：{node.get('ftype')!r}")
         x[i, FTYPE_START + FTYPE_ORDER.index(ftype)] = 1.0
 
         x[i, CONFIDENCE_IDX] = _clamp01(node.get("confidence", 0.0)) * confidence_scale

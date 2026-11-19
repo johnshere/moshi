@@ -11,6 +11,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { closeDb, openDb, type Db } from '../../src/infra/sqlite/db.js';
 import { migrate } from '../../src/infra/sqlite/migrate.js';
 import { getMeta } from '../../src/infra/sqlite/metaRepo.js';
+import { countSamplesByKind } from '../../src/infra/sqlite/trainingSampleRepo.js';
+import { openAdjudication, resolveAdjudication } from '../../src/infra/sqlite/adjudicationRepo.js';
 import { loadConfig, type Config } from '../../src/app/config.js';
 import { startCollectRunner } from '../../src/app/collectRunner.js';
 import { startLayoutRunner } from '../../src/app/layoutRunner.js';
@@ -216,6 +218,34 @@ describe('调度链（P2-17 §8.6）', () => {
     ]);
     expect(ran).toEqual(['consolidate']);
     expect(log.lines.some((l) => l.level === 'warn' && l.obj.event === 'scheduler.job.timeout')).toBe(true);
+    sched.stop();
+  });
+});
+
+describe('每日样本回填（P1②）', () => {
+  it('03:30 跑 samples，把新裁决转成 training_sample，重复跑幂等', async () => {
+    const { db, cfg } = makeEnv();
+    const adjId = openAdjudication(db, {
+      kind: 'mutex_win',
+      factIds: ['f_a', 'f_b'],
+      decidedBy: 'mutex_by_confidence@2',
+      decidedAt: '2026-11-04T00:00:00.000Z',
+    });
+    resolveAdjudication(db, adjId, 'overturned', null, '2026-11-04T00:00:00.000Z');
+
+    const sched = startScheduler({ db, cfg, log: fakeLog(), timerMs: 0 });
+    const res = await sched.runDue(new Date(2026, 10, 5, 3, 30, 0));
+    expect(res.map((r) => [r.name, r.status])).toEqual([['samples', 'ok']]);
+    expect(countSamplesByKind(db)).toEqual([
+      { source: 'adjudication', labelKind: 'overturn', n: 1 },
+    ]);
+
+    // 幂等：同一份来源再跑一次不新增
+    const again = await sched.runJob('samples');
+    expect(again.status).toBe('ok');
+    expect(countSamplesByKind(db)).toEqual([
+      { source: 'adjudication', labelKind: 'overturn', n: 1 },
+    ]);
     sched.stop();
   });
 });

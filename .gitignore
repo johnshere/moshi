@@ -19,3 +19,5 @@ __pycache__/
 # sidecar 虚拟环境与模型权重（体积大、可复现，见 sidecar/requirements.txt 与 fetch_model.py）
 sidecar/.venv/
 sidecar/models/
+# 训练产物（`pnpm train:gat` 生成，可由样本复现；运行时权重在 <data_dir>/models/）
+models/

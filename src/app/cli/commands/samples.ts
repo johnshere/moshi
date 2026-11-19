@@ -11,14 +11,16 @@
  *
  * 退出码沿用 `db`/`schema` 命令的约定：0 = 成功；1 = 没库/IO 错误；2 = 用法错误。
  */
+import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { buildTrainingSamples } from '../../../core/lifecycle/train-samples.js';
-import { exportTrainingPayloads, toJsonl } from '../../../core/lifecycle/train-export.js';
+import { exportTrainingPayloads } from '../../../core/lifecycle/train-export.js';
+import type { SamplePayloadRecord } from '../../../core/lifecycle/train-export.js';
 import { closeDb, openDb } from '../../../infra/sqlite/db.js';
 import { migrate } from '../../../infra/sqlite/migrate.js';
 import { countSamplesByKind } from '../../../infra/sqlite/trainingSampleRepo.js';
-import { safeWriteFile } from '../../../infra/fs/safeWrite.js';
+import { safeCreateWriteStream, safeRemoveFile } from '../../../infra/fs/safeWrite.js';
 import { SidecarClient } from '../../../infra/sidecar/client.js';
 import { dataPaths } from '../../config.js';
 import type { Command, CommandContext } from '../types.js';
@@ -51,6 +53,31 @@ function takeValue(args: readonly string[], i: number): string | null {
 
 function writeRoots(ctx: CommandContext): readonly string[] {
   return [ctx.cfg.storage.data_dir, ctx.cfg.storage.archive_dir, ctx.home];
+}
+
+/**
+ * JSONL 逐条流式落盘。
+ *
+ * 不能在内存里拼整串：一条 64 节点的子图约 0.4 MB，几百条就超过 V8 的字符串上限
+ * （实测 923 条报 `Invalid string length`，文件一条都没写出来）。逐条写 + 背压即可。
+ */
+async function writeJsonl(
+  file: string,
+  records: readonly SamplePayloadRecord[],
+  roots: readonly string[],
+): Promise<void> {
+  const stream = safeCreateWriteStream(file, roots, 'w');
+  try {
+    for (const record of records) {
+      if (!stream.write(`${JSON.stringify(record)}\n`)) await once(stream, 'drain');
+    }
+    stream.end();
+    await once(stream, 'finish');
+  } catch (err) {
+    stream.destroy();
+    safeRemoveFile(file, roots);
+    throw err;
+  }
 }
 
 function runBuild(ctx: CommandContext, rest: readonly string[]): number {
@@ -190,7 +217,7 @@ async function runExport(ctx: CommandContext, rest: readonly string[]): Promise<
       ...(encode === undefined ? {} : { queryVectors: encode }),
     });
 
-    safeWriteFile(outFile, toJsonl(result.records), writeRoots(ctx));
+    await writeJsonl(outFile, result.records, writeRoots(ctx));
     ctx.stdout(
       `${JSON.stringify(
         {
