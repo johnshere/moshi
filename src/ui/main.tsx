@@ -10,7 +10,7 @@
  * `Shell` 负责常驻导航/搜索/三灯，页面组件只填 `<main>`。
  */
 import './styles/app.css';
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { fetchGraph, resolveToken, type GraphPayload } from './api.js';
 import { AccessPage } from './access/AccessPage.js';
@@ -104,42 +104,16 @@ function Badge({ label, value }: { label: string; value: string }): JSX.Element 
   }, [value]);
 
   return (
-    <span style={{ marginRight: 14, whiteSpace: 'nowrap' }}>
-      <span style={{ color: 'var(--color-text-muted)' }}>{label}</span>{' '}
+    <span className="graph-readout">
+      <span className="graph-readout-key">{label}</span>{' '}
       <span
         className={`moshi-value${flash ? ' moshi-value-flash' : ''}`}
-        style={{ color: 'var(--color-text-primary)' }}
       >
         {value}
       </span>
     </span>
   );
 }
-
-function switchStyle(active: boolean): CSSProperties {
-  return {
-    background: active ? 'var(--color-bg-raised)' : 'transparent',
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-    border: 'none',
-    borderRadius: 999,
-    padding: '3px 12px',
-    cursor: active ? 'default' : 'pointer',
-    font: 'inherit',
-    fontWeight: active ? 600 : 400,
-    boxShadow: active ? 'var(--shadow-menu)' : 'none',
-    transition: 'background-color 140ms ease, color 140ms ease',
-  };
-}
-
-const buttonStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  color: 'var(--color-text-secondary)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '2px 10px',
-  cursor: 'pointer',
-  font: 'inherit',
-};
 
 /** 活跃态文案要跟着时间走（"3.2 秒前"），所以按 500ms 重渲染一次；沉默时不挂定时器 */
 function useNow(active: boolean): number {
@@ -167,7 +141,7 @@ function ActivityNote(): JSX.Element {
   const now = useNow(live);
   if (snapshot === null || hitId === null) {
     return (
-      <div style={{ color: 'var(--color-text-faint)' }}>{t('graph.activity.idle')}</div>
+      <div className="graph-notice" data-tone="muted">{t('graph.activity.idle')}</div>
     );
   }
   const ageMs = Math.max(now - hitAt, 0);
@@ -178,7 +152,7 @@ function ActivityNote(): JSX.Element {
       ? t('graph.activity.truncated', { nodes: snapshot.truncatedNodes, edges: snapshot.truncatedEdges })
       : '';
   return (
-    <div style={{ color: expired ? 'var(--color-text-faint)' : 'var(--color-text-secondary)' }}>
+    <div className="graph-notice" data-tone={expired ? 'muted' : 'live'}>
       {t('graph.activity.hit', { nodes: snapshot.activeNodes, edges: snapshot.activeEdges })}
       {expired ? t('graph.activity.expired', { seconds }) : t('graph.activity.ago', { seconds })}
       {truncated}
@@ -205,7 +179,7 @@ function TraceNote(): JSX.Element {
   const summary = traceSummary(trace);
   if (summary === null) {
     return (
-      <div style={{ color: 'var(--color-text-faint)' }}>
+      <div className="graph-notice" data-tone="muted">
         {t('graph.trace.empty', {
             err: error === null ? '' : t('common.paren', { text: error }),
           })}
@@ -213,8 +187,11 @@ function TraceNote(): JSX.Element {
     );
   }
   return (
-    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', color: 'var(--color-text-secondary)' }}>
-      <span style={{ color: mode === 'replay' ? 'var(--color-warning)' : 'var(--color-text-faint)' }}>
+    <div className="graph-legend">
+      <span
+        className="graph-legend-mode"
+        style={{ color: mode === 'replay' ? 'var(--color-warning)' : 'var(--color-text-faint)' }}
+      >
         {mode === 'replay'
           ? t('graph.trace.replay', { id: replayId === null ? '' : replayId.slice(-8) })
           : t('graph.trace.live')}
@@ -222,6 +199,7 @@ function TraceNote(): JSX.Element {
       <span style={{ color: 'var(--color-text-secondary)' }}>
         {t('graph.trace.title', { id: summary.query_id.slice(-8) })}
       </span>
+      <span className="graph-legend-sep" aria-hidden="true" />
       <span>
         {summary.route} · {summary.source}/{summary.model_mode}
       </span>
@@ -291,7 +269,7 @@ function ImpactPreview({ ids }: { ids: readonly string[] }): JSX.Element {
 
   return (
     <span style={{ marginLeft: 8, whiteSpace: 'nowrap' }}>
-      <button type="button" onClick={() => void preview()} disabled={busy} style={buttonStyle}>
+      <button type="button" onClick={() => void preview()} disabled={busy} className="btn-quiet">
         {busy ? t('graph.preview.running') : t('graph.preview.title')}
       </button>
       {counts !== null && (
@@ -521,23 +499,10 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           lineHeight: 1.7,
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--color-text-primary)', letterSpacing: '-0.01em' }}>
-            {t('graph.title')}{' '}
-            <span style={{ color: 'var(--color-text-faint)', fontSize: 12, fontWeight: 400, letterSpacing: 0 }}>{t(tagKey)}</span>
-          </div>
-          <span
-            style={{
-              pointerEvents: 'auto',
-              display: 'inline-flex',
-              gap: 2,
-              alignItems: 'center',
-              padding: 2,
-              borderRadius: 999,
-              border: '1px solid var(--color-border-subtle)',
-              background: 'var(--color-bg-overlay)',
-            }}
-          >
+        <div className="graph-head">
+          <div className="graph-head-title">{t('graph.title')}</div>
+          <span className="graph-head-tag">{t(tagKey)}</span>
+          <span className="graph-switch" style={{ pointerEvents: 'auto' }}>
             {VIEWS.map((item) => (
               <button
                 key={item.v}
@@ -546,7 +511,6 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
                 disabled={view === item.v}
                 aria-pressed={view === item.v}
                 title={t(item.titleKey)}
-                style={switchStyle(view === item.v)}
               >
                 {t(item.labelKey)}
               </button>
@@ -576,14 +540,14 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
             {!is2d && <Badge label={t('graph.stat.labels')} value={stats3d === null ? '—' : String(stats3d.labelCount)} />}
             {is2d && <Badge label={t('graph.stat.selected')} value={stats2d === null ? '—' : (stats2d.selectedId ?? '—')} />}
             <span style={{ pointerEvents: 'auto' }}>
-              <button type="button" onClick={() => void load(limit, scope)} style={buttonStyle}>
+              <button type="button" onClick={() => void load(limit, scope)} className="btn-quiet">
                 {loading ? t('common.loading') : t('graph.refresh')}
               </button>
               {meta !== undefined && meta.returned_nodes < meta.total_nodes && (
                 <button
                   type="button"
                   onClick={() => void load(FULL_LIMIT, scope)}
-                  style={{ ...buttonStyle, background: 'var(--color-bg-raised)', color: 'var(--color-warning)', border: '1px solid var(--color-warning-dim)', marginLeft: 6 }}
+                  className="btn-quiet graph-loadall"
                 >
                   {t('graph.loadAll', { limit: FULL_LIMIT })}
                 </button>
@@ -593,7 +557,7 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           </div>
         )}
         {!isTable && meta !== undefined && meta.truncated && (
-          <div style={{ color: 'var(--color-warning)' }}>
+          <div className="graph-notice" data-tone="warn">
             {t('graph.truncated', {
               returned: meta.returned_nodes,
               total: meta.total_nodes,
@@ -603,19 +567,22 @@ function App({ route }: { route: RouteInfo }): JSX.Element {
           </div>
         )}
         {!isTable && meta !== undefined && meta.nodes_without_layout > 0 && (
-          <div style={{ color: 'var(--color-text-muted)' }}>
+          <div className="graph-notice" data-tone="muted">
             {t('graph.noLayout', { count: meta.nodes_without_layout })}
           </div>
         )}
-        {!isTable && error !== null && <div style={{ color: 'var(--color-danger)' }}>{t('graph.loadError', { error })}</div>}
+        {!isTable && error !== null && <div className="graph-notice" data-tone="danger">{t('graph.loadError', { error })}</div>}
         {!isTable && focusMiss && (
-          <div style={{ color: 'var(--color-warning)' }} data-testid="focus-miss">
+          <div className="graph-notice" data-tone="warn" data-testid="focus-miss">
             {t('graph.focusMiss', { focus: route.focusId ?? '', limit })}
           </div>
         )}
         {!isTable && <ActivityNote />}
         {!isTable && <TraceNote />}
       </div>
+
+      {/* 舞台取景器（四角准星 + 顶部刻度尺）由 Graph2D/Graph3D 自己挂进画布 host：
+          放在 page 层级会被 HUD 盖住顶边，且切图时位置会跳 */}
 
       {/* 表格态的操作提示由表格自己的底栏承担（那边还有行数/请求数），这里不再叠一层 */}
       {!isTable && (

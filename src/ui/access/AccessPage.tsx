@@ -13,8 +13,11 @@
  * - `/hook/api/trace` 5s 轮询（轻）；
  * - `/hook/api/install/plan` 打开时取一次（重，含磁盘检查），装/卸后再取；
  * - `/hook/api/detect` 打开时取一次缓存（60s），只有用户点「重新探测」才强制。
+ *
+ * 视觉（w10）：本页只消费 `styles/app.css` 的读数带语言——页头是台账头，四段主体
+ * 是 `.band`（1px 边 + 四角准星），矩阵/台账是读数行，浮层用 `.modal` 的准星组。
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 import { enumLabel } from '../i18n/enums.js';
@@ -87,78 +90,6 @@ export interface OnboardPayload {
 
 // turn / outcome / install 三个枚举的文案在 `../i18n/dict.ts` 的 `enum.*` 下，
 // 统一经 `enumLabel()` 取（D-184：后端枚举值不翻译，界面文案才翻译）。
-
-// ── 样式 ──
-
-const pageStyle = (standalone: boolean): CSSProperties =>
-  standalone
-    ? { position: 'absolute', inset: 0, overflow: 'auto', padding: '18px 22px 32px', boxSizing: 'border-box' }
-    : // 内嵌在设置页里：**不能**绝对定位，否则会盖住二级页签与说明
-      { padding: '0 0 8px', boxSizing: 'border-box' };
-
-const titleStyle: CSSProperties = {
-  color: 'var(--color-text-primary)',
-  fontSize: 18,
-  fontWeight: 600,
-  margin: 0,
-};
-
-const subtitleStyle: CSSProperties = {
-  color: 'var(--color-text-faint)',
-  fontSize: 12,
-  marginTop: 4,
-  lineHeight: 1.6,
-};
-
-const cardStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '14px 16px',
-  marginTop: 14,
-};
-
-const cardTitleStyle: CSSProperties = {
-  color: 'var(--color-text-primary)',
-  fontSize: 13,
-  fontWeight: 600,
-  marginBottom: 10,
-};
-
-const rowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  padding: '8px 0',
-  borderTop: '1px solid var(--color-border-subtle)',
-};
-
-const mutedStyle: CSSProperties = {
-  color: 'var(--color-text-faint)',
-  fontSize: 12,
-};
-
-function buttonStyle(disabled = false): CSSProperties {
-  return {
-    padding: '5px 12px',
-    borderRadius: 8,
-    border: '1px solid var(--color-border-subtle)',
-    background: disabled ? 'transparent' : 'var(--color-bg-overlay)',
-    color: disabled ? 'var(--color-text-faint)' : 'var(--color-text-primary)',
-    fontSize: 12,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-  };
-}
-
-const linkButtonStyle: CSSProperties = {
-  padding: 0,
-  border: 'none',
-  background: 'transparent',
-  color: 'var(--color-status-info, #4a9eff)',
-  fontSize: 12,
-  cursor: 'pointer',
-  textDecoration: 'underline',
-};
 
 // ── HTTP ──
 
@@ -339,271 +270,275 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
   };
 
   return (
-    <div style={pageStyle(standalone)} data-testid="access-page">
+    <div className={standalone ? 'ledger ledger-fill' : 'station-stack'} data-testid="access-page">
       {standalone ? (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12 }}>
-          <h2 style={titleStyle}>{t('access.title')}</h2>
-          <a href={`/ui/graph${window.location.search}`} style={{ ...linkButtonStyle, fontSize: 12 }} data-testid="access-back">
-            {t('access.back')}
-          </a>
-        </div>
+        <header className="ledger-head">
+          <div className="ledger-title">{t('access.title')}</div>
+          <div className="ledger-tools">
+            <a className="btn btn-quiet" href={`/ui/graph${window.location.search}`} data-testid="access-back">
+              {t('access.back')}
+            </a>
+          </div>
+        </header>
       ) : null}
-      <div style={subtitleStyle}>
-        {t('access.intro')}
-      </div>
 
-      {resultText !== null ? (
-        <div style={{ ...cardStyle, borderColor: 'var(--color-border-strong, #3a4a5a)' }} data-testid="access-result" data-tone={resultTone}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-            <span style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{resultText}</span>
-            <button type="button" style={linkButtonStyle} onClick={() => setResultText(null)}>
+      <div className={standalone ? 'station-body' : 'station-stack'}>
+        <p className="station-note">{t('access.intro')}</p>
+
+        {resultText !== null ? (
+          <div className="notice" data-tone={resultTone === 'ok' ? 'ok' : 'error'} data-testid="access-result">
+            <span className="notice-text">{resultText}</span>
+            <button type="button" className="chip chip-action" onClick={() => setResultText(null)}>
               {t('common.close')}
             </button>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {error !== null ? (
-        <div style={{ ...cardStyle, borderColor: 'var(--color-status-error, #e05252)' }} data-testid="access-error">
-          <span style={{ fontSize: 12, color: 'var(--color-status-error, #e05252)' }}>{error}</span>
-        </div>
-      ) : null}
+        {error !== null ? (
+          <div className="notice" data-tone="error" data-testid="access-error">
+            <span className="notice-text">{error}</span>
+          </div>
+        ) : null}
 
-      {/* ── 连接态 + 工程身份 ── */}
-      <div style={cardStyle} data-testid="access-connection">
-        <div style={cardTitleStyle}>{t('access.conn.title')}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span
-            data-testid="access-connected"
-            data-connected={connected ? 'true' : 'false'}
-            style={{
-              fontSize: 12,
-              padding: '2px 8px',
-              borderRadius: 999,
-              border: '1px solid var(--color-border-subtle)',
-              color: connected ? 'var(--color-status-ok, #4caf50)' : 'var(--color-text-faint)',
-            }}
-          >
-            {connected ? t('access.conn.connected') : t('access.conn.disconnected')}
-          </span>
-          <button
-            type="button"
-            data-testid="access-connect-toggle"
-            style={buttonStyle(busy !== null)}
-            disabled={busy !== null}
-            onClick={() => void connect(connected ? 'disconnect' : 'connect')}
-          >
-            {connected ? t('access.conn.disconnect') : t('access.conn.connect')}
-          </button>
-          <span style={mutedStyle}>{t('access.conn.hint')}</span>
-        </div>
-      </div>
+        {/* ── 连接态 + 工程身份 ── */}
+        <section className="band" data-testid="access-connection">
+          <div className="band-head">
+            <span className="band-title">{t('access.conn.title')}</span>
+            <span
+              className={`readout-status ${connected ? 'tone-ok' : 'tone-faint'}`}
+              data-testid="access-connected"
+              data-connected={connected ? 'true' : 'false'}
+            >
+              <i className="lamp" aria-hidden="true" />
+              {connected ? t('access.conn.connected') : t('access.conn.disconnected')}
+            </span>
+            <div className="band-tools">
+              <button
+                type="button"
+                className={connected ? 'btn' : 'btn btn-primary'}
+                data-testid="access-connect-toggle"
+                disabled={busy !== null}
+                onClick={() => void connect(connected ? 'disconnect' : 'connect')}
+              >
+                {connected ? t('access.conn.disconnect') : t('access.conn.connect')}
+              </button>
+            </div>
+          </div>
+          <div className="band-body">
+            <span className="station-note">{t('access.conn.hint')}</span>
+          </div>
+        </section>
 
-      {/* ── 三个真开关（magpie_enabled 由连接按钮驱动，不单独给开关，避免两处语义打架） ── */}
-      <div style={cardStyle} data-testid="access-switches">
-        <div style={cardTitleStyle}>{t('access.switches.title')}</div>
-        {(
-          [
-            ['enabled', 'access.switch.enabled.label', 'access.switch.enabled.desc'],
-            ['inject_existing', 'access.switch.inject_existing.label', 'access.switch.inject_existing.desc'],
-            ['capture_reply', 'access.switch.capture_reply.label', 'access.switch.capture_reply.desc'],
-          ] as const
-        ).map(([key, labelKey, hintKey]) => (
-          <label key={key} style={{ ...rowStyle, cursor: 'pointer' }} data-testid={`access-switch-${key}`}>
-            <input
-              type="checkbox"
-              checked={status?.switches[key] === true}
-              disabled={status === null || busy !== null}
-              onChange={(event) => void setSwitch({ [key]: event.target.checked })}
-            />
-            <span style={{ fontSize: 12, color: 'var(--color-text-primary)', minWidth: 110 }}>{t(labelKey)}</span>
-            <span style={mutedStyle}>{t(hintKey)}</span>
-          </label>
-        ))}
-      </div>
-
-      {/* ── 接入矩阵：两大类 × 三个客户端 ── */}
-      {(['hook', 'mcp'] as const).map((kind) => (
-        <div style={cardStyle} key={kind} data-testid={`access-group-${kind}`}>
-          <div style={cardTitleStyle}>{t(kind === 'hook' ? 'access.matrix.hook' : 'access.matrix.mcp')}</div>
-          {kind === 'mcp' ? (
-            <div style={{ ...mutedStyle, marginBottom: 6 }}>{t('access.matrix.note')}</div>
-          ) : null}
-          {(plans?.plans ?? [])
-            .filter((plan) => plan.kind === kind)
-            .map((plan) => {
-              const record = recordOf(plan);
-              const installed = record?.state === 'installed';
-              const detected = onboard?.detected?.hosts[plan.host]?.hit === true;
-              const label = plans?.labels[plan.host] ?? plan.host;
-              const isMagpieHook = plan.host === 'magpie' && plan.kind === 'hook';
-              return (
-                <div key={`${plan.host}:${plan.kind}`} style={rowStyle} data-testid={`access-plan-${plan.host}-${plan.kind}`}>
-                  <span style={{ fontSize: 13, color: 'var(--color-text-primary)', minWidth: 110 }}>
-                    {label}
-                    {detected ? <span style={{ ...mutedStyle, marginLeft: 6 }}>{t('access.matrix.detected')}</span> : null}
-                  </span>
-                  <span
-                    data-testid={`access-state-${plan.host}-${plan.kind}`}
-                    data-state={installed ? 'installed' : plan.supported ? 'absent' : 'unsupported'}
-                    style={{ ...mutedStyle, minWidth: 150 }}
-                  >
-                    {installed
-                      ? `${enumLabel('install', 'installed')}${record.version === null ? '' : ` v${record.version}`}`
-                      : kind === 'mcp'
-                        ? t('access.matrix.soon')
-                        : plan.supported
-                          ? enumLabel('install', 'absent')
-                          : t('access.notSupported', {
-                              label: enumLabel('install', 'unsupported'),
-                              reason: reasonText(plan.reason),
-                            })}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  {isMagpieHook ? (
-                    installed ? (
-                      <button
-                        type="button"
-                        style={buttonStyle(busy !== null)}
-                        disabled={busy !== null}
-                        data-testid="access-uninstall"
-                        onClick={() => void runUninstall(plan)}
-                      >
-                        {t('access.matrix.uninstall')}
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        style={buttonStyle(busy !== null)}
-                        disabled={busy !== null}
-                        data-testid="access-install"
-                        onClick={() => setConfirming(plan)}
-                      >
-                        {t('access.matrix.install')}
-                      </button>
-                    )
-                  ) : (
-                    <button type="button" style={buttonStyle(true)} disabled data-testid={`access-soon-${plan.host}-${plan.kind}`}>
-                      {t('access.matrix.soon')}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    style={linkButtonStyle}
-                    data-testid={`access-manual-${plan.host}-${plan.kind}`}
-                    onClick={() => setManual({ host: plan.host, kind: plan.kind })}
-                  >
-                    {t('access.matrix.manual')}
-                  </button>
-                </div>
-              );
-            })}
-        </div>
-      ))}
-
-      {/* ── 注入台账 ── */}
-      <div style={cardStyle} data-testid="access-trace">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={cardTitleStyle}>{t('access.trace.title')}</div>
-          <span style={mutedStyle}>
-            {t('access.trace.meta', { n: trace?.items.length ?? 0, capacity: trace?.capacity ?? 0 })}
-          </span>
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            style={buttonStyle(false)}
-            data-testid="access-trace-clear"
-            onClick={() => {
-              void api('/hook/api/trace', { method: 'POST', body: {} })
-                .then(() => loadTrace())
-                .catch(fail);
-            }}
-          >
-            {t('access.trace.clear')}
-          </button>
-        </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
-          <thead>
-            <tr style={{ color: 'var(--color-text-faint)', textAlign: 'left' }}>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.time')}</th>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.turn')}</th>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.outcome')}</th>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.evidence')}</th>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.bytes')}</th>
-              <th style={{ padding: '4px 6px' }}>{t('access.trace.col.latency')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {(trace?.items ?? []).map((item, index) => (
-              <tr key={`${item.ts}:${String(index)}`} style={{ borderTop: '1px solid var(--color-border-subtle)' }}>
-                <td style={{ padding: '4px 6px' }}>{item.ts.slice(11, 19)}</td>
-                <td style={{ padding: '4px 6px' }}>{enumLabel('turn', item.turn)}</td>
-                <td style={{ padding: '4px 6px' }}>
-                  {enumLabel('outcome', item.status)}
-                  {item.degraded.length > 0 ? (
-                    <span style={mutedStyle}>{t('common.paren', { text: item.degraded.join('/') })}</span>
-                  ) : null}
-                </td>
-                <td style={{ padding: '4px 6px' }}>{item.evidence}</td>
-                <td style={{ padding: '4px 6px' }}>{item.inject_bytes}</td>
-                <td style={{ padding: '4px 6px' }}>{item.latency_ms}ms</td>
-              </tr>
+        {/* ── 三个真开关（magpie_enabled 由连接按钮驱动，不单独给开关，避免两处语义打架） ── */}
+        <section className="band" data-testid="access-switches">
+          <div className="band-head">
+            <span className="band-title">{t('access.switches.title')}</span>
+          </div>
+          <div className="band-body">
+            {(
+              [
+                ['enabled', 'access.switch.enabled.label', 'access.switch.enabled.desc'],
+                ['inject_existing', 'access.switch.inject_existing.label', 'access.switch.inject_existing.desc'],
+                ['capture_reply', 'access.switch.capture_reply.label', 'access.switch.capture_reply.desc'],
+              ] as const
+            ).map(([key, labelKey, hintKey]) => (
+              <label key={key} className="switch" data-testid={`access-switch-${key}`}>
+                <input
+                  type="checkbox"
+                  checked={status?.switches[key] === true}
+                  disabled={status === null || busy !== null}
+                  onChange={(event) => void setSwitch({ [key]: event.target.checked })}
+                />
+                <span className="switch-body">
+                  <span className="switch-label">{t(labelKey)}</span>
+                  <span className="switch-hint">{t(hintKey)}</span>
+                </span>
+              </label>
             ))}
-            {trace !== null && trace.items.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ padding: '8px 6px', ...mutedStyle }}>
-                  {t('access.trace.empty')}
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+          </div>
+        </section>
+
+        {/* ── 接入矩阵：两大类 × 三个客户端 ── */}
+        {(['hook', 'mcp'] as const).map((kind) => (
+          <section className="band" key={kind} data-testid={`access-group-${kind}`}>
+            <div className="band-head">
+              <span className="band-title">{t(kind === 'hook' ? 'access.matrix.hook' : 'access.matrix.mcp')}</span>
+              {kind === 'mcp' ? <span className="band-tag">{t('access.matrix.note')}</span> : null}
+            </div>
+            <div className="band-body">
+              {(plans?.plans ?? [])
+                .filter((plan) => plan.kind === kind)
+                .map((plan) => {
+                  const record = recordOf(plan);
+                  const installed = record?.state === 'installed';
+                  const detected = onboard?.detected?.hosts[plan.host]?.hit === true;
+                  const label = plans?.labels[plan.host] ?? plan.host;
+                  const isMagpieHook = plan.host === 'magpie' && plan.kind === 'hook';
+                  return (
+                    <div key={`${plan.host}:${plan.kind}`} className="matrix-row" data-testid={`access-plan-${plan.host}-${plan.kind}`}>
+                      <span className="matrix-name">
+                        {label}
+                        {detected ? <span className="readout tone-accent">{t('access.matrix.detected')}</span> : null}
+                      </span>
+                      <span
+                        className={`readout-status matrix-state ${installed ? 'tone-ok' : plan.supported ? 'tone-mute' : 'tone-faint'}`}
+                        data-testid={`access-state-${plan.host}-${plan.kind}`}
+                        data-state={installed ? 'installed' : plan.supported ? 'absent' : 'unsupported'}
+                      >
+                        <i className="lamp" aria-hidden="true" />
+                        {installed
+                          ? `${enumLabel('install', 'installed')}${record.version === null ? '' : ` v${record.version}`}`
+                          : kind === 'mcp'
+                            ? t('access.matrix.soon')
+                            : plan.supported
+                              ? enumLabel('install', 'absent')
+                              : t('access.notSupported', {
+                                  label: enumLabel('install', 'unsupported'),
+                                  reason: reasonText(plan.reason),
+                                })}
+                      </span>
+                      <span className="matrix-actions">
+                        {isMagpieHook ? (
+                          installed ? (
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={busy !== null}
+                              data-testid="access-uninstall"
+                              onClick={() => void runUninstall(plan)}
+                            >
+                              {t('access.matrix.uninstall')}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={busy !== null}
+                              data-testid="access-install"
+                              onClick={() => setConfirming(plan)}
+                            >
+                              {t('access.matrix.install')}
+                            </button>
+                          )
+                        ) : (
+                          <button type="button" className="btn" disabled data-testid={`access-soon-${plan.host}-${plan.kind}`}>
+                            {t('access.matrix.soon')}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="chip chip-action"
+                          data-testid={`access-manual-${plan.host}-${plan.kind}`}
+                          onClick={() => setManual({ host: plan.host, kind: plan.kind })}
+                        >
+                          {t('access.matrix.manual')}
+                        </button>
+                      </span>
+                    </div>
+                  );
+                })}
+            </div>
+          </section>
+        ))}
+
+        {/* ── 注入台账 ── */}
+        <section className="band" data-testid="access-trace">
+          <div className="band-head">
+            <span className="band-title">{t('access.trace.title')}</span>
+            <span className="band-tag">
+              {t('access.trace.meta', { n: trace?.items.length ?? 0, capacity: trace?.capacity ?? 0 })}
+            </span>
+            <div className="band-tools">
+              <button
+                type="button"
+                className="btn"
+                data-testid="access-trace-clear"
+                onClick={() => {
+                  void api('/hook/api/trace', { method: 'POST', body: {} })
+                    .then(() => loadTrace())
+                    .catch(fail);
+                }}
+              >
+                {t('access.trace.clear')}
+              </button>
+            </div>
+          </div>
+          <div className="band-body">
+            <div className="data-scroll">
+              <div className="data-table">
+                <div className="data-head cols-trace">
+                  <span>{t('access.trace.col.time')}</span>
+                  <span>{t('access.trace.col.turn')}</span>
+                  <span>{t('access.trace.col.outcome')}</span>
+                  <span>{t('access.trace.col.evidence')}</span>
+                  <span data-num="true">{t('access.trace.col.bytes')}</span>
+                  <span data-num="true">{t('access.trace.col.latency')}</span>
+                </div>
+                {(trace?.items ?? []).map((item, index) => (
+                  <div key={`${item.ts}:${String(index)}`} className="data-row cols-trace">
+                    <span className="data-num data-line">{item.ts.slice(11, 19)}</span>
+                    <span>{enumLabel('turn', item.turn)}</span>
+                    <span>
+                      {enumLabel('outcome', item.status)}
+                      {item.degraded.length > 0 ? (
+                        <span className="tone-faint">{t('common.paren', { text: item.degraded.join('/') })}</span>
+                      ) : null}
+                    </span>
+                    <span>{item.evidence}</span>
+                    <span className="data-num">{item.inject_bytes}</span>
+                    <span className="data-num">{item.latency_ms}ms</span>
+                  </div>
+                ))}
+                {trace !== null && trace.items.length === 0 ? (
+                  <div className="data-empty">{t('access.trace.empty')}</div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
 
       {/* ── F8 遮罩：断开过 Magpie 的情况下先要求连接，避免用户以为插件坏了 ──
           刚从首启弹窗装完跳过来时不遮：此刻要让用户先看到安装结果（结果条就在上面），
           连接按钮在「连接」卡片里，跑不掉。 */}
       {needsConnect && onboardResult === null ? (
-        <div
-          data-testid="access-mask"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 80,
-            background: 'rgba(8, 12, 18, 0.82)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <div style={{ ...cardStyle, marginTop: 0, maxWidth: 420, textAlign: 'center' }}>
-            <div style={{ ...cardTitleStyle, fontSize: 15 }}>{t('access.gate.title')}</div>
-            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 14 }}>
-              {t('access.gate.desc')}
+        <div className="overlay-gate" data-testid="access-mask">
+          <div className="band gate-card">
+            <div className="band-body">
+              <h3 className="gate-title">{t('access.gate.title')}</h3>
+              <p className="station-note gate-note">{t('access.gate.desc')}</p>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy !== null}
+                onClick={() => void connect('connect')}
+                data-testid="access-mask-connect"
+              >
+                {t('access.gate.action')}
+              </button>
             </div>
-            <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void connect('connect')} data-testid="access-mask-connect">
-              {t('access.gate.action')}
-            </button>
           </div>
         </div>
       ) : null}
 
       {/* ── 手动安装弹窗 ── */}
       {manual !== null ? (
-        <div style={overlayStyle} onClick={() => setManual(null)}>
-          <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-manual-dialog">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ ...cardTitleStyle, fontSize: 14 }}>
-                {t('access.manual.title', {
-                  host: plans?.labels[manual.host] ?? manual.host,
-                  kind: t(manual.kind === 'hook' ? 'access.manual.kind.hook' : 'access.manual.kind.mcp'),
-                })}
+        <div className="modal-backdrop" onClick={() => setManual(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()} data-testid="access-manual-dialog">
+            <div className="modal-head">
+              <div className="modal-head-body">
+                <h3 className="modal-title">
+                  {t('access.manual.title', {
+                    host: plans?.labels[manual.host] ?? manual.host,
+                    kind: t(manual.kind === 'hook' ? 'access.manual.kind.hook' : 'access.manual.kind.mcp'),
+                  })}
+                </h3>
               </div>
-              <button type="button" style={linkButtonStyle} onClick={() => setManual(null)}>
+              <button type="button" className="chip chip-action" onClick={() => setManual(null)}>
                 {t('common.close')}
               </button>
             </div>
-            <pre style={preStyle} data-testid="access-manual-text">
+            <pre className="dialog-pre" data-testid="access-manual-text">
               {t(manualTextKey(manual.host, manual.kind))}
             </pre>
           </div>
@@ -612,27 +547,41 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
 
       {/* ── 二次确认弹窗：列出将写入哪些文件 ── */}
       {confirming !== null ? (
-        <div style={overlayStyle} onClick={() => setConfirming(null)}>
-          <div style={{ ...modalStyle }} onClick={(event) => event.stopPropagation()} data-testid="access-confirm-dialog">
-            <div style={{ ...cardTitleStyle, fontSize: 14 }}>{t('access.confirm.title', { host: plans?.labels[confirming.host] ?? confirming.host })}</div>
-            <div style={{ ...mutedStyle, lineHeight: 1.7, marginBottom: 8 }}>{t('access.confirm.desc')}</div>
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
+        <div className="modal-backdrop" onClick={() => setConfirming(null)}>
+          <div className="modal" onClick={(event) => event.stopPropagation()} data-testid="access-confirm-dialog">
+            <div className="modal-head">
+              <div className="modal-head-body">
+                <h3 className="modal-title">
+                  {t('access.confirm.title', { host: plans?.labels[confirming.host] ?? confirming.host })}
+                </h3>
+              </div>
+            </div>
+            <p className="station-note">{t('access.confirm.desc')}</p>
+            <ul className="confirm-steps">
               {confirming.steps.map((step) => (
                 <li key={`${step.action}:${step.path}`}>
-                  <span style={mutedStyle}>{actionText(step.action)} </span>
-                  <code style={{ fontSize: 11 }}>{step.path}</code>
+                  <span className="tone-mute">{actionText(step.action)} </span>
+                  <code className="confirm-path">{step.path}</code>
                   {step.note === undefined ? null : (
-                    <span style={mutedStyle}>{t('common.paren', { text: noteText(step.note) ?? '' })}</span>
+                    <span className="tone-faint">{t('common.paren', { text: noteText(step.note) ?? '' })}</span>
                   )}
                 </li>
               ))}
             </ul>
-            {confirming.risk !== null ? <div style={{ ...mutedStyle, marginTop: 8 }}>{t('access.confirm.risk', { risk: riskText(confirming.risk) })}</div> : null}
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 14 }}>
-              <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => setConfirming(null)}>
+            {confirming.risk !== null ? (
+              <p className="station-note">{t('access.confirm.risk', { risk: riskText(confirming.risk) })}</p>
+            ) : null}
+            <div className="modal-actions">
+              <button type="button" className="btn" disabled={busy !== null} onClick={() => setConfirming(null)}>
                 {t('access.confirm.cancel')}
               </button>
-              <button type="button" style={buttonStyle(busy !== null)} disabled={busy !== null} onClick={() => void runInstall(confirming)} data-testid="access-confirm-install">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={busy !== null}
+                onClick={() => void runInstall(confirming)}
+                data-testid="access-confirm-install"
+              >
                 {t('access.confirm.ok')}
               </button>
             </div>
@@ -642,36 +591,3 @@ export function AccessPage({ standalone, onboardResult }: AccessPageProps): Reac
     </div>
   );
 }
-
-const overlayStyle: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 90,
-  background: 'rgba(8, 12, 18, 0.72)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const modalStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-strong, #3a4a5a)',
-  borderRadius: 8,
-  padding: '16px 18px',
-  minWidth: 420,
-  maxWidth: 620,
-  maxHeight: '70vh',
-  overflow: 'auto',
-};
-
-const preStyle: CSSProperties = {
-  margin: '10px 0 0',
-  padding: '10px 12px',
-  borderRadius: 8,
-  background: 'var(--color-bg-base)',
-  color: 'var(--color-text-secondary)',
-  fontSize: 11,
-  lineHeight: 1.7,
-  whiteSpace: 'pre-wrap',
-  wordBreak: 'break-all',
-};

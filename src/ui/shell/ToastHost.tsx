@@ -4,39 +4,8 @@
  * 右下角堆叠、inline style（P2-19-B 再统一视觉）；`undo` 类显示倒计时秒数，
  * 到期由 `useToast.sweep` 移除。按钮回调统一走 `useToast.runAction`（先 dismiss 再执行）。
  */
-import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
-import { useToast, type Toast, type ToastKind } from '../state/toast.js';
-
-const stackStyle: CSSProperties = {
-  position: 'fixed',
-  right: 16,
-  bottom: 16,
-  zIndex: 80,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  maxWidth: 380,
-  pointerEvents: 'none',
-};
-
-const KIND_STYLE: Record<ToastKind, CSSProperties> = {
-  info: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' },
-  success: { background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', color: 'var(--color-success-soft)' },
-  error: { background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', color: 'var(--color-danger-soft)' },
-  undo: { background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', color: 'var(--color-warning-soft)' },
-};
-
-const toastStyle: CSSProperties = {
-  pointerEvents: 'auto',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 12,
-  padding: '8px 12px',
-  borderRadius: 8,
-  boxShadow: 'var(--shadow-menu)',
-  fontSize: 12,
-  lineHeight: 1.4,
-};
+import { useEffect, useState, type ReactElement } from 'react';
+import { useToast, type Toast } from '../state/toast.js';
 
 function secondsLeft(toast: Toast, now: number): number | null {
   if (toast.kind !== 'undo') return null;
@@ -46,24 +15,15 @@ function secondsLeft(toast: Toast, now: number): number | null {
 function ToastRow({ toast, now }: { toast: Toast; now: number }): ReactElement {
   const seconds = secondsLeft(toast, now);
   return (
-    <div style={{ ...toastStyle, ...KIND_STYLE[toast.kind] }} role="status" aria-live="polite">
+    <div className="toast" data-kind={toast.kind} role="status" aria-live="polite">
       <span style={{ flex: 1, minWidth: 0 }}>{toast.text}</span>
-      {seconds === null ? null : <span style={{ color: 'var(--color-warning)', fontVariantNumeric: 'tabular-nums' }}>{seconds}s</span>}
+      {seconds === null ? null : (
+        <span className="moshi-value" style={{ color: 'var(--color-warning)' }}>
+          {seconds}s
+        </span>
+      )}
       {toast.actionLabel === undefined ? null : (
-        <button
-          type="button"
-          onClick={() => useToast.getState().runAction(toast.id)}
-          style={{
-            background: 'var(--color-bg-raised)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-text-faint)',
-            borderRadius: 8,
-            padding: '2px 10px',
-            font: 'inherit',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
+        <button type="button" className="btn" onClick={() => useToast.getState().runAction(toast.id)}>
           {toast.actionLabel}
         </button>
       )}
@@ -88,7 +48,7 @@ export function ToastHost(): ReactElement | null {
   if (toasts.length === 0) return null;
 
   return (
-    <div style={stackStyle} data-testid="toast-host">
+    <div className="toast-stack" data-testid="toast-host">
       {toasts.map((toast) => (
         <ToastRow key={toast.id} toast={toast} now={now} />
       ))}

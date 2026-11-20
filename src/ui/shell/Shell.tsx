@@ -1,12 +1,14 @@
 /**
- * 应用外壳（P2-19-A，概设 §8.1）：左侧一级导航 + 顶栏语言/三灯/待办角标。
+ * 应用外壳（W8H 遥测台）：顶部 56px 仪表导轨 + 全局状态读数 + 通道导航。
  *
  * 外壳只负责「常驻」和「取全局状态」，不接管页面内容：页面仍是 absolute inset:0
  * 填满 <main>。三灯与角标 30s 轮询一次，取数失败显式降级，不静默装正常。
- * 顶栏只留 语言 + 三灯 + 角标；全局搜索与作用域下拉在记忆页工具条上（V-10，用户 m01201）。
+ * 导航从左侧栏改为顶栏：一级通道常驻导轨；「接入」的两个二级（日志 / 接入点）在导轨
+ * 下常驻一条页签带，与设置页的页签同一套 `.seg` 样式与语义（选中态、展开态都由 URL
+ * 决定，见 pure.ts）。
  */
-import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
-import { NAV, hrefForPath, lightColor, pageHref, queueBadge, statusLights, type AccessSection, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode } from 'react';
+import { ACCESS_SECTIONS, NAV, accessHref, pageHref, queueBadge, statusLights, type AccessSection, type PageKey, type QueueBadge, type SettingsSection, type StatusLight } from './pure.js';
 import { navigate, navigatePage } from './navigate.js';
 import { gSequenceExpired, resolveKey } from './keyboard.js';
 import { LocaleSwitch } from './LocaleSwitch.js';
@@ -21,110 +23,13 @@ import { useSelection } from '../state/selection.js';
 
 const POLL_MS = 30_000;
 
-const shellStyle: CSSProperties = {
-  display: 'flex',
-  width: '100vw',
-  height: '100vh',
-  overflow: 'hidden',
-  background: 'var(--color-bg-base)',
-  color: 'var(--color-text-secondary)',
-  fontFamily:
-    "'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
-};
-
-const navStyle: CSSProperties = {
-  width: 208,
-  flex: '0 0 208px',
-  display: 'flex',
-  flexDirection: 'column',
-  boxSizing: 'border-box',
-  padding: '14px 12px',
-  gap: 4,
-};
-
-const brandStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  color: 'var(--color-text-primary)',
-  fontSize: 14,
-  fontWeight: 600,
-  letterSpacing: '.02em',
-  padding: '4px 10px 14px',
-};
-
-/** 品牌标记：一个小方块 + 一个强调色圆点，成本极低但让左栏有「头」 */
-const brandMarkStyle: CSSProperties = {
-  width: 22,
-  height: 22,
-  borderRadius: 7,
-  border: '1px solid var(--color-border-subtle)',
-  background: 'var(--color-bg-overlay)',
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  position: 'relative',
-  flex: 'none',
-};
-
-const brandDotStyle: CSSProperties = {
-  width: 6,
-  height: 6,
-  borderRadius: '50%',
-  background: 'var(--color-accent)',
-};
-
-const topbarStyle: CSSProperties = {
-  height: 56,
-  flex: '0 0 56px',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 14,
-  padding: '0 16px',
-  background: 'var(--color-bg-raised)',
-  borderBottom: '1px solid var(--color-border-subtle)',
-  boxSizing: 'border-box',
-};
-
-function navItemStyle(active: boolean): CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    padding: '8px 10px',
-    borderRadius: 8,
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-    textDecoration: 'none',
-    fontSize: 13,
-    fontWeight: active ? 600 : 400,
-    cursor: 'pointer',
-  };
-}
-
-/** 树里的一级子项（设置五二级）：缩进 + 小一号，用左侧竖线表达从属关系。 */
-function navChildStyle(active: boolean): CSSProperties {
-  return {
-    display: 'flex',
-    alignItems: 'center',
-    padding: '5px 10px 5px 24px',
-    borderRadius: 7,
-    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-    textDecoration: 'none',
-    fontSize: 12,
-    cursor: 'pointer',
-    position: 'relative',
-  };
-}
-
-/** 子项左侧的树线：始终画，短一截表示「最后一个」由 CSS 无法判断，统一同长短。 */
-const navTreeLineStyle: CSSProperties = {
-  position: 'absolute',
-  left: 13,
-  top: 0,
-  bottom: 0,
-  width: 1,
-  background: 'var(--color-border-subtle)',
-};
+/** 灯旁的等宽状态码（两语同形：仪表读数不翻译） */
+const LIGHT_CODES = {
+  ok: 'light.code.ok',
+  warn: 'light.code.warn',
+  error: 'light.code.error',
+  off: 'light.code.off',
+} as const;
 
 function isPlainLeftClick(event: ReactMouseEvent<HTMLAnchorElement>): boolean {
   return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey;
@@ -160,7 +65,7 @@ export interface ShellProps {
   children: ReactNode;
 }
 
-export function Shell({ route, section, accessSection, children }: ShellProps): ReactElement {
+export function Shell({ route, accessSection, children }: ShellProps): ReactElement {
   const t = useT();
   const [lights, setLights] = useState<readonly StatusLight[]>(statusLights(null));
   const [badge, setBadge] = useState<QueueBadge | null>(null);
@@ -249,95 +154,62 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
   }, []);
 
   return (
-    <div style={shellStyle}>
+    <div className="deck">
       {onboardOpen ? null : <FirstRun />}
       <OnboardModal onOpenChange={setOnboardOpen} />
-      <aside style={navStyle} data-testid="shell-nav" className="moshi-nav">
-        <div style={brandStyle}>
-          <span style={brandMarkStyle} aria-hidden="true">
-            <span style={brandDotStyle} />
-          </span>
-          {t('app.brand')}
-        </div>
-        {NAV.map((node) => {
-          const active = node.key === route;
-          return (
-            <div key={node.key} data-testid={`nav-node-${node.key}`}>
-              <a
-                href={pageHref(node.key, window.location.search)}
-                aria-current={active ? 'page' : undefined}
-                aria-expanded={node.children === undefined ? undefined : active}
-                data-testid={`nav-${node.key}`}
-                data-active={active ? 'true' : 'false'}
-                className="moshi-nav-item"
-                style={navItemStyle(active)}
-                onClick={(event) => {
-                  if (!isPlainLeftClick(event)) return;
-                  event.preventDefault();
-                  navigate(pageHref(node.key, window.location.search));
-                }}
-                title={t(node.titleKey)}
-              >
-                {t(node.labelKey)}
-              </a>
-              {node.children !== undefined && active
-                ? node.children.map((child) => {
-                    const childActive =
-                      node.key === 'settings' ? child.key === section : child.key === accessSection;
-                    return (
-                      <a
-                        key={child.key}
-                        href={hrefForPath(child.path, window.location.search)}
-                        aria-current={childActive ? 'page' : undefined}
-                        data-testid={`nav-${node.key}-${child.key}`}
-                        data-active={childActive ? 'true' : 'false'}
-                        className="moshi-nav-item moshi-nav-child"
-                        style={navChildStyle(childActive)}
-                        onClick={(event) => {
-                          if (!isPlainLeftClick(event)) return;
-                          event.preventDefault();
-                          navigate(hrefForPath(child.path, window.location.search));
-                        }}
-                      >
-                        <span style={navTreeLineStyle} aria-hidden="true" />
-                        {t(child.labelKey)}
-                      </a>
-                    );
-                  })
-                : null}
-            </div>
-          );
-        })}
-        <div style={{ flex: 1 }} />
-        <div style={{ color: 'var(--color-text-faint)', fontSize: 11, padding: '0 10px' }}>{t('app.tagline')}</div>
-      </aside>
 
-      <div style={{ flex: 1, minWidth: 0, height: '100%', display: 'flex', flexDirection: 'column' }}>
-        <header style={topbarStyle}>
-          <div style={{ flex: 1 }} />
+      <header className="masthead">
+        <div className="masthead-brand">
+          <span className="brand-mark" aria-hidden="true" />
+          <span style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.15, minWidth: 0 }}>
+            <span>{t('app.brand')}</span>
+            <span className="brand-tagline" title={t('app.tagline')}>
+              {t('app.tagline')}
+            </span>
+          </span>
+        </div>
+
+        <nav className="masthead-nav" data-testid="shell-nav" aria-label={t('app.brand')}>
+          {NAV.map((node) => {
+            const active = node.key === route;
+            return (
+              <div key={node.key} data-testid={`nav-node-${node.key}`} style={{ display: 'contents' }}>
+                <a
+                  href={pageHref(node.key, window.location.search)}
+                  aria-current={active ? 'page' : undefined}
+                  aria-expanded={node.children === undefined ? undefined : active}
+                  data-testid={`nav-${node.key}`}
+                  data-active={active ? 'true' : 'false'}
+                  className="deck-tab"
+                  onClick={(event) => {
+                    if (!isPlainLeftClick(event)) return;
+                    event.preventDefault();
+                    navigate(pageHref(node.key, window.location.search));
+                  }}
+                  title={t(node.titleKey)}
+                >
+                  {t(node.labelKey)}
+                </a>
+              </div>
+            );
+          })}
+        </nav>
+
+        <div className="deck-tools">
           <LocaleSwitch />
           <ThemeSwitch />
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }} data-testid="status-lights">
+          <div className="deck-status" data-testid="status-lights">
             {lights.map((light) => (
               <span
                 key={light.key}
+                className="deck-light"
                 data-testid={`light-${light.key}`}
                 data-state={light.state}
                 title={t(light.textKey, light.textVars)}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--color-text-secondary)' }}
               >
-                <span
-                  className="moshi-light-dot"
-                  data-state={light.state}
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    background: lightColor(light.state),
-                    display: 'inline-block',
-                  }}
-                />
-                {t(light.labelKey)}
+                <span className="moshi-light-dot" data-state={light.state} />
+                <span className="status-label">{t(light.labelKey)}</span>
+                <span className="light-code">{t(LIGHT_CODES[light.state])}</span>
               </span>
             ))}
           </div>
@@ -347,15 +219,6 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
             data-count={badgeCount > 0 ? 'active' : 'zero'}
             className="moshi-inbox-badge"
             title={t('topbar.inbox.title')}
-            style={{
-              color: badgeCount > 0 ? 'var(--color-warning-soft)' : 'var(--color-text-muted)',
-              textDecoration: 'none',
-              fontSize: 12,
-              border: `1px solid ${badgeCount > 0 ? 'var(--color-warning-dim)' : 'var(--color-border-subtle)'}`,
-              background: badgeCount > 0 ? 'var(--color-warning-bg)' : 'var(--color-bg-raised)',
-              borderRadius: 999,
-              padding: '2px 10px',
-            }}
             onClick={(event) => {
               if (!isPlainLeftClick(event)) return;
               event.preventDefault();
@@ -364,9 +227,48 @@ export function Shell({ route, section, accessSection, children }: ShellProps): 
           >
             {t('topbar.inbox.badge', { count: badge === null ? '—' : badge.label })}
           </a>
-        </header>
-        <main style={{ position: 'relative', flex: 1, minHeight: 0, minWidth: 0 }}>{children}</main>
-      </div>
+          <span className="masthead-coord" aria-hidden="true">
+            {window.location.pathname}
+          </span>
+        </div>
+      </header>
+
+      {/* 接入二级：日志 / 接入点。设置页的二级在页头自建页签，这里只为「接入」补一条
+          常驻页签带——导轨一行放不下两级，二级就落在导轨正下方，样式与设置页同源。 */}
+      {route === 'access' ? (
+        <div className="masthead-subnav" data-testid="access-section-bar">
+          <span className="subnav-label" aria-hidden="true">
+            {t('nav.access')}
+          </span>
+          <div className="seg subnav-tabs" role="tablist" aria-label={t('nav.access.title')} data-testid="access-section-tabs">
+            {ACCESS_SECTIONS.map((item) => {
+              const active = item.key === accessSection;
+              return (
+                <a
+                  key={item.key}
+                  href={accessHref(item.key, window.location.search)}
+                  role="tab"
+                  aria-selected={active}
+                  aria-current={active ? 'page' : undefined}
+                  data-testid={`nav-access-${item.key}`}
+                  data-active={active ? 'true' : 'false'}
+                  className="seg-item"
+                  title={t(item.titleKey)}
+                  onClick={(event) => {
+                    if (!isPlainLeftClick(event)) return;
+                    event.preventDefault();
+                    navigate(accessHref(item.key, window.location.search));
+                  }}
+                >
+                  {t(item.labelKey)}
+                </a>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <main className="shell-main">{children}</main>
       <ToastHost />
     </div>
   );

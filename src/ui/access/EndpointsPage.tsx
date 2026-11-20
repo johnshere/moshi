@@ -5,8 +5,11 @@
  * 中间是「历史会话导入」（把已有会话记录扫进记忆库，后台执行 + 轮询状态），
  * 下半屏内嵌 Magpie 插件的安装/连接面板（原 `/ui/hook` 与设置里的「接入」
  * 共用 `AccessPage`，用户 m02743 把它迁到这里）。
+ *
+ * 视觉（w10）：页头读数 + 四格接入点小面板（`.tile`）+ 导入读数带（`.band`）+
+ * 一条分隔线接安装面；不再用 inline 卡片样式。
  */
-import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { AccessPage } from './AccessPage.js';
 import { useT } from '../i18n/index.js';
 import type { DictKey } from '../i18n/dict.js';
@@ -27,15 +30,6 @@ const ENDPOINTS: readonly { kind: string; labelKey: DictKey; descKey: DictKey }[
   { kind: 'ui', labelKey: 'endpoints.def.ui.label', descKey: 'endpoints.def.ui.desc' },
 ];
 
-const cardStyle: CSSProperties = {
-  border: '1px solid var(--color-border, #2a333d)',
-  borderRadius: 8,
-  background: 'var(--color-bg-raised)',
-  padding: '10px 12px',
-  minWidth: 220,
-  flex: '1 1 220px',
-};
-
 function fmtTime(ts: string | null): string {
   if (ts === null) return '—';
   const date = new Date(ts);
@@ -50,25 +44,6 @@ const IMPORT_RANGES: readonly { value: ImportRange; labelKey: DictKey }[] = [
   { value: '7d', labelKey: 'endpoints.import.range.7d' },
   { value: 'all', labelKey: 'endpoints.import.range.all' },
 ];
-
-const importButtonStyle: CSSProperties = {
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 4,
-  padding: '4px 10px',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
-const importSelectStyle: CSSProperties = {
-  background: 'var(--color-bg-base)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border, #2a333d)',
-  borderRadius: 4,
-  padding: '3px 6px',
-  fontSize: 12,
-};
 
 /** 范围 → `POST /api/import` 的 since：按天换算成 ISO 时刻，「全部历史」直接传 `all`。 */
 function sinceFor(range: ImportRange): string {
@@ -87,7 +62,11 @@ function fmtElapsed(startedAt: string | null, now: number): string {
 }
 
 /** 状态行文案：空闲 / 执行中（已用时 mm:ss）/ 完成摘要 / 失败。 */
-function importStatusText(t: (key: DictKey, vars?: Readonly<Record<string, string | number>>) => string, status: ImportStatus | null, now: number): string {
+function importStatusText(
+  t: (key: DictKey, vars?: Readonly<Record<string, string | number>>) => string,
+  status: ImportStatus | null,
+  now: number,
+): string {
   if (status === null) return t('endpoints.import.status.loading');
   if (status.running) return t('endpoints.import.status.running', { elapsed: fmtElapsed(status.started_at, now) });
   if (status.error !== null) return t('endpoints.import.status.failed', { error: status.error });
@@ -208,107 +187,107 @@ export function EndpointsPage(): ReactElement {
   }
 
   return (
-    <div
-      data-testid="endpoints-page"
-      style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
-    >
-      <div style={{ padding: '14px 18px 0', color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>
-        {t('endpoints.title')}
-      </div>
-      <div style={{ color: 'var(--color-text-muted)', fontSize: 12, padding: '4px 18px 10px' }}>
-        {t('endpoints.intro')}
-      </div>
-      {error !== null ? (
-        <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px 8px' }}>
-          {t('endpoints.summaryError', { error })}
-        </div>
-      ) : null}
-      <div style={{ display: 'flex', gap: 10, padding: '0 18px', flexWrap: 'wrap' }}>
-        {ENDPOINTS.map((endpoint) => {
-          const list = byKind.get(endpoint.kind) ?? [];
-          const count = list.reduce((sum, item) => sum + item.count, 0);
-          const ok = list.reduce((sum, item) => sum + item.ok, 0);
-          const last = list.reduce<string | null>((acc, item) => {
-            if (item.last_ts === null) return acc;
-            return acc === null || item.last_ts > acc ? item.last_ts : acc;
-          }, null);
-          return (
-            <div key={endpoint.kind} data-testid={`endpoint-card-${endpoint.kind}`} style={cardStyle}>
-              <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{t(endpoint.labelKey)}</div>
-              <div style={{ fontSize: 20, color: 'var(--color-text-primary)', margin: '2px 0' }}>
-                {count}
-                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>{t('endpoints.unit')}</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
-                {t('endpoints.card.ok', { ok, last: fmtTime(last) })}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>{t(endpoint.descKey)}</div>
-              {list.map((group) => (
-                <div key={`${group.caller_id}:${group.caller_kind}`} style={{ fontSize: 11, color: 'var(--color-text-secondary)', marginTop: 4 }}>
-                  {t('endpoints.card.row', { id: group.caller_id, n: group.count })}
-                  {group.p95_ms === null ? '—' : `${String(Math.round(group.p95_ms))}ms`}
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
+    <div className="ledger ledger-fill" data-testid="endpoints-page">
+      <header className="ledger-head">
+        <div className="ledger-title">{t('endpoints.title')}</div>
+        <span className="ledger-meta">{t('endpoints.unit')}</span>
+      </header>
 
-      <div style={{ padding: '12px 18px 0' }}>
-        <div data-testid="import-card" style={cardStyle}>
-          <div style={{ fontSize: 12, color: 'var(--color-text-primary)' }}>{t('endpoints.import.title')}</div>
-          <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            {t('endpoints.import.desc')}
+      <div className="station-body">
+        <p className="station-note">{t('endpoints.intro')}</p>
+        {error !== null ? (
+          <div className="notice" data-tone="error">
+            <span className="notice-text">{t('endpoints.summaryError', { error })}</span>
           </div>
-          <div
-            data-testid="import-sources"
-            data-available={sources === null ? 'unknown' : String(sources.available)}
-            style={{
-              fontSize: 11,
-              marginTop: 6,
-              color: noSource ? 'var(--color-warning)' : 'var(--color-text-secondary)',
-            }}
-          >
-            {sources === null
-              ? t('endpoints.import.sources.loading')
-              : sources.available
-                ? t('endpoints.import.sources.available', {
-                    ids: sources.sources
-                      .filter((source) => source.available)
-                      .map((source) => source.id)
-                      .join(t('common.listSep')),
-                  })
-                : t('endpoints.import.sources.none')}
-          </div>
-          {sourcesError !== null ? (
-            <div style={{ fontSize: 11, marginTop: 4, color: 'var(--color-danger, #f85149)' }}>
-              {t('endpoints.import.sources.error', { error: sourcesError })}
-            </div>
-          ) : null}
-          {sources !== null && !sources.available ? (
-            <div data-testid="import-source-list" style={{ fontSize: 11, marginTop: 4 }}>
-              {sources.sources.length === 0 ? (
-                <div style={{ color: 'var(--color-text-muted)' }}>{t('endpoints.import.sources.unconfigured')}</div>
-              ) : (
-                sources.sources.map((source) => (
-                  <div key={source.id} style={{ color: 'var(--color-text-secondary)' }}>
-                    {source.id} · {source.adapter} ·{' '}
-                    <span style={{ color: source.available ? 'var(--color-success)' : 'var(--color-text-muted)' }}>
-                      {source.available ? t('endpoints.import.source.available') : t('endpoints.import.source.unavailable')}
-                    </span>
+        ) : null}
+
+        {/* 四类接入点：同一读数面，一行四格 */}
+        <div className="tile-grid">
+          {ENDPOINTS.map((endpoint) => {
+            const list = byKind.get(endpoint.kind) ?? [];
+            const count = list.reduce((sum, item) => sum + item.count, 0);
+            const ok = list.reduce((sum, item) => sum + item.ok, 0);
+            const last = list.reduce<string | null>((acc, item) => {
+              if (item.last_ts === null) return acc;
+              return acc === null || item.last_ts > acc ? item.last_ts : acc;
+            }, null);
+            return (
+              <div key={endpoint.kind} className="tile" data-testid={`endpoint-card-${endpoint.kind}`}>
+                <div className="tile-title">{t(endpoint.labelKey)}</div>
+                <div className="tile-num">
+                  {count}
+                  <span className="tile-unit">{t('endpoints.unit')}</span>
+                </div>
+                <div className="tile-line">{t('endpoints.card.ok', { ok, last: fmtTime(last) })}</div>
+                <div className="tile-note">{t(endpoint.descKey)}</div>
+                {list.map((group) => (
+                  <div key={`${group.caller_id}:${group.caller_kind}`} className="tile-line">
+                    {t('endpoints.card.row', { id: group.caller_id, n: group.count })}
+                    {group.p95_ms === null ? '—' : `${String(Math.round(group.p95_ms))}ms`}
                   </div>
-                ))
-              )}
+                ))}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* 历史会话导入：写入口只有这里一颗按钮，状态在带脚 */}
+        <section className="band" data-testid="import-card">
+          <div className="band-head">
+            <span className="band-title">{t('endpoints.import.title')}</span>
+            <span className="band-tag">{importStatusLine}</span>
+          </div>
+          <div className="band-body">
+            <span className="station-note">{t('endpoints.import.desc')}</span>
+            <div
+              className={`tile-line ${noSource ? 'tone-warn' : ''}`}
+              data-testid="import-sources"
+              data-available={sources === null ? 'unknown' : String(sources.available)}
+            >
+              {sources === null
+                ? t('endpoints.import.sources.loading')
+                : sources.available
+                  ? t('endpoints.import.sources.available', {
+                      ids: sources.sources
+                        .filter((source) => source.available)
+                        .map((source) => source.id)
+                        .join(t('common.listSep')),
+                    })
+                  : t('endpoints.import.sources.none')}
             </div>
-          ) : null}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
-            <label style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
-              {t('endpoints.import.range')}
+            {sourcesError !== null ? (
+              <div className="notice" data-tone="error">
+                <span className="notice-text">{t('endpoints.import.sources.error', { error: sourcesError })}</span>
+              </div>
+            ) : null}
+            {sources !== null && !sources.available ? (
+              <div className="diag-group" data-testid="import-source-list">
+                {sources.sources.length === 0 ? (
+                  <span className="tile-line tone-mute">{t('endpoints.import.sources.unconfigured')}</span>
+                ) : (
+                  sources.sources.map((source) => (
+                    <div key={source.id} className="tile-line">
+                      {source.id} · {source.adapter} ·{' '}
+                      <span className={source.available ? 'tone-ok' : 'tone-faint'}>
+                        {source.available
+                          ? t('endpoints.import.source.available')
+                          : t('endpoints.import.source.unavailable')}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            ) : null}
+            <div className="btn-row">
+              <label className="form-label" htmlFor="import-range-select">
+                {t('endpoints.import.range')}
+              </label>
               <select
+                id="import-range-select"
+                className="scope-select"
                 data-testid="import-range"
                 value={range}
                 onChange={(e) => setRange(e.target.value as ImportRange)}
-                style={{ ...importSelectStyle, marginLeft: 6 }}
               >
                 {IMPORT_RANGES.map((item) => (
                   <option key={item.value} value={item.value}>
@@ -316,37 +295,28 @@ export function EndpointsPage(): ReactElement {
                   </option>
                 ))}
               </select>
-            </label>
-            <button
-              type="button"
-              data-testid="import-run"
-              style={{ ...importButtonStyle, opacity: importRunning || noSource ? 0.5 : 1 }}
-              disabled={importRunning || noSource}
-              title={noSource ? t('endpoints.import.sources.none') : undefined}
-              onClick={() => {
-                void startImport();
-              }}
-            >
-              {importRunning ? t('endpoints.import.running') : t('endpoints.import.run')}
-            </button>
+              <button
+                type="button"
+                className="btn"
+                data-testid="import-run"
+                disabled={importRunning || noSource}
+                title={noSource ? t('endpoints.import.sources.none') : undefined}
+                onClick={() => {
+                  void startImport();
+                }}
+              >
+                {importRunning ? t('endpoints.import.running') : t('endpoints.import.run')}
+              </button>
+            </div>
+            <div className={`tile-line ${importStatusDanger ? 'tone-err' : 'tone-mute'}`} data-testid="import-status">
+              {importStatusLine}
+            </div>
           </div>
-          <div
-            data-testid="import-status"
-            style={{
-              fontSize: 11,
-              marginTop: 8,
-              color: importStatusDanger ? 'var(--color-danger, #f85149)' : 'var(--color-text-secondary)',
-            }}
-          >
-            {importStatusLine}
-          </div>
-        </div>
-      </div>
+        </section>
 
-      <div style={{ padding: '16px 18px 6px', color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>
-        {t('endpoints.hook.title')}
-      </div>
-      <div style={{ padding: '0 18px 24px' }}>
+        <div className="station-divider">
+          <span className="station-divider-title">{t('endpoints.hook.title')}</span>
+        </div>
         <AccessPage standalone={false} onboardResult={null} />
       </div>
     </div>

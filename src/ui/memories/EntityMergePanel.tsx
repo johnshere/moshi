@@ -6,7 +6,7 @@
  *
  * 这是最小可用入口，不做视觉重构；样式全部 inline，收敛在面板内部。
  */
-import { useCallback, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 
@@ -50,53 +50,6 @@ interface MergeResult {
   undoable: boolean;
   undo_reason: string;
 }
-
-const panelStyle: CSSProperties = {
-  position: 'fixed',
-  left: '50%',
-  top: '54%',
-  transform: 'translate(-50%, -50%)',
-  width: 'min(720px, 92vw)',
-  maxHeight: '78vh',
-  overflow: 'auto',
-  zIndex: 40,
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  boxShadow: 'var(--shadow-float)',
-  color: 'var(--color-text-secondary)',
-  fontSize: 12,
-  padding: 14,
-  boxSizing: 'border-box',
-};
-
-const rowStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 8,
-  padding: '4px 6px',
-  borderBottom: '1px solid var(--color-border-subtle)',
-};
-
-const buttonStyle: CSSProperties = {
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  fontSize: 11,
-  padding: '3px 8px',
-  cursor: 'pointer',
-};
-
-const inputStyle: CSSProperties = {
-  flex: 1,
-  background: 'var(--color-bg-base)',
-  border: '1px solid var(--color-border-strong)',
-  color: 'var(--color-text-primary)',
-  borderRadius: 8,
-  padding: '5px 8px',
-  fontSize: 12,
-};
 
 async function callJson<T>(url: string, init?: RequestInit): Promise<T> {
   const token = resolveToken();
@@ -193,7 +146,7 @@ export function EntityMergePanel(): ReactElement {
           setOpen(true);
           void search();
         }}
-        style={{ ...buttonStyle, position: 'fixed', right: 12, bottom: 12, zIndex: 9 }}
+        className="merge-open"
       >
         {t('merge.open')}
       </button>
@@ -201,25 +154,20 @@ export function EntityMergePanel(): ReactElement {
   }
 
   return (
-    <div data-testid="entity-merge-panel" style={panelStyle}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <strong style={{ color: 'var(--color-text-primary)', fontSize: 13 }}>{t('merge.title')}</strong>
-        <span style={{ color: 'var(--color-text-muted)' }}>{t('merge.hint')}</span>
+    <div data-testid="entity-merge-panel" className="merge-panel">
+      <div className="merge-head">
+        <strong className="merge-title">{t('merge.title')}</strong>
+        <span className="merge-hint">{t('merge.hint')}</span>
         <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          data-testid="entity-merge-close"
-          onClick={() => setOpen(false)}
-          style={buttonStyle}
-        >
+        <button type="button" data-testid="entity-merge-close" onClick={() => setOpen(false)} className="btn">
           {t('common.close')}
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div className="merge-search">
         <input
           data-testid="entity-merge-query"
-          style={inputStyle}
+          className="input-line"
           value={query}
           placeholder={t('merge.searchPlaceholder')}
           onChange={(e) => setQuery(e.target.value)}
@@ -227,25 +175,19 @@ export function EntityMergePanel(): ReactElement {
             if (e.key === 'Enter') void search();
           }}
         />
-        <button
-          type="button"
-          data-testid="entity-merge-search"
-          disabled={busy}
-          onClick={() => void search()}
-          style={buttonStyle}
-        >
+        <button type="button" data-testid="entity-merge-search" disabled={busy} onClick={() => void search()} className="btn">
           {t('merge.search')}
         </button>
       </div>
 
       {rows.length === 0 ? (
-        <div style={{ color: 'var(--color-text-muted)', padding: '8px 2px' }}>{t('merge.empty')}</div>
+        <div className="merge-empty">{t('merge.empty')}</div>
       ) : (
-        <div style={{ marginTop: 8, border: '1px solid var(--color-border-subtle)', borderRadius: 8 }}>
+        <div className="merge-list">
           {rows.map((row) => (
-            <div key={row.entity_id} data-testid="entity-merge-row" style={rowStyle}>
-              <span style={{ color: 'var(--color-text-primary)' }}>{row.canonical_name}</span>
-              <span style={{ color: 'var(--color-text-muted)' }}>
+            <div key={row.entity_id} data-testid="entity-merge-row" className="merge-row">
+              <span className="merge-row-name">{row.canonical_name}</span>
+              <span className="merge-row-meta">
                 {t('merge.rowMeta', {
                   etype: row.etype,
                   facts: row.fact_count,
@@ -256,24 +198,20 @@ export function EntityMergePanel(): ReactElement {
               <button
                 type="button"
                 data-testid={`entity-merge-from-${row.entity_id}`}
+                data-role="from"
+                data-picked={fromId === row.entity_id ? 'true' : 'false'}
                 onClick={() => setFromId(row.entity_id)}
-                style={{
-                  ...buttonStyle,
-                  borderColor: fromId === row.entity_id ? 'var(--color-warning)' : 'var(--color-border-strong)',
-                  color: fromId === row.entity_id ? 'var(--color-warning-soft)' : 'var(--color-text-primary)',
-                }}
+                className="btn merge-pick"
               >
                 {t('merge.setSource')}
               </button>
               <button
                 type="button"
                 data-testid={`entity-merge-to-${row.entity_id}`}
+                data-role="to"
+                data-picked={toId === row.entity_id ? 'true' : 'false'}
                 onClick={() => setToId(row.entity_id)}
-                style={{
-                  ...buttonStyle,
-                  borderColor: toId === row.entity_id ? 'var(--color-success)' : 'var(--color-border-strong)',
-                  color: toId === row.entity_id ? 'var(--color-success)' : 'var(--color-text-primary)',
-                }}
+                className="btn merge-pick"
               >
                 {t('merge.setTarget')}
               </button>
@@ -282,8 +220,8 @@ export function EntityMergePanel(): ReactElement {
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: 12, marginTop: 10, alignItems: 'center' }}>
-        <span data-testid="entity-merge-selection" style={{ color: 'var(--color-text-secondary)' }}>
+      <div className="merge-actions">
+        <span data-testid="entity-merge-selection" className="merge-selection">
           {t('merge.sourceLabel')}
           {fromId === null
             ? t('common.dash')
@@ -298,7 +236,7 @@ export function EntityMergePanel(): ReactElement {
           data-testid="entity-merge-preview"
           disabled={busy || fromId === null || toId === null}
           onClick={() => void doPreview()}
-          style={buttonStyle}
+          className="btn"
         >
           {t('merge.preview')}
         </button>
@@ -307,14 +245,14 @@ export function EntityMergePanel(): ReactElement {
           data-testid="entity-merge-confirm"
           disabled={busy || fromId === null || toId === null || preview === null || !preview.can_merge}
           onClick={() => void doMerge()}
-          style={{ ...buttonStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger-soft)' }}
+          className="btn btn-danger"
         >
           {t('merge.confirm')}
         </button>
       </div>
 
       {preview === null ? null : (
-        <div data-testid="entity-merge-preview-box" style={{ marginTop: 10, background: 'var(--color-bg-base)', padding: 8, borderRadius: 8 }}>
+        <div data-testid="entity-merge-preview-box" className="merge-preview">
           <div>
             {t('merge.canMerge', {
               can: preview.can_merge
@@ -328,12 +266,16 @@ export function EntityMergePanel(): ReactElement {
               edges: preview.will_move.edges,
               aliases: preview.will_move.aliases,
             })}{' '}
-            <span data-testid="entity-merge-conflict-count" style={{ color: preview.conflicts.length > 0 ? 'var(--color-warning-soft)' : 'var(--color-success)' }}>
+            <span
+              data-testid="entity-merge-conflict-count"
+              className="merge-conflict-count"
+              data-conflicts={preview.conflicts.length > 0 ? 'true' : 'false'}
+            >
               {preview.conflicts.length}
             </span>
           </div>
           {preview.conflicts.length === 0 ? null : (
-            <ul style={{ margin: '6px 0 0 16px', padding: 0, color: 'var(--color-warning-soft)' }}>
+            <ul className="merge-conflicts">
               {preview.conflicts.slice(0, 5).map((c, i) => (
                 <li key={`${c.predicate}-${i}`}>
                   {c.predicate}: {JSON.stringify(c.from.value)} → {JSON.stringify(c.to.value)}
@@ -345,7 +287,7 @@ export function EntityMergePanel(): ReactElement {
       )}
 
       {result === null ? null : (
-        <div data-testid="entity-merge-result" style={{ marginTop: 10, color: 'var(--color-success)' }}>
+        <div data-testid="entity-merge-result" className="merge-result">
           {t('merge.result', {
             moved: result.moved_facts,
             deduped: result.deduped_facts,
@@ -357,7 +299,7 @@ export function EntityMergePanel(): ReactElement {
       )}
 
       {error === null ? null : (
-        <div data-testid="entity-merge-error" style={{ marginTop: 10, color: 'var(--color-danger-soft)' }}>
+        <div data-testid="entity-merge-error" className="merge-error">
           {error}
         </div>
       )}

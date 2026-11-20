@@ -13,7 +13,7 @@
  *   会把历史栈刷爆，也让"后退"失去意义（后退一次 = 撤销一个字符）。
  * - 按钮类（ftype / status）点击即提交：多选语义，点一次是一次完整筛选变更。
  */
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useState } from 'react';
 import { useFilter } from '../state/filter.js';
 import { FILTER_FTYPES, FILTER_STATUSES, filterToSearch } from './pure/filter.js';
 import { useT } from '../i18n/index.js';
@@ -32,49 +32,6 @@ declare global {
     };
   }
 }
-
-const containerStyle: CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: 5,
-  flexWrap: 'wrap',
-  fontSize: 12,
-  lineHeight: 1.6,
-  pointerEvents: 'auto',
-};
-
-const labelStyle: CSSProperties = { color: 'var(--color-text-muted)', whiteSpace: 'nowrap' };
-
-/* 胶囊：只有可点的东西是圆的；标签保持方角，圆角不滥用 */
-const chipBase: CSSProperties = {
-  background: 'transparent',
-  color: 'var(--color-text-secondary)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 999,
-  padding: '1px 8px',
-  cursor: 'pointer',
-  font: 'inherit',
-  transition: 'background-color 120ms ease, color 120ms ease, border-color 120ms ease',
-};
-
-const chipOn: CSSProperties = {
-  ...chipBase,
-  background: 'color-mix(in srgb, var(--color-accent) 14%, transparent)',
-  color: 'var(--color-accent-soft)',
-  border: '1px solid color-mix(in srgb, var(--color-accent) 38%, transparent)',
-};
-
-const textInputStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 999,
-  padding: '1px 9px',
-  font: 'inherit',
-  width: 112,
-};
-
-const dateInputStyle: CSSProperties = { ...textInputStyle, width: 98, colorScheme: 'light dark' };
 
 /** 把 ISO 时间截成 date input 能吃的 `YYYY-MM-DD`（取日期部分，容忍含时间的完整 ISO） */
 function toDateValue(iso: string | null): string {
@@ -139,62 +96,67 @@ export function FilterBar(): JSX.Element {
   };
 
   return (
-    <div
-      style={{
-        ...containerStyle,
-        ...(active ? { border: '1px solid var(--color-border-strong)', background: 'var(--color-bg-overlay)', borderRadius: 8, padding: '4px 8px' } : {}),
-      }}
-    >
-      <span style={labelStyle} data-testid="filter-label">
+    <div className="filterbar" data-active={active ? 'true' : 'false'}>
+      <span className="filter-title" data-active={active ? 'true' : 'false'} data-testid="filter-label">
         {t(active ? 'filter.titleActive' : 'filter.title')}
       </span>
 
-      <label style={labelStyle}>{t('filter.scope')}</label>
-      <input
-        type="text"
-        value={scopeInput}
-        placeholder={t('filter.scopePlaceholder')}
-        onChange={(e) => setScopeInput(e.target.value)}
-        onBlur={commitScope}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commitScope();
-        }}
-        style={textInputStyle}
-      />
+      <div className="filter-group">
+        <span className="filter-label">{t('filter.scope')}</span>
+        <input
+          type="text"
+          value={scopeInput}
+          placeholder={t('filter.scopePlaceholder')}
+          onChange={(e) => setScopeInput(e.target.value)}
+          onBlur={commitScope}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') commitScope();
+          }}
+          className="input-line filter-scope"
+        />
+      </div>
 
-      <span style={labelStyle}>{t('filter.ftype')}</span>
-      {FILTER_FTYPES.map((v) => (
-        <button
-          key={v}
-          type="button"
-          aria-pressed={filter.ftype.includes(v)}
-          onClick={() => toggleFtype(v)}
-          style={filter.ftype.includes(v) ? chipOn : chipBase}
-        >
-          {enumLabel('ftype', v)}
-        </button>
-      ))}
+      <div className="filter-group">
+        <span className="filter-label">{t('filter.ftype')}</span>
+        {FILTER_FTYPES.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={filter.ftype.includes(v)}
+            data-on={filter.ftype.includes(v) ? 'true' : 'false'}
+            onClick={() => toggleFtype(v)}
+            className="chip"
+          >
+            {enumLabel('ftype', v)}
+          </button>
+        ))}
+      </div>
 
-      <span style={labelStyle}>{t('filter.status')}</span>
-      {FILTER_STATUSES.map((v) => (
-        <button
-          key={v}
-          type="button"
-          aria-pressed={filter.status.includes(v)}
-          onClick={() => toggleStatus(v)}
-          style={filter.status.includes(v) ? chipOn : chipBase}
-        >
-          {enumLabel('epistemic', v)}
-        </button>
-      ))}
+      <div className="filter-group">
+        <span className="filter-label">{t('filter.status')}</span>
+        {FILTER_STATUSES.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={filter.status.includes(v)}
+            data-on={filter.status.includes(v) ? 'true' : 'false'}
+            onClick={() => toggleStatus(v)}
+            className="chip"
+          >
+            {enumLabel('epistemic', v)}
+          </button>
+        ))}
+      </div>
 
-      <span style={labelStyle}>{t('filter.time')}</span>
-      <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} onBlur={commitFrom} style={dateInputStyle} />
-      <span style={{ color: 'var(--color-text-faint)' }}>~</span>
-      <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} onBlur={commitTo} style={dateInputStyle} />
+      <div className="filter-group">
+        <span className="filter-label">{t('filter.time')}</span>
+        <input type="date" value={fromInput} onChange={(e) => setFromInput(e.target.value)} onBlur={commitFrom} className="input-line filter-date" />
+        <span className="filter-label">~</span>
+        <input type="date" value={toInput} onChange={(e) => setToInput(e.target.value)} onBlur={commitTo} className="input-line filter-date" />
+      </div>
 
       {active && (
-        <button type="button" onClick={reset} style={{ ...chipBase, color: 'var(--color-warning)', borderColor: 'var(--color-warning-dim)' }}>
+        <button type="button" onClick={reset} className="chip filter-reset" data-tone="warning">
           {t('common.reset')}
         </button>
       )}

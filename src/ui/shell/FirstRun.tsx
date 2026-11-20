@@ -7,55 +7,16 @@
  * 判定逻辑在 `./first-run.js`（纯函数，node 侧可直接单测）；这里只做取数、渲染与重试。
  * `ready` 或尚未探测完成时返回 null——首开提示不是常驻 UI。
  */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 import {
   BANNERS,
   firstRunState,
-  type BannerSpec,
   type FirstRunOptions,
   type FirstRunState,
   type FirstRunStatus,
 } from './first-run.js';
-
-const TONE_STYLE: Record<BannerSpec['tone'], CSSProperties> = {
-  error: { background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', color: 'var(--color-danger-soft)' },
-  info: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-info-bg)', color: 'var(--color-info-soft)' },
-  muted: { background: 'var(--color-bg-overlay)', border: '1px solid var(--color-border-strong)', color: 'var(--color-text-secondary)' },
-  warn: { background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', color: 'var(--color-warning-soft)' },
-};
-
-const bannerStyle = (tone: BannerSpec['tone']): CSSProperties => ({
-  position: 'fixed',
-  bottom: 66,
-  right: 20,
-  zIndex: 60,
-  maxWidth: 'min(340px, calc(100vw - 32px))',
-  display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  flexWrap: 'wrap',
-  padding: '6px 12px',
-  borderRadius: 14,
-  textAlign: 'left',
-  boxShadow: 'var(--shadow-menu)',
-  fontSize: 12,
-  lineHeight: 1.5,
-  ...TONE_STYLE[tone],
-});
-
-const retryStyle: CSSProperties = {
-  marginLeft: 'auto',
-  background: 'transparent',
-  color: 'inherit',
-  border: '1px solid currentColor',
-  borderRadius: 999,
-  padding: '2px 11px',
-  cursor: 'pointer',
-  font: 'inherit',
-  opacity: 0.9,
-};
 
 async function getJson<T>(url: string, signal: AbortSignal): Promise<T> {
   const res = await fetch(url, {
@@ -114,6 +75,8 @@ async function probe(signal: AbortSignal): Promise<ProbeResult> {
 export function FirstRun(): ReactElement | null {
   const t = useT();
   const [result, setResult] = useState<ProbeResult | null>(null);
+  /** 用户手动关掉后本会话不再弹（外壳不随页面切换卸载，切页回来也不会重新冒出来） */
+  const [dismissed, setDismissed] = useState(false);
 
   const load = useCallback(async (signal: AbortSignal): Promise<void> => {
     const next = await probe(signal);
@@ -126,7 +89,7 @@ export function FirstRun(): ReactElement | null {
     return () => controller.abort();
   }, [load]);
 
-  if (result === null) return null;
+  if (result === null || dismissed) return null;
   const options: FirstRunOptions = { collectEnabled: result.collectEnabled };
   const state: FirstRunState = firstRunState(result.status, result.hasData, options);
   if (state === 'ready') return null;
@@ -136,24 +99,37 @@ export function FirstRun(): ReactElement | null {
   if (banner === undefined) return null;
   return (
     <div
-      style={bannerStyle(banner.tone)}
+      className="firstrun"
       role="status"
       aria-live="polite"
       data-testid="first-run"
       data-state={state}
-      className="moshi-firstrun"
+      data-tone={banner.tone}
     >
       <strong style={{ fontWeight: 600 }}>{t(banner.textKey)}</strong>
       <span style={{ opacity: 0.85 }}>{t(banner.hintKey)}</span>
       <button
         type="button"
-        style={retryStyle}
+        className="btn"
+        style={{ marginLeft: 'auto' }}
         data-testid="first-run-retry"
         onClick={() => {
           void load(new AbortController().signal);
         }}
       >
         {t('common.retry')}
+      </button>
+      <button
+        type="button"
+        className="firstrun-close"
+        data-testid="first-run-close"
+        aria-label={t('common.close')}
+        title={t('common.close')}
+        onClick={() => {
+          setDismissed(true);
+        }}
+      >
+        ×
       </button>
     </div>
   );

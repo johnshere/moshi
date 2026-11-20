@@ -4,62 +4,12 @@
  * 交互：`/` 聚焦（输入框内不抢字符）→ 输入 2 字以上取 `/api/facts?q=` 建议 →
  * 点建议进记忆页并选中 `?fact=`，回车进 `?q=` 结果页。Esc 收起。
  */
-import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useRef, useState, type ReactElement } from 'react';
 import { factHref, isSearchShortcut, isTypingTarget, memoriesHref } from './pure.js';
 import { navigate } from './navigate.js';
 import { fetchSuggestions, type FactSuggestion } from './api.js';
 import { useT } from '../i18n/index.js';
 import { enumLabel } from '../i18n/enums.js';
-
-const boxStyle: CSSProperties = {
-  position: 'relative',
-  width: 320,
-  maxWidth: '46vw',
-};
-
-const inputStyle = (focused: boolean): CSSProperties => ({
-  width: '100%',
-  boxSizing: 'border-box',
-  background: 'var(--color-bg-overlay)',
-  color: 'var(--color-text-primary)',
-  border: `1px solid ${focused ? 'color-mix(in srgb, var(--color-accent) 55%, transparent)' : 'var(--color-border-subtle)'}`,
-  borderRadius: 999,
-  padding: '5px 12px 5px 28px',
-  fontSize: 12,
-  outline: 'none',
-  boxShadow: focused
-    ? '0 0 0 3px color-mix(in srgb, var(--color-accent) 16%, transparent)'
-    : 'none',
-});
-
-const listStyle: CSSProperties = {
-  position: 'absolute',
-  top: 'calc(100% + 4px)',
-  left: 0,
-  right: 0,
-  background: 'var(--color-bg-overlay)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 12,
-  boxShadow: 'var(--shadow-menu)',
-  zIndex: 60,
-  overflow: 'hidden',
-};
-
-const itemStyle: CSSProperties = {
-  display: 'block',
-  width: '100%',
-  textAlign: 'left',
-  background: 'transparent',
-  border: 0,
-  borderBottom: '1px solid var(--color-border-subtle)',
-  color: 'var(--color-text-secondary)',
-  padding: '7px 9px',
-  fontSize: 12,
-  cursor: 'pointer',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-};
 
 export function SearchBox(): ReactElement {
   const t = useT();
@@ -114,14 +64,16 @@ export function SearchBox(): ReactElement {
   };
 
   return (
-    <div style={boxStyle}>
-      <span style={{ position: 'absolute', left: 11, top: 6, color: 'var(--color-text-muted)', fontSize: 12 }}>⌕</span>
+    <div className="search-shell">
+      <span className="search-glyph" aria-hidden="true">
+        ⌕
+      </span>
       <input
         ref={inputRef}
         data-testid="global-search"
         aria-label={t('search.global')}
         data-focus={focusWithin ? 'true' : 'false'}
-        className="moshi-search"
+        className="search-input moshi-search"
         placeholder={t('search.placeholder')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
@@ -140,29 +92,19 @@ export function SearchBox(): ReactElement {
             inputRef.current?.blur();
           }
         }}
-        style={inputStyle(focusWithin)}
       />
       {!focusWithin && query === '' ? (
-        <span
-          style={{
-            position: 'absolute',
-            right: 8,
-            top: 5,
-            color: 'var(--color-text-faint)',
-            fontSize: 11,
-            pointerEvents: 'none',
-          }}
-        >
+        <span className="search-key" aria-hidden="true">
           /
         </span>
       ) : null}
       {open && items.length > 0 ? (
-        <div style={listStyle} data-testid="search-suggestions">
+        <div className="search-suggestions" data-testid="search-suggestions">
           {items.map((item) => (
             <button
               key={item.id}
               type="button"
-              style={itemStyle}
+              className="search-suggestion"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
                 setOpen(false);

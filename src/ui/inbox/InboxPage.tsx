@@ -15,7 +15,7 @@
  *
  * 状态全在本组件：批量操作是"跨 tab 的一件事"，放进子组件会让切 tab 丢掉预览结果。
  */
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   InboxApiError,
   decideQueue,
@@ -52,35 +52,6 @@ const TABS: readonly { key: Tab; labelKey: DictKey; hintKey: DictKey }[] = [
 /** 每页取多少条：与服务端默认 limit 一致 */
 const QUEUE_LIMIT = 50;
 
-const pageStyle = {
-  position: 'absolute',
-  inset: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  padding: '14px 18px 120px',
-  boxSizing: 'border-box',
-} as const;
-
-const tabStyle = (active: boolean): CSSProperties => ({
-  background: active ? 'var(--color-bg-hover)' : 'var(--color-bg-raised)',
-  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-  border: `1px solid ${active ? 'var(--color-border-strong)' : 'var(--color-border-subtle)'}`,
-  borderRadius: 8,
-  padding: '4px 12px',
-  cursor: active ? 'default' : 'pointer',
-  font: 'inherit',
-});
-
-const rowStyle: CSSProperties = {
-  display: 'flex',
-  gap: 10,
-  alignItems: 'flex-start',
-  padding: '7px 4px',
-  borderBottom: '1px solid var(--color-bg-overlay)',
-};
-
-const muted: CSSProperties = { color: 'var(--color-text-muted)' };
-
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
@@ -107,31 +78,21 @@ function decideNotice(
   }
 }
 
-/** 行内小按钮：只做单条决策，样式与页面其它按钮同一套 inline 语言（P2-19-B 再统一） */
+/** 行内小按钮：只做单条决策，视觉上收成读数带内的微型控件 */
 function RowButton(props: {
   label: string;
   tone?: 'plain' | 'primary' | 'danger';
   disabled: boolean;
   onClick: () => void;
 }): JSX.Element {
-  const color =
-    props.tone === 'danger' ? 'var(--color-danger-soft)' : props.tone === 'primary' ? 'var(--color-info-soft)' : 'var(--color-text-secondary)';
+  const toneClass =
+    props.tone === 'danger' ? ' btn-danger' : props.tone === 'primary' ? ' inbox-act-primary' : '';
   return (
     <button
       type="button"
+      className={`btn inbox-act${toneClass}`}
       disabled={props.disabled}
       onClick={props.onClick}
-      style={{
-        background: 'var(--color-bg-raised)',
-        border: '1px solid var(--color-border-subtle)',
-        borderRadius: 6,
-        color,
-        padding: '1px 8px',
-        font: 'inherit',
-        fontSize: 11,
-        cursor: props.disabled ? 'default' : 'pointer',
-        opacity: props.disabled ? 0.5 : 1,
-      }}
     >
       {props.label}
     </button>
@@ -147,10 +108,10 @@ function FactCheckbox(props: {
   return (
     <input
       type="checkbox"
+      className="inbox-check"
       checked={props.checked}
       onChange={() => props.onToggle(props.id)}
       aria-label={t('inbox.selectRow', { id: props.id })}
-      style={{ marginTop: 3, accentColor: 'var(--color-info-strong)' }}
     />
   );
 }
@@ -331,22 +292,27 @@ export function InboxPage(): JSX.Element {
 
   const rows: JSX.Element[] =
     tab === 'resolve'
-        ? resolveRows.map((row) => (
+      ? resolveRows.map((row) => (
           <div
             key={row.id}
             data-fact-id={row.id}
-            style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
+            className="inbox-row"
+            data-kind="resolve"
+            data-focus={row.id === focusId}
           >
-            <span style={{ ...muted, width: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            <span className="inbox-lamp" aria-hidden="true" />
+            <span className="inbox-alias" title={row.alias}>
               {row.alias}
             </span>
-            <span style={{ color: 'var(--color-text-secondary)' }}>→</span>
-            <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.canonical_name}</span>
-            <span style={{ ...muted, fontFamily: 'monospace' }}>{row.entity_id}</span>
-            <span style={{ color: 'var(--color-info)', width: 60, textAlign: 'right' }}>
-              {row.confidence.toFixed(3)}
+            <span className="inbox-arrow" aria-hidden="true">
+              →
             </span>
-            <span style={{ display: 'inline-flex', gap: 6 }}>
+            <span className="inbox-canonical">{row.canonical_name}</span>
+            <span className="inbox-entity" title={row.entity_id}>
+              {row.entity_id}
+            </span>
+            <span className="inbox-num">{row.confidence.toFixed(3)}</span>
+            <span className="inbox-actions">
               <RowButton
                 label={t('inbox.row.merge')}
                 tone="primary"
@@ -372,15 +338,16 @@ export function InboxPage(): JSX.Element {
             <div
               key={row.id}
               data-fact-id={row.id}
-              style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
+              className="inbox-row"
+              data-kind="lowconf"
+              data-focus={row.id === focusId}
             >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
-              <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.content}</span>
-              <span style={{ ...muted, width: 110, textAlign: 'right' }}>conf {row.confidence.toFixed(2)}</span>
-              <span style={{ color: 'var(--color-info)', width: 110, textAlign: 'right' }}>
-                imp {row.importance.toFixed(2)}
-              </span>
-              <span style={{ display: 'inline-flex', gap: 6 }}>
+              <span className="inbox-lamp" aria-hidden="true" />
+              <span className="inbox-content">{row.content}</span>
+              <span className="inbox-num inbox-num-muted">{row.confidence.toFixed(2)}</span>
+              <span className="inbox-num">{row.importance.toFixed(2)}</span>
+              <span className="inbox-actions">
                 <RowButton
                   label={t('inbox.row.promote')}
                   tone="primary"
@@ -400,16 +367,15 @@ export function InboxPage(): JSX.Element {
             <div
               key={row.id}
               data-fact-id={row.id}
-              style={{ ...rowStyle, background: row.id === focusId ? 'var(--color-bg-active)' : 'transparent' }}
+              className="inbox-row"
+              data-kind="prune"
+              data-focus={row.id === focusId}
             >
               <FactCheckbox id={row.id} checked={selected.has(row.id)} onToggle={toggle} />
-              <span style={{ color: 'var(--color-text-primary)', flex: 1 }}>{row.content}</span>
-              <span style={{ color: 'var(--color-warning)', width: 110, textAlign: 'right' }}>
-                str {row.strength.toFixed(2)}
-              </span>
-              <span style={{ ...muted, width: 170, textAlign: 'right' }}>
-                {row.last_access_at ?? t('inbox.neverAccessed')}
-              </span>
+              <span className="inbox-lamp" aria-hidden="true" />
+              <span className="inbox-content">{row.content}</span>
+              <span className="inbox-num inbox-str">{row.strength.toFixed(2)}</span>
+              <span className="inbox-time">{row.last_access_at ?? t('inbox.neverAccessed')}</span>
             </div>
           ));
 
@@ -421,37 +387,39 @@ export function InboxPage(): JSX.Element {
   };
 
   return (
-    <div style={pageStyle}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-        <div style={{ fontSize: 15, color: 'var(--color-text-primary)', letterSpacing: 1 }}>
-          {t('inbox.title')} <span style={{ ...muted, fontSize: 12 }}>{t('inbox.subtitle')}</span>
-        </div>
-        <span style={{ display: 'inline-flex', gap: 6 }}>
+    <div className="ledger inbox-page">
+      <div className="ledger-head inbox-head">
+        <div className="ledger-title">{t('inbox.title')}</div>
+        <div className="ledger-meta">{t('inbox.subtitle')}</div>
+        <div className="seg inbox-tabs" role="group" aria-label={t('inbox.title')}>
           {TABS.map((item) => (
             <button
               key={item.key}
               type="button"
+              className="seg-item"
+              data-active={item.key === tab}
               onClick={() => setTab(item.key)}
               disabled={item.key === tab}
               aria-pressed={item.key === tab}
               title={t(item.hintKey)}
-              style={tabStyle(item.key === tab)}
             >
               {t('inbox.tabCount', { label: t(item.labelKey), count: counts[item.key] })}
             </button>
           ))}
-        </span>
-        <button
-          type="button"
-          onClick={() => void loadAll()}
-          style={{ ...tabStyle(false), marginLeft: 'auto' }}
-          disabled={loading}
-        >
-          {loading ? t('common.loading') : t('inbox.refresh')}
-        </button>
+        </div>
+        <div className="ledger-tools">
+          <button
+            type="button"
+            className="btn inbox-refresh"
+            onClick={() => void loadAll()}
+            disabled={loading}
+          >
+            {loading ? t('common.loading') : t('inbox.refresh')}
+          </button>
+        </div>
       </div>
 
-      <div style={{ ...muted, marginTop: 6 }}>
+      <div className="ledger-shelf inbox-hint">
         {(activeTab === undefined ? '' : t(activeTab.hintKey)) + t('inbox.hint.tail', { limit: QUEUE_LIMIT })}
         {tab === 'prune' && pruneThresholds !== null
           ? t('inbox.hint.prune', {
@@ -462,13 +430,54 @@ export function InboxPage(): JSX.Element {
         {tab === 'resolve' && t('inbox.hint.resolve')}
       </div>
 
-      {error !== null && <div style={{ color: 'var(--color-danger)', marginTop: 8 }}>{t('inbox.errorGeneric', { error })}</div>}
+      {error !== null && (
+        <div className="inbox-error" role="alert">
+          {t('inbox.errorGeneric', { error })}
+        </div>
+      )}
 
-      <div style={{ marginTop: 10, overflowY: 'auto', flex: 1 }}>
+      <div className="inbox-body">
         {rows.length === 0 ? (
-          <div style={{ ...muted, padding: '24px 4px' }}>{t('inbox.empty')}</div>
+          <div className="inbox-empty">
+            <div className="inbox-empty-title">{t('inbox.empty')}</div>
+            <div className="inbox-empty-readout">
+              0 / {QUEUE_LIMIT}
+            </div>
+          </div>
         ) : (
-          rows
+          <>
+            <div className="inbox-cols" data-kind={tab} aria-hidden="true">
+              {tab === 'resolve' ? (
+                <>
+                  <span />
+                  <span>alias</span>
+                  <span />
+                  <span>canonical</span>
+                  <span>entity</span>
+                  <span>conf</span>
+                  <span />
+                </>
+              ) : tab === 'lowconf' ? (
+                <>
+                  <span />
+                  <span />
+                  <span>content</span>
+                  <span>conf</span>
+                  <span>imp</span>
+                  <span />
+                </>
+              ) : (
+                <>
+                  <span />
+                  <span />
+                  <span>content</span>
+                  <span>str</span>
+                  <span>last_access</span>
+                </>
+              )}
+            </div>
+            <div className="inbox-rows">{rows}</div>
+          </>
         )}
       </div>
 

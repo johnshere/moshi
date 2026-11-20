@@ -27,7 +27,10 @@ export type PaletteToken =
   | '--color-stage-base'
   | '--color-stage-raised'
   | '--color-stage-text'
-  | '--color-stage-grid';
+  | '--color-stage-grid'
+  // 字体族：标签/读数要跟外壳同一套字形（canvas 与 CSS2D 都拿不到继承）
+  | '--font-ui'
+  | '--font-mono';
 
 /** token 名固定（与 task-29 的 CSS 变量对齐）；fallback 是旧色板的值 */
 const TOKEN_FALLBACK: Record<PaletteToken, string> = {
@@ -45,6 +48,8 @@ const TOKEN_FALLBACK: Record<PaletteToken, string> = {
   '--color-stage-raised': '#0b1020',
   '--color-stage-text': '#e2e8f0',
   '--color-stage-grid': '#1e293b',
+  '--font-ui': "'Segoe UI Variable Text', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif",
+  '--font-mono': "'Cascadia Mono', 'SF Mono', ui-monospace, Menlo, Consolas, monospace",
 };
 
 /** 纯白：光晕贴图/高光的内核色（不属于 token 表，集中在这里） */
@@ -173,16 +178,17 @@ export function dangerHex(): string {
   return readToken('--color-danger');
 }
 
-/** 3D 背景：深空蓝紫底 + 两团径向雾（DOM 层，不占 3D draw call） */
+/** 3D 背景：深场底 + 两团冷光（DOM 层，不占 3D draw call）
+ *  只用「荧光青 + 月光」两枚冷色：紫调留给第二数据序列，不拿来做环境光。 */
 export function sceneBackdropCss(): string {
   const base = bgBaseHex();
   const raised = readToken('--color-stage-raised');
   const glow = glowHex();
-  const accentAlt = readToken('--color-accent-alt');
+  const accent = accentHex();
   return [
-    `radial-gradient(90% 70% at 30% 18%, ${mixWithTransparent(accentAlt, 16)}, transparent 62%)`,
-    `radial-gradient(110% 85% at 72% 78%, ${mixWithTransparent(glow, 12)}, transparent 66%)`,
-    `linear-gradient(180deg, ${base} 0%, ${raised} 48%, ${base} 100%)`,
+    `radial-gradient(88% 66% at 34% 16%, ${mixWithTransparent(glow, 9)}, transparent 60%)`,
+    `radial-gradient(110% 85% at 70% 80%, ${mixWithTransparent(accent, 7)}, transparent 68%)`,
+    `linear-gradient(180deg, ${base} 0%, ${raised} 46%, ${base} 100%)`,
   ].join(', ');
 }
 
@@ -192,31 +198,52 @@ export function sceneVignetteCss(): string {
   return `radial-gradient(120% 100% at 50% 44%, transparent 42%, ${mixWithTransparent(base, 72)} 78%, ${base} 100%)`;
 }
 
-/** 2D 网格：双轴细线 + 中心向外淡出（网格雾），透明度由 Graph2D 按缩放调 */
+/** 2D 网格：24px 细格 + 144px 主格（两级参照系），透明度由 Graph2D 按缩放调 */
 export function gridCss(): string {
-  const line = mixWithTransparent(readToken('--color-stage-grid'), 42);
-  const cell = 44;
+  // `--color-stage-grid` 自带 0.1 alpha，再 color-mix 会二次相乘到看不见；
+  // 所以两级格线都从舞台字色派生 alpha（同一冷色相，只是浓淡不同）。
+  const ink = readToken('--color-stage-text');
+  const fine = withAlpha(ink, 0.05);
+  const major = withAlpha(ink, 0.11);
+  const cell = 24;
+  const block = cell * 6;
   return [
-    `repeating-linear-gradient(0deg, ${line} 0, ${line} 1px, transparent 1px, transparent ${cell}px)`,
-    `repeating-linear-gradient(90deg, ${line} 0, ${line} 1px, transparent 1px, transparent ${cell}px)`,
+    `repeating-linear-gradient(0deg, ${fine} 0, ${fine} 1px, transparent 1px, transparent ${cell}px)`,
+    `repeating-linear-gradient(90deg, ${fine} 0, ${fine} 1px, transparent 1px, transparent ${cell}px)`,
+    `repeating-linear-gradient(0deg, ${major} 0, ${major} 1px, transparent 1px, transparent ${block}px)`,
+    `repeating-linear-gradient(90deg, ${major} 0, ${major} 1px, transparent 1px, transparent ${block}px)`,
   ].join(', ');
 }
 
-/** 2D 背景：径向光晕 + 底色（DOM 层，压在 sigma canvas 之上，用 screen 混合只提亮不遮挡） */
+/** 2D 背景：单团冷光（screen 混合只提亮不遮挡） */
 export function stageGlowCss(): string {
-  const glow = glowHex();
-  const accentAlt = readToken('--color-accent-alt');
   return [
-    `radial-gradient(70% 55% at 48% 42%, ${mixWithTransparent(glow, 10)}, transparent 70%)`,
-    `radial-gradient(85% 65% at 70% 76%, ${mixWithTransparent(accentAlt, 8)}, transparent 72%)`,
+    `radial-gradient(64% 50% at 50% 44%, ${mixWithTransparent(glowHex(), 7)}, transparent 72%)`,
+    `radial-gradient(88% 70% at 68% 78%, ${mixWithTransparent(accentHex(), 5)}, transparent 74%)`,
   ].join(', ');
 }
 
-/** 3D 标签：颜色 + 双层描边（替换原来的 hex 内联样式） */
+/** 3D 标签：等宽数字 + 方灯底片（读数感，替换原来的 hex 内联样式） */
 export function labelCss(): string {
   const color = readToken('--color-stage-text');
   const base = bgBaseHex();
-  return `color:${color};font:11px/1.2 ui-sans-serif,system-ui;text-shadow:0 0 4px ${base},0 0 8px ${base};white-space:nowrap;padding:1px 3px;border-radius:3px;`;
+  const grid = readToken('--color-stage-grid');
+  return `color:${color};font:11px/1.25 ui-sans-serif,system-ui;font-variant-numeric:tabular-nums;letter-spacing:0.01em;text-shadow:0 0 4px ${base},0 0 8px ${base};white-space:nowrap;padding:1px 4px;border-radius:2px;border:1px solid ${mixWithTransparent(grid, 55)};background:${mixWithTransparent(base, 62)};`;
+}
+
+/** sigma 标签色：与 3D 标签同一个舞台字色 */
+export function labelColorCss(): string {
+  return readToken('--color-stage-text');
+}
+
+/** sigma 标签底片：深场裁片，保证压在亮节点上也读得清 */
+export function labelBgCss(): string {
+  return mixWithTransparent(bgBaseHex(), 58);
+}
+
+/** sigma 标签字体族（`--font-ui`：中文正文字形，等宽只留给读数） */
+export function labelFontFamilyCss(): string {
+  return readToken('--font-ui');
 }
 
 /** 3D 网页光晕贴图的三段 stop（内芯 → 中段 → 外圈透明） */
@@ -252,4 +279,66 @@ export function layerPlaneHexes(): [string, string, string, string] {
     readToken('--color-border-subtle'),
     readToken('--color-danger'),
   ];
+}
+
+// ── 仪器件：选中环 / 邻域 / 悬停读数（2D overlay 与 3D DOM 共用）──────
+
+/** 选中节点准星与外环：accent，1px 级信号，不做实底 */
+export function reticleColorCss(): string {
+  return withAlpha(accentHex(), 0.92);
+}
+
+/** 选中环的内环 / 邻域环：同色低一档 */
+export function neighborRingCss(): string {
+  return withAlpha(accentHex(), 0.45);
+}
+
+/** 选中节点的邻域（1 跳）连线：只做关系提示，不抢节点 */
+export function neighborEdgeCss(): string {
+  return withAlpha(accentHex(), 0.26);
+}
+
+/** 1 跳邻域节点的细环：比选中环再低一档 */
+export function neighborRingSoftCss(): string {
+  return withAlpha(accentHex(), 0.28);
+}
+
+/** 选中节点的方向箭头：glow 细三角，表达 in/out 而不抢色 */
+export function directionArrowCss(): string {
+  return withAlpha(glowHex(), 0.6);
+}
+
+/** 等宽字体栈（canvas / DOM 读数，值来自 --font-mono） */
+export function monoFontCss(): string {
+  return readToken('--font-mono');
+}
+
+/** 2D 悬停读数牌：贴光标、等宽、方角、左侧 2px 信号条 */
+export function hoverChipCss(): string {
+  const accent = accentHex();
+  const base = bgBaseHex();
+  const mono = readToken('--font-mono');
+  return [
+    'position:absolute',
+    'z-index:6',
+    'pointer-events:none',
+    'display:none',
+    'transform:translate(14px, 14px)',
+    `background:${mixWithTransparent(base, 86)}`,
+    `border:1px solid ${withAlpha(accent, 0.38)}`,
+    `border-left:2px solid ${withAlpha(accent, 0.9)}`,
+    'border-radius:2px',
+    `color:${readToken('--color-stage-text')}`,
+    `font:11px/1.5 ${mono}`,
+    'font-variant-numeric:tabular-nums',
+    'letter-spacing:0.01em',
+    'padding:4px 8px',
+    'white-space:nowrap',
+    `box-shadow:0 0 0 1px ${mixWithTransparent(base, 60)}`,
+  ].join(';') + ';';
+}
+
+/** 3D 选中扫描光的颜色（shader uniform）：accent → 0–1 rgb，替代原来的纯白扫光 */
+export function selectionSweepRgb(): [number, number, number] {
+  return selectionRingRgb();
 }

@@ -4,8 +4,11 @@
  * 内容仍是 `settings/AccessLogsPanel`（唯一写入口）——这里只提供外壳：遮罩、
  * 居中面板、关闭（×／Esc／点遮罩）、打开时聚焦面板并按 `initialSection` 滚到对应段。
  * 弹框只在 `open` 时挂载，避免日志页常驻时先拉一次配置。
+ *
+ * 视觉（w10）：外壳只用 `.modal-backdrop` + `.modal`（1px 强边、顶部 1px 信号线、四角准星），
+ * 不再自带颜色字面量。
  */
-import { useEffect, useRef, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useRef, type ReactElement } from 'react';
 import { useT } from '../i18n/index.js';
 import { AccessLogsPanel } from '../settings/AccessLogsPanel.js';
 
@@ -15,52 +18,6 @@ export interface LogConfigModalProps {
   /** 打开时滚到哪一段（日志页进来时是查询日志） */
   initialSection?: 'query-log' | 'plugin-trace';
 }
-
-const overlayStyle: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 100,
-  background: 'rgba(8, 12, 18, 0.78)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const panelStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border)',
-  borderRadius: 10,
-  padding: '16px 18px',
-  maxWidth: 760,
-  width: 'calc(100% - 40px)',
-  maxHeight: '82vh',
-  overflow: 'auto',
-  outline: 'none',
-  boxShadow: '0 18px 48px rgba(0,0,0,0.45)',
-};
-
-const titleStyle: CSSProperties = {
-  color: 'var(--color-text-primary)',
-  fontSize: 15,
-  fontWeight: 600,
-  margin: 0,
-};
-
-const hintStyle: CSSProperties = {
-  color: 'var(--color-text-muted)',
-  fontSize: 12,
-  marginTop: 4,
-};
-
-const closeStyle: CSSProperties = {
-  background: 'transparent',
-  border: 'none',
-  color: 'var(--color-text-muted)',
-  fontSize: 18,
-  lineHeight: 1,
-  padding: '2px 6px',
-  cursor: 'pointer',
-};
 
 export function LogConfigModal({ open, onClose, initialSection = 'query-log' }: LogConfigModalProps): ReactElement | null {
   const t = useT();
@@ -90,7 +47,7 @@ export function LogConfigModal({ open, onClose, initialSection = 'query-log' }: 
 
   return (
     <div
-      style={overlayStyle}
+      className="modal-backdrop"
       data-testid="log-config-modal"
       // 点遮罩关闭；面板内点击不关（target 只有落在遮罩本身时才算点外）
       onMouseDown={(event) => {
@@ -103,16 +60,20 @@ export function LogConfigModal({ open, onClose, initialSection = 'query-log' }: 
         role="dialog"
         aria-modal="true"
         aria-label={t('access.logConfig.title')}
-        style={panelStyle}
+        className="modal log-config-modal"
       >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
-          <div style={{ flex: 1 }}>
-            <h3 style={titleStyle}>{t('access.logConfig.title')}</h3>
-            <div style={hintStyle}>
-              {t('access.logConfig.hint')}
-            </div>
+        <div className="modal-head">
+          <div className="modal-head-body">
+            <h3 className="modal-title">{t('access.logConfig.title')}</h3>
+            <div className="modal-note">{t('access.logConfig.hint')}</div>
           </div>
-          <button type="button" aria-label={t('common.close')} data-testid="log-config-modal-close" style={closeStyle} onClick={onClose}>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={t('common.close')}
+            data-testid="log-config-modal-close"
+            onClick={onClose}
+          >
             ×
           </button>
         </div>

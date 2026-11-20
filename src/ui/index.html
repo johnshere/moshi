@@ -4,6 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#06090b" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#eaf0ef" media="(prefers-color-scheme: light)" />
     <title>默识 · 记忆图谱</title>
     <style>
       /* 首屏底色跟着主题走；真正的令牌在 app.css，这里只给一个不会闪的值 */
@@ -12,10 +14,10 @@
       #root {
         height: 100%;
         margin: 0;
-        background: #0b0c0e;
-        color: #c4c7cc;
-        font: 13px/1.5 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'PingFang SC',
-          'Segoe UI Variable Text', 'Microsoft YaHei', system-ui, sans-serif;
+        background: #06090b;
+        color: #dce8ea;
+        font: 13px/1.5 'Segoe UI Variable Text', 'SF Pro Text', -apple-system, BlinkMacSystemFont,
+          'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
         overflow: hidden;
         -webkit-font-smoothing: antialiased;
       }
@@ -23,8 +25,8 @@
       html[data-theme='light'],
       html[data-theme='light'] body,
       html[data-theme='light'] #root {
-        background: #f1f2f4;
-        color: #3a3f45;
+        background: #eaf0ef;
+        color: #2e4348;
       }
     </style>
     <script>

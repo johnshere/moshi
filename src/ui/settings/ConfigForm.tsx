@@ -7,9 +7,10 @@
  *   否则 `restart_required` 会被未改动的启动期键误置为 true
  * - 启动期键（端口 / data_dir / archive_dir）只读展示，其余可编辑
  *
- * 样式 inline、深色，与既有 DiagPanel 一致；不做视觉重构（P2-19-B 另议）。
+ * 视觉（w10）：一条读数带（`.band`）+ 三个 `.form-group`（1px 线分隔、10px 等宽小标题），
+ * 输入 `.input-line`、开关 `.lamp-check`、提示 `.notice`；校验与保存逻辑一字未动。
  */
-import { useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { t as translate, useT } from '../i18n/index.js';
 import type { DictKey } from '../i18n/dict.js';
@@ -135,48 +136,6 @@ async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-const panelStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '12px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-};
-
-const groupStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6 };
-const rowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '220px 1fr',
-  gap: 10,
-  alignItems: 'center',
-  minHeight: 26,
-};
-const labelStyle: CSSProperties = { color: 'var(--color-text-secondary)', fontSize: 12 };
-const inputStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  padding: '4px 8px',
-  fontSize: 12,
-  width: '100%',
-  boxSizing: 'border-box',
-};
-const buttonStyle: CSSProperties = {
-  background: 'var(--color-info-dim)',
-  color: 'var(--color-text-primary)',
-  border: 'none',
-  borderRadius: 8,
-  padding: '6px 14px',
-  fontSize: 12,
-  cursor: 'pointer',
-  alignSelf: 'flex-start',
-};
-
 export function ConfigForm(): ReactElement {
   const t = useT();
   const [loaded, setLoaded] = useState<FlatConfig | null>(null);
@@ -268,112 +227,113 @@ export function ConfigForm(): ReactElement {
   };
 
   return (
-    <section data-testid="config-form" style={panelStyle}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
-        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('settings.cfg.title')}</div>
-        <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{configPath}</div>
+    <section className="band" data-testid="config-form">
+      <div className="band-head">
+        <span className="band-title">{t('settings.cfg.title')}</span>
+        <span className="band-tag">{configPath}</span>
       </div>
+      <div className="band-body">
+        {loading && <span className="station-note">{t('settings.cfg.loading')}</span>}
+        {error !== null && (
+          <div className="notice" data-tone="error" data-testid="config-error">
+            <span className="notice-text">{error}</span>
+          </div>
+        )}
+        {toast !== null && (
+          <div className="notice" data-tone="ok" data-testid="config-toast">
+            <span className="notice-text">{toast}</span>
+          </div>
+        )}
+        {restart.length > 0 && (
+          <div className="notice" data-tone="warn" data-testid="config-restart-hint">
+            <span className="notice-text">{t('settings.cfg.restartNeeded', { list: restart.join(', ') })}</span>
+          </div>
+        )}
 
-      {loading && <div style={{ color: 'var(--color-text-secondary)' }}>{t('settings.cfg.loading')}</div>}
-      {error !== null && (
-        <div
-          data-testid="config-error"
-          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 8, padding: '6px 8px' }}
-        >
-          {error}
-        </div>
-      )}
-      {toast !== null && (
-        <div
-          data-testid="config-toast"
-          style={{ color: 'var(--color-success-soft)', background: 'var(--color-success-bg)', border: '1px solid var(--color-success-dim)', borderRadius: 8, padding: '6px 8px' }}
-        >
-          {toast}
-        </div>
-      )}
-      {restart.length > 0 && (
-        <div
-          data-testid="config-restart-hint"
-          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 8, padding: '6px 8px' }}
-        >
-          {t('settings.cfg.restartNeeded', { list: restart.join(', ') })}
-        </div>
-      )}
+        {loaded !== null && (
+          <div className="form">
+            {FIELD_GROUPS.map((group) => (
+              <div key={group.titleKey} className="form-group">
+                <span className="form-title">{t(group.titleKey)}</span>
+                {group.hintKey !== undefined && <span className="form-hint">{t(group.hintKey)}</span>}
+                {group.fields.map((field) => {
+                  const value = draft[field.path];
+                  const readOnly = STARTUP_PATHS.has(field.path);
+                  return (
+                    <label key={field.path} className="form-row" data-testid={`config-row-${field.path}`}>
+                      <span className="form-label">{t(field.labelKey)}</span>
+                      {field.kind === 'toggle' ? (
+                        <input
+                          type="checkbox"
+                          id={`cfg-${field.path}`}
+                          name={field.path}
+                          className="lamp-check"
+                          data-testid={`config-field-${field.path}`}
+                          checked={value === true}
+                          disabled={readOnly || saving}
+                          onChange={(e) => { setField(field.path, e.target.checked); }}
+                        />
+                      ) : (
+                        <input
+                          type={field.kind}
+                          id={`cfg-${field.path}`}
+                          name={field.path}
+                          className="input-line"
+                          data-kind={field.kind === 'number' ? 'num' : undefined}
+                          data-testid={`config-field-${field.path}`}
+                          value={String(value ?? '')}
+                          readOnly={readOnly}
+                          min={field.path === 'http.port' ? PORT_MIN : undefined}
+                          max={field.path === 'http.port' ? PORT_MAX : undefined}
+                          step={field.path.endsWith('confidence') ? 0.05 : 1}
+                          onChange={(e) => {
+                            const raw = e.target.value;
+                            setField(field.path, field.kind === 'number' ? (raw === '' ? 0 : Number(raw)) : raw);
+                          }}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+            ))}
 
-      {loaded !== null && FIELD_GROUPS.map((group) => (
-        <div key={group.titleKey} style={groupStyle}>
-          <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600 }}>{t(group.titleKey)}</div>
-          {group.hintKey !== undefined && <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>{t(group.hintKey)}</div>}
-          {group.fields.map((field) => {
-            const value = draft[field.path];
-            const readOnly = STARTUP_PATHS.has(field.path);
-            return (
-              <label key={field.path} style={rowStyle} data-testid={`config-row-${field.path}`}>
-                <span style={labelStyle}>{t(field.labelKey)}</span>
-                {field.kind === 'toggle' ? (
-                  <input
-                    type="checkbox"
-                    data-testid={`config-field-${field.path}`}
-                    checked={value === true}
-                    disabled={readOnly || saving}
-                    onChange={(e) => { setField(field.path, e.target.checked); }}
-                  />
-                ) : (
-                  <input
-                    type={field.kind}
-                    data-testid={`config-field-${field.path}`}
-                    style={{ ...inputStyle, ...(readOnly ? { color: 'var(--color-text-muted)', cursor: 'not-allowed' } : {}) }}
-                    value={String(value ?? '')}
-                    readOnly={readOnly}
-                    min={field.path === 'http.port' ? PORT_MIN : undefined}
-                    max={field.path === 'http.port' ? PORT_MAX : undefined}
-                    step={field.path.endsWith('confidence') ? 0.05 : 1}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setField(field.path, field.kind === 'number' ? (raw === '' ? 0 : Number(raw)) : raw);
-                    }}
-                  />
-                )}
-              </label>
-            );
-          })}
-        </div>
-      ))}
+            {changed['http.port'] !== undefined && (
+              <div className="notice" data-tone="warn" data-testid="config-port-hint">
+                <span className="notice-text">
+                  {t('settings.cfg.portNoticePrefix')}
+                  <code className="confirm-path">http://127.0.0.1:{String(draft['http.port'])}/mcp</code>
+                  {t('settings.cfg.portNoticeSuffix')}
+                </span>
+              </div>
+            )}
 
-      {changed['http.port'] !== undefined && (
-        <div
-          data-testid="config-port-hint"
-          style={{ color: 'var(--color-warning-soft)', background: 'var(--color-warning-bg)', border: '1px solid var(--color-warning-dim)', borderRadius: 8, padding: '6px 8px', lineHeight: 1.6 }}
-        >
-          {t('settings.cfg.portNoticePrefix')}
-          <code>http://127.0.0.1:{String(draft['http.port'])}/mcp</code>
-          {t('settings.cfg.portNoticeSuffix')}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <button
-          type="button"
-          data-testid="config-save"
-          style={{ ...buttonStyle, opacity: !dirty || saving ? 0.5 : 1 }}
-          disabled={!dirty || saving}
-          onClick={() => { void save(); }}
-        >
-          {saving
-            ? t('settings.cfg.saving')
-            : dirty
-              ? t('settings.cfg.saveCount', { count: Object.keys(changed).length })
-              : t('settings.cfg.noChanges')}
-        </button>
-        {dirty && (
-          <button
-            type="button"
-            data-testid="config-reset"
-            style={{ ...buttonStyle, background: 'var(--color-bg-hover)' }}
-            onClick={() => { setDraft(baseline); setToast(null); }}
-          >
-            {t('settings.cfg.reset')}
-          </button>
+            <div className="form-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                data-testid="config-save"
+                disabled={!dirty || saving}
+                onClick={() => { void save(); }}
+              >
+                {saving
+                  ? t('settings.cfg.saving')
+                  : dirty
+                    ? t('settings.cfg.saveCount', { count: Object.keys(changed).length })
+                    : t('settings.cfg.noChanges')}
+              </button>
+              {dirty && (
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="config-reset"
+                  onClick={() => { setDraft(baseline); setToast(null); }}
+                >
+                  {t('settings.cfg.reset')}
+                </button>
+              )}
+            </div>
+          </div>
         )}
       </div>
     </section>

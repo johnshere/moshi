@@ -9,25 +9,9 @@
  *
  * 角标本身可点，直接跳召回页——看完直读表想验证「该采信什么」，一步能到。
  */
-import type { CSSProperties, ReactElement } from 'react';
+import type { ReactElement } from 'react';
 import { pageHref } from './pure.js';
 import { useT } from '../i18n/index.js';
-
-const badgeStyle: CSSProperties = {
-  pointerEvents: 'auto',
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 5,
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 999,
-  padding: '2px 10px',
-  fontSize: 11,
-  lineHeight: 1.6,
-  color: 'var(--color-warning)',
-  background: 'color-mix(in srgb, var(--color-warning) 12%, var(--color-bg-overlay))',
-  textDecoration: 'none',
-  whiteSpace: 'nowrap',
-};
 
 export function AdminDirectBadge(): ReactElement {
   const t = useT();
@@ -36,7 +20,7 @@ export function AdminDirectBadge(): ReactElement {
       data-testid="admin-direct-badge"
       href={pageHref('recall', window.location.search)}
       title={t('adminDirect.title')}
-      style={badgeStyle}
+      className="badge-admin-direct"
     >
       {t('adminDirect.badge')}
     </a>

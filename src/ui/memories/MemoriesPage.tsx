@@ -1,12 +1,13 @@
 /**
- * 记忆页（P2-19-A，概设 §8.1 / 详设 §10.1）：FilterBar + FactsTable + Inspector。
+ * 记忆页（W8 索引台）：页头（标题 + 直读标记 + 搜索 + 作用域）→ 筛选架 → 台账 → 右侧档案抽屉。
  *
- * 深链：
+ * 布局从「表格铺满 + 顶部覆盖层」改成三段式台账：表格不再需要为覆盖层让出 148px，
+ * 自己就是正常文档流里的一格。数据流与深链行为完全不变：
  * - `?fact=<id>`：选中并滚到该行（行是虚拟滚动，必须轮询等它进 DOM）
  * - `?canonical_key=<k>`：/api/facts 没有该筛选参数（D-89 不改契约），
  *   Root 会把 `<k>` 归一成 `q` 近似检索，本页只标明这一降级。
  */
-import { useEffect, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, type ReactElement } from 'react';
 import { FactsTable } from '../table/FactsTable.js';
 import { FilterBar } from '../filter/FilterBar.js';
 import { Inspector } from '../inspector/Inspector.js';
@@ -18,21 +19,6 @@ import { EntityMergePanel } from './EntityMergePanel.js';
 import { SearchBox } from '../shell/SearchBox.js';
 import { ScopeSwitcher } from '../shell/ScopeSwitcher.js';
 import { AdminDirectBadge } from '../shell/AdminDirectBadge.js';
-
-const overlayStyle: CSSProperties = {
-  position: 'absolute',
-  top: 0,
-  left: 0,
-  right: 0,
-  zIndex: 8,
-  display: 'flex',
-  alignItems: 'flex-start',
-  gap: 12,
-  padding: '7px 12px',
-  background: 'linear-gradient(color-mix(in srgb, var(--color-bg-base) 96%, transparent), color-mix(in srgb, var(--color-bg-base) 72%, transparent))',
-  borderBottom: '1px solid var(--color-border-subtle)',
-  boxSizing: 'border-box',
-};
 
 function scrollToFact(factId: string): (() => void) | undefined {
   let attempts = 0;
@@ -96,40 +82,31 @@ export function MemoriesPage({ route }: MemoriesPageProps): ReactElement {
   }, []);
 
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
-      <FactsTable key={route.query} />
-      <Inspector />
-      <div style={overlayStyle}>
-        <div style={{ color: 'var(--color-text-primary)', fontSize: 13, fontWeight: 600, padding: '4px 2px', whiteSpace: 'nowrap' }}>
-          {t('memories.title')}
-        </div>
+    <div className="ledger">
+      <div className="ledger-head">
+        <div className="ledger-title">{t('memories.title')}</div>
         <AdminDirectBadge />
-        {/* 全局搜索与作用域下拉从顶栏下移到这里（V-10，用户 m01201）：顶栏只留 语言+三灯+角标 */}
-        <SearchBox />
-        <ScopeSwitcher />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <FilterBar />
+        <div className="ledger-tools">
+          {/* 全局搜索与作用域下拉从顶栏下移到这里（V-10，用户 m01201）：顶栏只留 语言+三灯+角标 */}
+          <SearchBox />
+          <ScopeSwitcher />
         </div>
       </div>
-      {route.canonicalKey === null ? null : (        <div
-          data-testid="canonical-note"
-          style={{
-            position: 'absolute',
-            left: 12,
-            bottom: 12,
-            zIndex: 9,
-            background: 'var(--color-bg-overlay)',
-            border: '1px solid var(--color-border-strong)',
-            borderRadius: 8,
-            color: 'var(--color-text-secondary)',
-            fontSize: 11,
-            padding: '5px 9px',
-            maxWidth: '50vw',
-          }}
-        >
-          {t('memories.canonicalApprox', { key: route.canonicalKey })}
-        </div>
-      )}
+
+      <div className="ledger-shelf">
+        <FilterBar />
+      </div>
+
+      <div className="ledger-body">
+        <FactsTable key={route.query} topInset={0} />
+        <Inspector />
+        {route.canonicalKey === null ? null : (
+          <div className="canonical-note" data-testid="canonical-note">
+            {t('memories.canonicalApprox', { key: route.canonicalKey })}
+          </div>
+        )}
+      </div>
+
       <EntityMergePanel />
     </div>
   );

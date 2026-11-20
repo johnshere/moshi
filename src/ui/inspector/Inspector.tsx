@@ -16,7 +16,7 @@
  * 键盘可达（概设 §8.2）：Esc 关闭抽屉；可写项用原生 input（Tab 天然可达）；
  * Cmd/Ctrl+Enter 提交。
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSelection } from '../state/selection.js';
 import { fetchFactDetail, patchFact, type FactDetail } from './api.js';
 import { guessExtControl, formatExtValue } from './pure/attrs.js';
@@ -28,27 +28,12 @@ const DEFAULT_WIDTH = 420;
 const MIN_WIDTH = 320;
 const MAX_WIDTH = 720;
 
-const KV_CELL: CSSProperties = {
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-  fontSize: 11,
-  color: 'var(--color-text-primary)',
-  wordBreak: 'break-all',
-};
-
-const LABEL: CSSProperties = {
-  color: 'var(--color-text-muted)',
-  fontSize: 11,
-  minWidth: 96,
-  paddingRight: 10,
-  whiteSpace: 'nowrap',
-};
-
 /** 只读字段行（摘要档的 content 等）：等宽 + 不提供任何编辑控件 */
 function ReadonlyRow({ label, value }: { label: string; value: string }): JSX.Element {
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', padding: '3px 0' }}>
-      <span style={LABEL}>{label}</span>
-      <span style={KV_CELL}>{value === '' ? '—' : value}</span>
+    <div className="kv-row">
+      <span className="kv-label">{label}</span>
+      <span className="kv-value">{value === '' ? '—' : value}</span>
     </div>
   );
 }
@@ -92,9 +77,9 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
   }, [draft, min, max, onCommit, t]);
 
   return (
-    <div style={{ padding: '3px 0' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ ...LABEL, minWidth: 96 }}>{label}</span>
+    <div className="writable-field">
+      <div className="writable-row">
+        <span className="kv-label">{label}</span>
         <input
           type="number"
           step={step}
@@ -107,38 +92,17 @@ function WritableRow({ label, value, step, min, max, audit, onCommit }: Writable
           }}
           disabled={busy}
           aria-label={t('inspector.writable', { label })}
-          style={{
-            background: 'var(--color-bg-raised)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 8,
-            padding: '2px 6px',
-            width: 72,
-            font: 'inherit',
-          }}
+          className="input-line writable-input"
         />
-        <button
-          type="button"
-          onClick={() => void commit()}
-          disabled={busy}
-          style={{
-            background: 'var(--color-bg-hover)',
-            color: 'var(--color-text-secondary)',
-            border: '1px solid var(--color-border-strong)',
-            borderRadius: 8,
-            padding: '2px 8px',
-            cursor: 'pointer',
-            font: 'inherit',
-          }}
-        >
+        <button type="button" onClick={() => void commit()} disabled={busy} className="btn">
           {busy ? t('inspector.submitting') : t('inspector.submit')}
         </button>
       </div>
       {/* 详设 §10.5：每个可写项旁必须有"上次是谁、什么时候改的" */}
-      <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginLeft: 106 }}>
+      <div className="writable-hint kv-hint">
         {lastModifiedLine(audit, t) ?? t('inspector.neverModified')}
       </div>
-      {error !== null && <div style={{ fontSize: 10, color: 'var(--color-danger)', marginLeft: 106 }}>{error}</div>}
+      {error !== null && <div className="writable-hint writable-error">{error}</div>}
     </div>
   );
 }
@@ -161,10 +125,10 @@ function ExtRow({ value }: { value: unknown }): JSX.Element {
     : guess.kind === 'text' ? t('inspector.kind.text')
     : '[KV] ';
   return (
-    <div style={{ display: 'flex', alignItems: 'baseline', padding: '3px 0' }}>
-      <span style={{ ...KV_CELL, color: 'var(--color-text-faint)' }}>{glyph}</span>
-      <span style={{ ...KV_CELL, color: guess.kind === 'kv' ? 'var(--color-warning)' : 'var(--color-text-primary)' }}>{text}</span>
-    </div>
+    <span className="kv-row" style={{ padding: 0 }}>
+      <span className="kv-value" data-kind="glyph">{glyph}</span>
+      <span className="kv-value" data-kind={guess.kind === 'kv' ? 'kv' : 'plain'}>{text}</span>
+    </span>
   );
 }
 
@@ -181,31 +145,15 @@ function SectionCard({
 }): JSX.Element {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div style={{ border: '1px solid var(--color-border-subtle)', borderRadius: 8, marginBottom: 8, background: 'var(--color-bg-overlay)' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        style={{
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          background: 'transparent',
-          border: 'none',
-          padding: '7px 10px',
-          color: 'var(--color-text-primary)',
-          fontSize: 12,
-          cursor: 'pointer',
-          font: 'inherit',
-          textAlign: 'left',
-        }}
-      >
-        <span style={{ color: 'var(--color-text-secondary)', fontSize: 10 }}>{open ? '▾' : '▸'}</span>
-        <span style={{ fontWeight: 600 }}>{title}</span>
-        <span style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{tag}</span>
+    <div className="section">
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="section-head">
+        <span className="section-caret" aria-hidden="true">
+          {open ? '▾' : '▸'}
+        </span>
+        <span className="section-title">{title}</span>
+        <span className="section-tag">{tag}</span>
       </button>
-      {open && <div style={{ padding: '4px 10px 10px' }}>{children}</div>}
+      {open && <div className="section-body">{children}</div>}
     </div>
   );
 }
@@ -217,19 +165,8 @@ function DigestLink({ d }: { d: { id: string; content: string; valid_to: string 
       type="button"
       onClick={() => useSelection.getState().select(d.id)}
       title={d.id}
-      style={{
-        display: 'block',
-        width: '100%',
-        textAlign: 'left',
-        background: 'transparent',
-        border: 'none',
-        borderBottom: '1px solid var(--color-bg-overlay)',
-        padding: '3px 0',
-        color: d.valid_to === null ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
-        fontSize: 11,
-        cursor: 'pointer',
-        font: 'inherit',
-      }}
+      data-dead={d.valid_to === null ? 'false' : 'true'}
+      className="digest-link"
     >
       {d.content.length > 60 ? `${d.content.slice(0, 60)}…` : d.content}
     </button>
@@ -332,20 +269,8 @@ export function Inspector(): JSX.Element {
     <div
       role="complementary"
       aria-label={t('inspector.aria.fact')}
-      style={{
-        position: 'absolute',
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width,
-        background: 'color-mix(in srgb, var(--color-bg-raised) 97%, transparent)',
-        borderLeft: '1px solid var(--color-border-subtle)',
-        display: 'flex',
-        flexDirection: 'column',
-        zIndex: 20,
-        fontSize: 12,
-        color: 'var(--color-text-primary)',
-      }}
+      className="inspector"
+      style={{ width }}
     >
       {/* 拖动条 */}
       <div
@@ -353,55 +278,39 @@ export function Inspector(): JSX.Element {
           dragRef.current = { startX: e.clientX, startW: width };
         }}
         title={t('inspector.drag')}
-        style={{
-          position: 'absolute',
-          left: -3,
-          top: 0,
-          bottom: 0,
-          width: 6,
-          cursor: 'ew-resize',
-          zIndex: 1,
-        }}
+        className="inspector-drag"
       />
-      <div style={{ display: 'flex', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid var(--color-border-subtle)' }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-primary)' }}>{t('inspector.title')}</span>
-        <span style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 8, fontFamily: 'ui-monospace, monospace' }}>
-          {detail === null ? focusId : detail.id}
-        </span>
+      <div className="inspector-head">
+        <span className="inspector-title">{t('inspector.title')}</span>
+        <span className="inspector-id">{detail === null ? focusId : detail.id}</span>
         <span style={{ marginLeft: 'auto' }}>
           <button
             type="button"
             onClick={close}
             title={t('inspector.close.title')}
             aria-label={t('inspector.close.aria')}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              fontSize: 14,
-            }}
+            className="icon-btn"
           >
             ✕
           </button>
         </span>
       </div>
 
-      {loading && <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('inspector.loading')}</div>}
+      {loading && <div className="inspector-state">{t('inspector.loading')}</div>}
       {error !== null && (
-        <div style={{ padding: 12, color: 'var(--color-danger)' }}>
+        <div className="inspector-state inspector-state-error">
           {t('inspector.loadFailed', { error })}
-          <button type="button" onClick={close} style={{ display: 'block', marginTop: 6, color: 'var(--color-text-secondary)', background: 'transparent', border: '1px solid var(--color-border-subtle)', borderRadius: 8, padding: '2px 8px', cursor: 'pointer', font: 'inherit' }}>
+          <button type="button" onClick={close} className="btn" style={{ display: 'block', marginTop: 6 }}>
             {t('common.close')}
           </button>
         </div>
       )}
       {!loading && error === null && detail === null && (
-        <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('inspector.notLoaded')}</div>
+        <div className="inspector-state">{t('inspector.notLoaded')}</div>
       )}
 
       {!loading && error === null && detail !== null && (
-        <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
+        <div className="inspector-body">
           {/* 摘要档（常显） */}
           <SectionCard title={t('inspector.section.summary')} tag={t('inspector.section.summaryTag')} defaultOpen>
             <ReadonlyRow label="content" value={detail.content} />
@@ -436,44 +345,44 @@ export function Inspector(): JSX.Element {
             ))}
             {/* attrs.ext：按值猜控件，只读呈现（不做自定义表单） */}
             {Object.entries(detail.attrs.ext).map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', alignItems: 'baseline', padding: '3px 0' }}>
-                <span style={LABEL}>{k}</span>
+              <div key={k} className="kv-row">
+                <span className="kv-label">{k}</span>
                 <ExtRow value={v} />
               </div>
             ))}
             {Object.keys(detail.attrs.ext).length === 0 && (
-              <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{t('inspector.attrsEmpty')}</div>
+              <div className="kv-empty">{t('inspector.attrsEmpty')}</div>
             )}
           </SectionCard>
 
           {/* 溯源档（默认折叠） */}
           <SectionCard title={t('inspector.section.trace')} tag={t('inspector.section.structureTag')} defaultOpen={false}>
             {detail.source_episode !== null && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ display: 'flex', alignItems: 'baseline' }}>
-                  <span style={LABEL}>source_episode</span>
-                  <span style={KV_CELL}>{detail.source_episode.id}</span>
+              <div className="trace-group">
+                <div className="kv-row">
+                  <span className="kv-label">source_episode</span>
+                  <span className="kv-value">{detail.source_episode.id}</span>
                 </div>
-                <div style={{ color: 'var(--color-text-muted)', fontSize: 10, marginLeft: 106 }}>
+                <div className="trace-note">
                   {detail.source_episode.summary ?? t('inspector.noSummary')} · {detail.source_episode.ts}
                 </div>
-                <div style={{ color: 'var(--color-text-faint)', fontSize: 10, marginLeft: 106 }}>
+                <div className="trace-note trace-note-faint">
                   {t('inspector.span', { value: detail.span === null ? '—' : `[${detail.span[0]}, ${detail.span[1]}]` })}
                 </div>
               </div>
             )}
             {detail.superseded_by !== null && <ReadonlyRow label={t('inspector.supersededBy')} value={detail.superseded_by} />}
             {detail.superseded.length > 0 && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.supersedes')}</div>
+              <div className="trace-group">
+                <div className="trace-head">{t('inspector.supersedes')}</div>
                 {detail.superseded.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
               </div>
             )}
             {detail.depends.upstream.length > 0 && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
+              <div className="trace-group">
+                <div className="trace-head">
                   {t('inspector.upstream')}
                 </div>
                 {detail.depends.upstream.map((d) => (
@@ -482,8 +391,8 @@ export function Inspector(): JSX.Element {
               </div>
             )}
             {detail.depends.downstream.length > 0 && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>
+              <div className="trace-group">
+                <div className="trace-head">
                   {t('inspector.downstream')}
                 </div>
                 {detail.depends.downstream.map((d) => (
@@ -492,18 +401,18 @@ export function Inspector(): JSX.Element {
               </div>
             )}
             {detail.conflicts.length > 0 && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-warning)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.conflicts')}</div>
+              <div className="trace-group">
+                <div className="trace-head" data-tone="warning">{t('inspector.conflicts')}</div>
                 {detail.conflicts.map((d) => (
                   <DigestLink key={d.id} d={d} />
                 ))}
               </div>
             )}
             {detail.audits.length > 0 && (
-              <div style={{ padding: '3px 0' }}>
-                <div style={{ color: 'var(--color-text-secondary)', fontSize: 10, paddingBottom: 2 }}>{t('inspector.audit')}</div>
+              <div className="trace-group">
+                <div className="trace-head">{t('inspector.audit')}</div>
                 {detail.audits.map((a) => (
-                  <div key={`${a.field}-${a.ts}-${a.source}`} style={{ fontSize: 10, color: 'var(--color-text-muted)', padding: '2px 0' }}>
+                  <div key={`${a.field}-${a.ts}-${a.source}`} className="trace-note">
                     {a.field}: {a.before ?? '∅'} → {a.after ?? '∅'} · {a.source ?? 'unknown'} @ {a.ts}
                   </div>
                 ))}
@@ -516,7 +425,7 @@ export function Inspector(): JSX.Element {
               detail.depends.downstream.length === 0 &&
               detail.conflicts.length === 0 &&
               detail.audits.length === 0 && (
-                <div style={{ color: 'var(--color-text-faint)', fontSize: 10 }}>{t('inspector.noProvenance')}</div>
+                <div className="kv-empty">{t('inspector.noProvenance')}</div>
               )}
           </SectionCard>
         </div>

@@ -11,7 +11,7 @@
  *
  * 关掉 = 已触发：落 `dialog_shown:true` + `dialog_closed_at`，不再弹（§16.2）。
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { navigate } from './navigate.js';
 import { useT } from '../i18n/index.js';
@@ -57,60 +57,6 @@ const VIA_KEYS: Record<string, DictKey> = {
   port: 'onboard.via.port',
   process: 'onboard.via.process',
 };
-
-const overlayStyle: CSSProperties = {
-  position: 'fixed',
-  inset: 0,
-  zIndex: 100,
-  background: 'rgba(8, 12, 18, 0.78)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-};
-
-const modalStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-strong, #3a4a5a)',
-  borderRadius: 14,
-  padding: '20px 22px',
-  width: 560,
-  maxWidth: '86vw',
-  maxHeight: '80vh',
-  overflow: 'auto',
-  boxShadow: '0 18px 48px rgba(0,0,0,0.45)',
-};
-
-const titleStyle: CSSProperties = {
-  color: 'var(--color-text-primary)',
-  fontSize: 16,
-  fontWeight: 600,
-  margin: 0,
-};
-
-const mutedStyle: CSSProperties = {
-  color: 'var(--color-text-faint)',
-  fontSize: 12,
-  lineHeight: 1.7,
-};
-
-const groupStyle: CSSProperties = {
-  borderTop: '1px solid var(--color-border-subtle)',
-  marginTop: 12,
-  paddingTop: 10,
-};
-
-function buttonStyle(primary = false, disabled = false): CSSProperties {
-  return {
-    padding: '7px 16px',
-    borderRadius: 8,
-    border: primary ? '1px solid transparent' : '1px solid var(--color-border-subtle)',
-    background: primary ? 'var(--color-accent, #4a9eff)' : 'transparent',
-    color: primary ? '#fff' : disabled ? 'var(--color-text-faint)' : 'var(--color-text-primary)',
-    fontSize: 12,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-  };
-}
 
 type Phase = 'hidden' | 'pick' | 'confirm';
 
@@ -220,17 +166,17 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
   const confirmPlans = (plans?.plans ?? []).filter((plan) => selected.includes(`${plan.host}:${plan.kind}`));
 
   return (
-    <div style={overlayStyle} data-testid="onboard-modal" data-phase={phase}>
-      <div style={modalStyle}>
+    <div className="modal-backdrop" data-testid="onboard-modal" data-phase={phase}>
+      <div className="modal">
         {phase === 'pick' ? (
           <>
-            <h3 style={titleStyle}>{t('onboard.title')}</h3>
-            <div style={{ ...mutedStyle, marginTop: 6 }}>
+            <h3 className="modal-title">{t('onboard.title')}</h3>
+            <div className="modal-note" style={{ marginTop: 6 }}>
               {t('onboard.intro')}
             </div>
 
-            <div style={groupStyle}>
-              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>{t('onboard.group.hook')}</div>
+            <div className="modal-group">
+              <div className="modal-group-title">{t('onboard.group.hook')}</div>
               {hookPlans.map((plan) => {
                 const key = `${plan.host}:${plan.kind}`;
                 const detection = onboard?.detected?.hosts[plan.host];
@@ -240,7 +186,8 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                 return (
                   <label
                     key={key}
-                    style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 0', cursor: unusable ? 'not-allowed' : 'pointer' }}
+                    className="modal-check"
+                    style={{ cursor: unusable ? 'not-allowed' : 'pointer' }}
                     data-testid={`onboard-check-${key}`}
                   >
                     <input
@@ -257,7 +204,7 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
                       <span style={{ fontSize: 13, color: unusable ? 'var(--color-text-faint)' : 'var(--color-text-primary)' }}>
                         {plans?.labels[plan.host] ?? plan.host}
                       </span>
-                      <span style={{ ...mutedStyle, marginLeft: 8 }}>
+                      <span className="modal-note" style={{ marginLeft: 8 }}>
                         {hit
                           ? t('onboard.detected', {
                               via: (detection?.via ?? [])
@@ -273,30 +220,30 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
               })}
             </div>
 
-            <div style={groupStyle}>
-              <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 6 }}>{t('onboard.group.mcp')}</div>
+            <div className="modal-group">
+              <div className="modal-group-title">{t('onboard.group.mcp')}</div>
               {mcpPlans.map((plan) => (
                 <div key={`${plan.host}:${plan.kind}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 0' }} data-testid={`onboard-mcp-${plan.host}`}>
                   <input type="checkbox" disabled checked={false} />
                   <span style={{ fontSize: 13, color: 'var(--color-text-faint)' }}>{plans?.labels[plan.host] ?? plan.host}</span>
-                  <span style={{ ...mutedStyle, marginLeft: 4 }}>{t('onboard.mcpSoon')}</span>
+                  <span className="modal-note" style={{ marginLeft: 4 }}>{t('onboard.mcpSoon')}</span>
                 </div>
               ))}
             </div>
 
-            {error !== null ? <div style={{ ...mutedStyle, color: 'var(--color-status-error, #e05252)', marginTop: 10 }}>{error}</div> : null}
+            {error !== null ? <div className="modal-error">{error}</div> : null}
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-              <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => void redetect()} data-testid="onboard-redetect">
+              <button type="button" className="btn" disabled={busy} onClick={() => void redetect()} data-testid="onboard-redetect">
                 {t('onboard.redetect')}
               </button>
               <span style={{ flex: 1 }} />
-              <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => void close()} data-testid="onboard-close">
+              <button type="button" className="btn" disabled={busy} onClick={() => void close()} data-testid="onboard-close">
                 {t('onboard.later')}
               </button>
               <button
                 type="button"
-                style={buttonStyle(true, busy || selected.length === 0)}
+                className="btn btn-primary"
                 disabled={busy || selected.length === 0}
                 onClick={() => setPhase('confirm')}
                 data-testid="onboard-next"
@@ -307,33 +254,33 @@ export function OnboardModal({ onOpenChange }: OnboardModalProps = {}): ReactEle
           </>
         ) : (
           <>
-            <h3 style={titleStyle}>{t('onboard.confirm.title')}</h3>
-            <div style={{ ...mutedStyle, marginTop: 6 }}>{t('onboard.confirm.intro')}</div>
+            <h3 className="modal-title">{t('onboard.confirm.title')}</h3>
+            <div className="modal-note" style={{ marginTop: 6 }}>{t('onboard.confirm.intro')}</div>
             {confirmPlans.map((plan) => (
-              <div key={`${plan.host}:${plan.kind}`} style={groupStyle}>
-                <div style={{ fontSize: 13, color: 'var(--color-text-primary)', marginBottom: 4 }}>
+              <div key={`${plan.host}:${plan.kind}`} className="modal-group">
+                <div className="modal-group-title">
                   {plans?.labels[plan.host] ?? plan.host} ·{' '}
                   {plan.kind === 'hook' ? t('onboard.group.hook') : 'MCP'}
-                  {plan.root === null ? null : <span style={mutedStyle}> → {plan.root}</span>}
+                  {plan.root === null ? null : <span className="modal-note"> → {plan.root}</span>}
                 </div>
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8 }}>
                   {plan.steps.map((step) => (
                     <li key={`${step.action}:${step.path}`}>
-                      <span style={mutedStyle}>{actionText(step.action)} </span>
+                      <span className="modal-note">{actionText(step.action)} </span>
                       <code style={{ fontSize: 11 }}>{step.path}</code>
                     </li>
                   ))}
                 </ul>
-                {plan.risk !== null ? <div style={{ ...mutedStyle, marginTop: 4 }}>{t('onboard.risk', { risk: riskText(plan.risk) })}</div> : null}
+                {plan.risk !== null ? <div className="modal-note" style={{ marginTop: 4 }}>{t('onboard.risk', { risk: riskText(plan.risk) })}</div> : null}
               </div>
             ))}
-            {error !== null ? <div style={{ ...mutedStyle, color: 'var(--color-status-error, #e05252)', marginTop: 10 }}>{error}</div> : null}
+            {error !== null ? <div className="modal-error">{error}</div> : null}
             <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
               <span style={{ flex: 1 }} />
-              <button type="button" style={buttonStyle(false, busy)} disabled={busy} onClick={() => setPhase('pick')}>
+              <button type="button" className="btn" disabled={busy} onClick={() => setPhase('pick')}>
                 {t('onboard.back')}
               </button>
-              <button type="button" style={buttonStyle(true, busy)} disabled={busy} onClick={() => void installAndJump()} data-testid="onboard-confirm">
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={() => void installAndJump()} data-testid="onboard-confirm">
                 {busy ? t('onboard.installing') : t('onboard.confirm.ok')}
               </button>
             </div>

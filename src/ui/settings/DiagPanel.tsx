@@ -6,8 +6,11 @@
  *
  * 本组件**不接管 `/ui/diagnostics` 路由**（由 P2-19-A 的设置页挂载），也不改
  * `/api/graph` 契约（D-89）。
+ *
+ * 视觉（w10）：一条读数带装全部自检项，分组是 `.diag-group`（1px 线 + 等宽小标题），
+ * 每项一个 `.metric` 读数签，状态只靠 5px 方灯与色调类。
  */
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { resolveToken } from '../api.js';
 import { t as translate, useT } from '../i18n/index.js';
 import type { DictKey } from '../i18n/dict.js';
@@ -65,57 +68,6 @@ async function fetchDiag(signal?: AbortSignal): Promise<DiagReport> {
   return (await res.json()) as DiagReport;
 }
 
-const panelStyle: CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-  padding: '14px 18px',
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-  background: 'var(--color-bg-raised)',
-  boxSizing: 'border-box',
-};
-
-const cardStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '10px 12px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 6,
-};
-
-const sectionTitleStyle: CSSProperties = {
-  color: 'var(--color-text-secondary)',
-  fontSize: 12,
-  letterSpacing: 0.5,
-  textTransform: 'uppercase',
-};
-
-const rowStyle: CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  gap: 8,
-  alignItems: 'center',
-};
-
-const chipStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '2px 8px',
-  fontFamily: 'monospace',
-};
-
-function chip(text: string, color?: string): JSX.Element {
-  return (
-    <span style={color === undefined ? chipStyle : { ...chipStyle, color }}>
-      {text}
-    </span>
-  );
-}
-
 function formatMetric(value: number | null): string {
   return value === null ? translate('diag.noData') : String(value);
 }
@@ -124,8 +76,28 @@ function formatSize(value: number | null): string {
   return value === null ? '—' : `${value.toFixed(2)} MB`;
 }
 
-function invariantColor(ok: boolean): string {
-  return ok ? 'var(--color-success)' : 'var(--color-danger)';
+/** 一项自检读数：键名更弱，值在右；tone 只上色不上底 */
+function metric(key: string, value: string, tone = 'tone-mute'): JSX.Element {
+  return (
+    <span className={`metric ${tone}`}>
+      <span className="metric-key">{key}</span>
+      {value}
+    </span>
+  );
+}
+
+function lampMetric(text: string, tone: string): JSX.Element {
+  return (
+    <span className={`metric ${tone}`}>
+      <i className="lamp" aria-hidden="true" />
+      {text}
+    </span>
+  );
+}
+
+/** 文案自带键名时用这个（`diag.size` 之类把「键 + 值」写在一条里） */
+function labelMetric(text: string, tone = 'tone-mute'): JSX.Element {
+  return <span className={`metric ${tone}`}>{text}</span>;
 }
 
 export function DiagPanel(): JSX.Element {
@@ -199,137 +171,157 @@ export function DiagPanel(): JSX.Element {
 
   if (error !== null) {
     return (
-      <div style={panelStyle}>
-        <div style={{ ...cardStyle, borderColor: 'var(--color-danger-dim)' }}>
-          <span style={sectionTitleStyle}>{t('diag.loadFailed')}</span>
-          <span style={{ color: 'var(--color-danger-soft)' }}>{error}</span>
-          <button type="button" onClick={() => void load()} disabled={busy}>
-            {t('diag.retry')}
-          </button>
+      <section className="band" data-tone="danger">
+        <div className="band-head">
+          <span className="band-title">{t('diag.loadFailed')}</span>
+          <div className="band-tools">
+            <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
+              {t('diag.retry')}
+            </button>
+          </div>
         </div>
-      </div>
+        <div className="band-body">
+          <div className="notice" data-tone="error">
+            <span className="notice-text">{error}</span>
+          </div>
+        </div>
+      </section>
     );
   }
 
   if (report === null) {
     return (
-      <div style={panelStyle}>
-        <span>{t('diag.loading')}</span>
-      </div>
+      <section className="band">
+        <div className="band-body">
+          <span className="station-note">{t('diag.loading')}</span>
+        </div>
+      </section>
     );
   }
 
   const failures = INVARIANT_IDS.filter((id) => report.invariants[id] !== true);
 
   return (
-    <div style={panelStyle}>
-      <div style={rowStyle}>
-        <span style={sectionTitleStyle}>{t('diag.title')}</span>
-        <span style={{ color: failures.length === 0 ? 'var(--color-success)' : 'var(--color-danger)' }}>
+    <section className="band">
+      <div className="band-head">
+        <span className="band-title">{t('diag.title')}</span>
+        <span className={`readout-status ${failures.length === 0 ? 'tone-ok' : 'tone-err'}`}>
+          <i className="lamp" aria-hidden="true" />
           {failures.length === 0 ? t('diag.allGreen') : t('diag.invariantFailed', { list: failures.join(', ') })}
         </span>
-        <button type="button" onClick={() => void load()} disabled={busy}>
-          {busy ? t('diag.refreshing') : t('diag.refresh')}
-        </button>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.db')}</span>
-        <div style={rowStyle}>
-          {chip(t('diag.integrity', { value: report.db.integrity }), report.db.integrity === 'ok' ? 'var(--color-success)' : 'var(--color-danger)')}
-          {chip(`user_version ${String(report.db.user_version)}`)}
-          {chip(t('diag.size', { value: formatSize(report.db.size_mb) }))}
-          {chip(`WAL ${formatSize(report.db.wal_mb)}`)}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.indexes')}</span>
-        <div style={rowStyle}>
-          {chip(`FTS ${report.indexes.fts}`, report.indexes.fts === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
-          {chip(t('diag.vec', { value: report.indexes.vec }), report.indexes.vec === 'ok' ? 'var(--color-success)' : 'var(--color-warning-soft)')}
-          {chip(
-            t('diag.degreeMismatch', { count: report.indexes.degree_mismatch }),
-            report.indexes.degree_mismatch === 0 ? 'var(--color-success)' : 'var(--color-danger)',
-          )}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.invariants')}</span>
-        <div style={rowStyle}>
-          {INVARIANT_IDS.map((id) => (
-            <span key={id} style={{ ...chipStyle, color: invariantColor(report.invariants[id] === true) }}>
-              {id} {report.invariants[id] === true ? '✅' : '❌'}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.quality')}</span>
-        <div style={rowStyle}>
-          {QUALITY_FIELDS.map((field) => (
-            <span key={field.key} style={chipStyle}>
-              {t(field.labelKey)} {formatMetric(report.quality[field.key])}
-            </span>
-          ))}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.backlog')}</span>
-        <div style={rowStyle}>
-          {chip(
-            t('diag.resolvePending', { count: report.resolve.pending }),
-            report.resolve.pending === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
-          )}
-          {chip(
-            t('diag.schemaPending', { count: report.schema.pending_promotions }),
-            report.schema.pending_promotions === 0 ? 'var(--color-success)' : 'var(--color-warning-soft)',
-          )}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.modelArchive')}</span>
-        <div style={rowStyle}>
-          {chip(`embed ${report.model.embed}`)}
-          {chip(`gat ${report.model.gat}`)}
-          {chip(t('diag.weights', { value: report.model.weights ? t('diag.has') : t('diag.none') }))}
-          {chip(t('diag.archiveTopics', { count: report.archive.topics }))}
-          {chip(t('diag.archiveDirty', { count: report.archive.dirty }))}
-          {chip(t('diag.humanEdited', { count: report.archive.human_edited }))}
-          {chip(t('diag.proposedPending', { count: report.archive.proposed_pending }))}
-          {chip(t('diag.mergedSplit', { count: report.archive.merged_or_split }))}
-        </div>
-      </div>
-
-      <div style={cardStyle}>
-        <span style={sectionTitleStyle}>{t('diag.recent')}</span>
-        <div style={rowStyle}>
-          {chip(`harvest ${report.last_harvest_at ?? '—'}`)}
-          {report.last_eval === null
-            ? chip('eval —')
-            : chip(
-                `eval ${report.last_eval.at} · ${String(report.last_eval.passed)}/${String(report.last_eval.total)}` +
-                  t('diag.blocking', { count: report.last_eval.blocking_failures }),
-              )}
-          <button
-            type="button"
-            data-testid="diag-run-eval"
-            disabled={evalBusy}
-            onClick={() => void runEval()}
-          >
-            {evalBusy ? t('diag.evalBusy') : t('diag.runEval')}
+        <div className="band-tools">
+          <button type="button" className="btn" onClick={() => void load()} disabled={busy}>
+            {busy ? t('diag.refreshing') : t('diag.refresh')}
           </button>
         </div>
-        {evalMessage !== null && (
-          <div data-testid="diag-eval-message" style={{ color: 'var(--color-warning-soft)', fontSize: 12 }}>
-            {evalMessage}
-          </div>
-        )}
       </div>
-    </div>
+
+      <div className="band-body">
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.db')}</span>
+          <div className="diag-items">
+            {labelMetric(
+              t('diag.integrity', { value: report.db.integrity }),
+              report.db.integrity === 'ok' ? 'tone-ok' : 'tone-err',
+            )}
+            {metric('user_version', String(report.db.user_version))}
+            {labelMetric(t('diag.size', { value: formatSize(report.db.size_mb) }))}
+            {metric('WAL', formatSize(report.db.wal_mb))}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.indexes')}</span>
+          <div className="diag-items">
+            {metric('FTS', report.indexes.fts, report.indexes.fts === 'ok' ? 'tone-ok' : 'tone-warn')}
+            {metric(
+              'VEC',
+              report.indexes.vec,
+              report.indexes.vec === 'ok' ? 'tone-ok' : 'tone-warn',
+            )}
+            {labelMetric(
+              t('diag.degreeMismatch', { count: report.indexes.degree_mismatch }),
+              report.indexes.degree_mismatch === 0 ? 'tone-ok' : 'tone-err',
+            )}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.invariants')}</span>
+          <div className="diag-items">
+            {INVARIANT_IDS.map((id) =>
+              lampMetric(id, report.invariants[id] === true ? 'tone-ok' : 'tone-err'),
+            )}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.quality')}</span>
+          <div className="diag-items">
+            {QUALITY_FIELDS.map((field) => (
+              <span key={field.key} className="metric">
+                <span className="metric-key">{t(field.labelKey)}</span>
+                {formatMetric(report.quality[field.key])}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.backlog')}</span>
+          <div className="diag-items">
+            {labelMetric(
+              t('diag.resolvePending', { count: report.resolve.pending }),
+              report.resolve.pending === 0 ? 'tone-ok' : 'tone-warn',
+            )}
+            {labelMetric(
+              t('diag.schemaPending', { count: report.schema.pending_promotions }),
+              report.schema.pending_promotions === 0 ? 'tone-ok' : 'tone-warn',
+            )}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.modelArchive')}</span>
+          <div className="diag-items">
+            {metric('embed', report.model.embed)}
+            {metric('gat', report.model.gat)}
+            {labelMetric(t('diag.weights', { value: report.model.weights ? t('diag.has') : t('diag.none') }))}
+            {labelMetric(t('diag.archiveTopics', { count: report.archive.topics }))}
+            {labelMetric(t('diag.archiveDirty', { count: report.archive.dirty }))}
+            {labelMetric(t('diag.humanEdited', { count: report.archive.human_edited }))}
+            {labelMetric(t('diag.proposedPending', { count: report.archive.proposed_pending }))}
+            {labelMetric(t('diag.mergedSplit', { count: report.archive.merged_or_split }))}
+          </div>
+        </div>
+
+        <div className="diag-group">
+          <span className="diag-title">{t('diag.recent')}</span>
+          <div className="diag-items">
+            {metric('harvest', report.last_harvest_at ?? '—')}
+            {report.last_eval === null
+              ? metric('eval', '—')
+              : labelMetric(
+                  `eval ${report.last_eval.at} · ${String(report.last_eval.passed)}/${String(report.last_eval.total)}` +
+                    t('diag.blocking', { count: report.last_eval.blocking_failures }),
+                )}
+            <button
+              type="button"
+              className="btn"
+              data-testid="diag-run-eval"
+              disabled={evalBusy}
+              onClick={() => void runEval()}
+            >
+              {evalBusy ? t('diag.evalBusy') : t('diag.runEval')}
+            </button>
+          </div>
+          {evalMessage !== null && (
+            <div className="notice" data-tone="warn" data-testid="diag-eval-message">
+              <span className="notice-text">{evalMessage}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }

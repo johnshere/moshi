@@ -8,8 +8,11 @@
  * **唯一写入口**：查询日志保留天数、插件运行日志档位/上限/保留，都经
  * `PUT /api/config`（白名单键，原子写回 YAML，daemon 收到后热应用档位）。
  * 日志页右上角的按钮只是打开这个弹框的快捷入口（用户 m02743）。
+ *
+ * 视觉（w10）：两段 `.diag-group`（`#query-log` / `#plugin-trace` 锚点保留，
+ * 弹框的 scrollIntoView 依赖它们），行 `.form-row`，值右对齐等宽。
  */
-import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { purgeQueryLogs, purgeTraceLogs } from '../access/api.js';
 import { useT } from '../i18n/index.js';
@@ -29,19 +32,6 @@ interface Draft {
   maxBytes: string;
   traceKeepDays: string;
 }
-
-const rowStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' };
-const labelStyle: CSSProperties = { fontSize: 12, color: 'var(--color-text-secondary)', minWidth: 140 };
-const inputStyle: CSSProperties = { fontSize: 12, padding: '3px 6px', width: 140 };
-const buttonStyle: CSSProperties = {
-  fontSize: 12,
-  padding: '4px 10px',
-  borderRadius: 8,
-  border: '1px solid var(--color-border-strong, #3a4a5a)',
-  background: 'var(--color-bg-raised)',
-  color: 'var(--color-text-primary)',
-  cursor: 'pointer',
-};
 
 async function errorMessage(res: Response): Promise<string> {
   const body = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
@@ -144,38 +134,43 @@ export function AccessLogsPanel(): ReactElement {
   };
 
   return (
-    <div data-testid="access-logs-panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      <section id="query-log" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('access.logRetention.query.title')}</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-          {t('access.logRetention.query.desc')}
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>{t('access.logRetention.keepDays')}</span>
+    <div className="form" data-testid="access-logs-panel">
+      <section id="query-log" className="diag-group">
+        <span className="diag-title">{t('access.logRetention.query.title')}</span>
+        <span className="form-hint">{t('access.logRetention.query.desc')}</span>
+        <div className="form-row">
+          <label className="form-label" htmlFor="log-keep-days">
+            {t('access.logRetention.keepDays')}
+          </label>
           <input
-            style={inputStyle}
+            id="log-keep-days"
+            name="query_log_keep_days"
+            className="input-line"
+            data-kind="num"
             data-testid="keep-days"
             value={draft?.keepDays ?? ''}
             onChange={(event) => setDraft(draft === null ? draft : { ...draft, keepDays: event.target.value })}
           />
         </div>
-        <div style={rowStyle}>
-          <button type="button" style={buttonStyle} onClick={() => { void purgeQuery(); }} data-testid="purge-query">
+        <div className="btn-row">
+          <button type="button" className="btn" onClick={() => { void purgeQuery(); }} data-testid="purge-query">
             {confirmQuery ? t('access.logRetention.purgeQuery.confirm') : t('access.logRetention.purgeQuery')}
           </button>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{t('access.logRetention.purgeQuery.hint')}</span>
+          <span className="form-hint">{t('access.logRetention.purgeQuery.hint')}</span>
         </div>
       </section>
 
-      <section id="plugin-trace" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('access.logRetention.trace.title')}</div>
-        <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-          {t('access.logRetention.trace.desc')}
-        </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>{t('access.logRetention.trace.level')}</span>
+      <section id="plugin-trace" className="diag-group">
+        <span className="diag-title">{t('access.logRetention.trace.title')}</span>
+        <span className="form-hint">{t('access.logRetention.trace.desc')}</span>
+        <div className="form-row">
+          <label className="form-label" htmlFor="log-trace-level">
+            {t('access.logRetention.trace.level')}
+          </label>
           <select
-            style={inputStyle}
+            id="log-trace-level"
+            name="hook_plugin_trace_level"
+            className="scope-select"
             data-testid="trace-level"
             value={draft?.level ?? 'off'}
             onChange={(event) =>
@@ -187,36 +182,46 @@ export function AccessLogsPanel(): ReactElement {
             <option value="full">{t('access.logRetention.trace.level.full')}</option>
           </select>
         </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>{t('access.logRetention.trace.maxBytes')}</span>
+        <div className="form-row">
+          <label className="form-label" htmlFor="log-trace-max-bytes">
+            {t('access.logRetention.trace.maxBytes')}
+          </label>
           <input
-            style={inputStyle}
+            id="log-trace-max-bytes"
+            name="hook_plugin_trace_max_bytes"
+            className="input-line"
+            data-kind="num"
             data-testid="trace-max-bytes"
             value={draft?.maxBytes ?? ''}
             onChange={(event) => setDraft(draft === null ? draft : { ...draft, maxBytes: event.target.value })}
           />
         </div>
-        <div style={rowStyle}>
-          <span style={labelStyle}>{t('access.logRetention.trace.keepDays')}</span>
+        <div className="form-row">
+          <label className="form-label" htmlFor="log-trace-keep-days">
+            {t('access.logRetention.trace.keepDays')}
+          </label>
           <input
-            style={inputStyle}
+            id="log-trace-keep-days"
+            name="hook_plugin_trace_keep_days"
+            className="input-line"
+            data-kind="num"
             data-testid="trace-keep-days"
             value={draft?.traceKeepDays ?? ''}
             onChange={(event) => setDraft(draft === null ? draft : { ...draft, traceKeepDays: event.target.value })}
           />
         </div>
-        <div style={rowStyle}>
-          <button type="button" style={buttonStyle} onClick={() => { void purgeTrace(); }} data-testid="purge-trace">
+        <div className="btn-row">
+          <button type="button" className="btn" onClick={() => { void purgeTrace(); }} data-testid="purge-trace">
             {confirmTrace ? t('access.logRetention.purgeTrace.confirm') : t('access.logRetention.purgeTrace')}
           </button>
-          <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{t('access.logRetention.purgeTrace.hint')}</span>
+          <span className="form-hint">{t('access.logRetention.purgeTrace.hint')}</span>
         </div>
       </section>
 
-      <div style={rowStyle}>
+      <div className="form-actions">
         <button
           type="button"
-          style={{ ...buttonStyle, opacity: dirty ? 1 : 0.5 }}
+          className="btn btn-primary"
           disabled={!dirty || saving}
           onClick={() => { void save(); }}
           data-testid="access-logs-save"
@@ -224,13 +229,13 @@ export function AccessLogsPanel(): ReactElement {
           {saving ? t('access.logRetention.saving') : t('access.logRetention.save')}
         </button>
         {toast === null ? null : (
-          <span style={{ fontSize: 12, color: 'var(--color-success, #3fb950)' }} data-testid="access-logs-toast">
-            {toast}
+          <span className="notice" data-tone="ok" data-testid="access-logs-toast">
+            <span className="notice-text">{toast}</span>
           </span>
         )}
         {error === null ? null : (
-          <span style={{ fontSize: 12, color: 'var(--color-danger, #f85149)' }} data-testid="access-logs-error">
-            {error}
+          <span className="notice" data-tone="error" data-testid="access-logs-error">
+            <span className="notice-text">{error}</span>
           </span>
         )}
       </div>

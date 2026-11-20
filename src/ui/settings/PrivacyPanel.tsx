@@ -6,10 +6,13 @@
  * - `POST /api/privacy/purge` body `{scope, dry_run?, confirm:'PURGE'}`
  * - `GET  /api/export/all` 附件流
  *
- * 纪律：不写 SQL、不改后端；导出/清理都走既有 HTTP 接口。样式 inline（P2-19-B 统一）。
+ * 纪律：不写 SQL、不改后端；导出/清理都走既有 HTTP 接口。
  * 请求函数暂放本文件（task-24 正在改 `src/ui/api.ts`，按 Lead 要求不动它）。
+ *
+ * 视觉（w10）：总览是一条读数带（标签 + 等宽值）；清理是带内嵌的一小条危险带，
+ * 预览是 `.notice`；`privacy-pure.ts` 的判定逻辑一字未动。
  */
-import { useCallback, useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { t as translate, useT } from '../i18n/index.js';
 import {
@@ -94,68 +97,6 @@ async function downloadAllExport(): Promise<string> {
   }
   return filename;
 }
-
-const panelStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '12px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-};
-
-const buttonStyle: CSSProperties = {
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  padding: '6px 12px',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
-const dangerButtonStyle: CSSProperties = {
-  ...buttonStyle,
-  background: 'var(--color-danger-bg)',
-  borderColor: 'var(--color-danger-dim)',
-  color: 'var(--color-danger-soft)',
-};
-
-const inputStyle: CSSProperties = {
-  background: 'var(--color-bg-overlay)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  padding: '5px 8px',
-  fontSize: 12,
-};
-
-const rowStyle: CSSProperties = {
-  display: 'grid',
-  gridTemplateColumns: '140px minmax(0, 1fr)',
-  gap: 8,
-  alignItems: 'baseline',
-  fontSize: 12,
-};
-
-const noticeStyle: CSSProperties = {
-  color: 'var(--color-success-soft)',
-  background: 'var(--color-success-bg)',
-  border: '1px solid var(--color-success-dim)',
-  borderRadius: 8,
-  padding: '6px 8px',
-};
-
-const errorStyle: CSSProperties = {
-  color: 'var(--color-danger-soft)',
-  background: 'var(--color-danger-bg)',
-  border: '1px solid var(--color-danger-dim)',
-  borderRadius: 8,
-  padding: '6px 8px',
-};
 
 export function PrivacyPanel(): ReactElement {
   const t = useT();
@@ -257,154 +198,126 @@ export function PrivacyPanel(): ReactElement {
   };
 
   return (
-    <section data-testid="privacy-panel" style={panelStyle}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('privacy.title')}</div>
-        <button
-          type="button"
-          data-testid="privacy-refresh"
-          style={buttonStyle}
-          disabled={busy}
-          onClick={() => void load()}
-        >
-          {busy ? t('privacy.refreshing') : t('privacy.refresh')}
-        </button>
-        <button
-          type="button"
-          data-testid="privacy-export"
-          style={buttonStyle}
-          disabled={exporting}
-          onClick={onExport}
-        >
-          {exporting ? t('privacy.exporting') : t('privacy.export')}
-        </button>
-        <button
-          type="button"
-          data-testid="privacy-open-dialog"
-          style={dangerButtonStyle}
-          onClick={openDialog}
-        >
-          {t('privacy.purge')}
-        </button>
-      </div>
-
-      <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-        {t('privacy.purgeHint')}
-      </div>
-
-      {notice !== null && (
-        <div data-testid="privacy-notice" style={noticeStyle}>
-          {notice}
+    <section className="band" data-testid="privacy-panel">
+      <div className="band-head">
+        <span className="band-title">{t('privacy.title')}</span>
+        <div className="band-tools">
+          <button type="button" className="btn" data-testid="privacy-refresh" disabled={busy} onClick={() => void load()}>
+            {busy ? t('privacy.refreshing') : t('privacy.refresh')}
+          </button>
+          <button type="button" className="btn" data-testid="privacy-export" disabled={exporting} onClick={onExport}>
+            {exporting ? t('privacy.exporting') : t('privacy.export')}
+          </button>
+          <button type="button" className="btn btn-danger" data-testid="privacy-open-dialog" onClick={openDialog}>
+            {t('privacy.purge')}
+          </button>
         </div>
-      )}
-      {error !== null && (
-        <div data-testid="privacy-error" style={errorStyle}>
-          {error}
-        </div>
-      )}
+      </div>
+      <div className="band-body">
+        <span className="station-note">{t('privacy.purgeHint')}</span>
 
-      <div data-testid="privacy-overview" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {overview === null
-          ? busy
-            ? t('privacy.loading')
-            : t('privacy.notLoaded')
-          : overviewRows(overview, t).map((row) => (
-              <div key={row.label} data-testid="privacy-row" style={rowStyle}>
-                <span style={{ color: 'var(--color-text-muted)' }}>{row.label}</span>
-                <span style={{ fontFamily: 'monospace', wordBreak: 'break-all' }}>{row.value}</span>
+        {notice !== null && (
+          <div className="notice" data-tone="ok" data-testid="privacy-notice">
+            <span className="notice-text">{notice}</span>
+          </div>
+        )}
+        {error !== null && (
+          <div className="notice" data-tone="error" data-testid="privacy-error">
+            <span className="notice-text">{error}</span>
+          </div>
+        )}
+
+        <div className="data-table" data-testid="privacy-overview">
+          {overview === null ? (
+            <div className="data-empty">{busy ? t('privacy.loading') : t('privacy.notLoaded')}</div>
+          ) : (
+            overviewRows(overview, t).map((row) => (
+              <div key={row.label} className="data-row cols-privacy" data-testid="privacy-row">
+                <span className="tone-mute">{row.label}</span>
+                <span className="tile-line">{row.value}</span>
               </div>
-            ))}
-      </div>
-
-      {dialogOpen && (
-        <div
-          data-testid="privacy-dialog"
-          style={{
-            background: 'var(--color-bg-overlay)',
-            border: '1px solid var(--color-danger-dim)',
-            borderRadius: 8,
-            padding: '10px 12px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
-          <div style={{ color: 'var(--color-danger-soft)', fontWeight: 600 }}>{t('privacy.dialog.title')}</div>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>{t('privacy.scopeLabel')}</span>
-            <select
-              data-testid="privacy-scope"
-              value={scope}
-              style={inputStyle}
-              onChange={(e) => {
-                setScope(e.target.value as PurgeScope);
-                setPreview(null);
-              }}
-            >
-              {purgeScopes(t).map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-            <span style={{ color: 'var(--color-text-secondary)', width: 48 }}>{t('privacy.confirmLabel')}</span>
-            <input
-              data-testid="privacy-confirm"
-              value={confirmText}
-              placeholder={t('privacy.confirmPlaceholder')}
-              style={{ ...inputStyle, width: 160 }}
-              onChange={(e) => {
-                setConfirmText(e.target.value);
-                setPreview(null);
-              }}
-            />
-          </label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              data-testid="privacy-dry-run"
-              style={buttonStyle}
-              disabled={previewBusy || executing}
-              onClick={onPreview}
-            >
-              {previewBusy ? t('privacy.previewing') : t('privacy.preview')}
-            </button>
-            <button
-              type="button"
-              data-testid="privacy-execute"
-              style={{
-                ...dangerButtonStyle,
-                opacity: canSubmitPurge(confirmText, scope) && !executing ? 1 : 0.45,
-              }}
-              disabled={!canSubmitPurge(confirmText, scope) || executing}
-              onClick={onExecute}
-            >
-              {executing ? t('privacy.executing') : t('privacy.execConfirm')}
-            </button>
-            <button
-              type="button"
-              data-testid="privacy-close"
-              style={buttonStyle}
-              disabled={executing}
-              onClick={() => {
-                setDialogOpen(false);
-              }}
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
-          {preview !== null && (
-            <div data-testid="privacy-preview" style={{ fontSize: 12, color: 'var(--color-warning-soft)' }}>
-              {t('privacy.previewLine', { summary: purgeSummary(preview, t) })}
-            </div>
+            ))
           )}
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-            {t('privacy.auditNote')}
-          </div>
         </div>
-      )}
+
+        {dialogOpen && (
+          <section className="band" data-tone="danger" data-testid="privacy-dialog">
+            <div className="band-head">
+              <span className="band-title tone-err">{t('privacy.dialog.title')}</span>
+            </div>
+            <div className="band-body">
+              <div className="field-row">
+                <span className="field-label">{t('privacy.scopeLabel')}</span>
+                <select
+                  className="scope-select"
+                  data-testid="privacy-scope"
+                  value={scope}
+                  onChange={(e) => {
+                    setScope(e.target.value as PurgeScope);
+                    setPreview(null);
+                  }}
+                >
+                  {purgeScopes(t).map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="field-row">
+                <span className="field-label">{t('privacy.confirmLabel')}</span>
+                <input
+                  className="input-line"
+                  data-testid="privacy-confirm"
+                  value={confirmText}
+                  placeholder={t('privacy.confirmPlaceholder')}
+                  onChange={(e) => {
+                    setConfirmText(e.target.value);
+                    setPreview(null);
+                  }}
+                />
+              </div>
+              <div className="btn-row">
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="privacy-dry-run"
+                  disabled={previewBusy || executing}
+                  onClick={onPreview}
+                >
+                  {previewBusy ? t('privacy.previewing') : t('privacy.preview')}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  data-testid="privacy-execute"
+                  disabled={!canSubmitPurge(confirmText, scope) || executing}
+                  onClick={onExecute}
+                >
+                  {executing ? t('privacy.executing') : t('privacy.execConfirm')}
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="privacy-close"
+                  disabled={executing}
+                  onClick={() => {
+                    setDialogOpen(false);
+                  }}
+                >
+                  {t('common.cancel')}
+                </button>
+              </div>
+              {preview !== null && (
+                <div className="notice" data-tone="warn" data-testid="privacy-preview">
+                  <span className="notice-text">{t('privacy.previewLine', { summary: purgeSummary(preview, t) })}</span>
+                </div>
+              )}
+              <span className="form-hint">{t('privacy.auditNote')}</span>
+            </div>
+          </section>
+        )}
+      </div>
     </section>
   );
 }

@@ -122,6 +122,13 @@ export const zh = {
   'logs.row.source.trace': '插件',
   'logs.row.meta': 'plugin {plugin} · 证据 {evidence} · corr {corr}',
   'logs.row.noBody': '正文未记录（插件运行日志默认只记计数；full 档才带正文）。',
+  'logs.row.source': '来源',
+  'logs.row.kind': '种类',
+  'logs.row.caller': '接入点',
+  'logs.row.in': '入',
+  'logs.row.out': '出',
+  'logs.row.status': '状态',
+  'logs.row.when': '时间 / 耗时',
   'endpoints.title': '接入点',
   'endpoints.intro': '四类接入点共用同一个记录面；下面是过去 24 小时的运行态，配置在日志页右上角的「日志与保留」弹框。',
   'endpoints.summaryError': '统计读取失败：{error}',
@@ -258,6 +265,11 @@ export const zh = {
   'light.vector.off': '已关闭（vector_disabled）',
   'light.vector.unknown': '未知（状态缺失）',
   'light.vector.label': '向量',
+  // 灯旁的等宽状态码：仪表读数，两种语言同形（不翻译）
+  'light.code.ok': 'OK',
+  'light.code.warn': 'WARN',
+  'light.code.error': 'ERR',
+  'light.code.off': 'OFF',
 
   // 记忆页
   'memories.title': '记忆',
@@ -661,7 +673,6 @@ export const zh = {
   'diag.integrity': '完整性 {value}',
   'diag.size': '大小 {value}',
   'diag.indexes': '索引',
-  'diag.vec': '向量 {value}',
   'diag.degreeMismatch': 'degree 不一致 {count}',
   'diag.invariants': '不变量',
   'diag.quality': '图质量（六项 + 布局新鲜度）',

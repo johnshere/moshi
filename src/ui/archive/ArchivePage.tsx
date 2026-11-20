@@ -9,7 +9,7 @@
  *
  * URL 唯一真相源：`?slug=` 写回用 `history.replaceState`（不新增历史条目）。
  */
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react';
 import {
   applyArchiveProposal,
   fetchArchiveTopic,
@@ -54,64 +54,11 @@ const STATUS_KEY: Record<ArchiveStatus, DictKey> = {
   split: 'archive.status.split',
 };
 
-const STATUS_COLOR: Record<ArchiveStatus, string> = {
-  active: 'var(--color-success)',
-  merged: 'var(--color-warning)',
-  split: 'var(--color-accent-alt)',
-};
-
 const HUMAN_KEY: Record<HumanEdited, DictKey> = {
   0: 'archive.human.auto',
   1: 'archive.human.pending',
   2: 'archive.human.locked',
 };
-
-const rootStyle: CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  display: 'flex',
-  background: 'var(--color-bg-base)',
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-};
-
-const rowStyle = (active: boolean): CSSProperties => ({
-  display: 'block',
-  width: '100%',
-  textAlign: 'left',
-  border: 0,
-  borderBottom: '1px solid var(--color-bg-active)',
-  background: active ? 'var(--color-bg-active)' : 'transparent',
-  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-  padding: '9px 12px',
-  cursor: 'pointer',
-  font: 'inherit',
-});
-
-const metaLabelStyle: CSSProperties = { color: 'var(--color-text-muted)', fontSize: 11, minWidth: 92 };
-
-const noticeStyle: CSSProperties = {
-  border: '1px solid var(--color-border-strong)',
-  background: 'var(--color-bg-raised)',
-  color: 'var(--color-text-secondary)',
-  borderRadius: 8,
-  padding: '10px 12px',
-  maxWidth: 720,
-  lineHeight: 1.6,
-};
-
-const linkStyle: CSSProperties = { color: 'var(--color-info)', textDecoration: 'underline', cursor: 'pointer' };
-
-const buttonStyle = (disabled: boolean): CSSProperties => ({
-  border: '1px solid var(--color-border-strong)',
-  background: disabled ? 'var(--color-bg-hover)' : 'var(--color-bg-overlay)',
-  color: disabled ? 'var(--color-text-muted)' : 'var(--color-text-primary)',
-  borderRadius: 8,
-  padding: '5px 10px',
-  cursor: disabled ? 'not-allowed' : 'pointer',
-  font: 'inherit',
-  fontSize: 12,
-});
 
 interface ToastState {
   kind: 'ok' | 'error';
@@ -254,10 +201,10 @@ export function ArchivePage(): ReactElement {
       setToast({
         kind: 'ok',
         text: t('archive.rebuild.done', {
-            action: meta?.label ?? action,
-            revision: result.revision,
-            edited: result.human_edited,
-          }),
+          action: meta?.label ?? action,
+          revision: result.revision,
+          edited: result.human_edited,
+        }),
       });
       setDialogSlug(null);
       await reloadTopics();
@@ -309,271 +256,249 @@ export function ArchivePage(): ReactElement {
             }
           : null;
   const dialogTopic = topics.find((t) => t.slug === dialogSlug) ?? null;
+  const rebuildOff = rebuildDisabled(exporting, loading);
 
   return (
-    <div style={rootStyle}>
-      <aside
-        style={{
-          width: 360,
-          flex: '0 0 360px',
-          borderRight: '1px solid var(--color-border-subtle)',
-          display: 'flex',
-          flexDirection: 'column',
-          minHeight: 0,
-        }}
-      >
-        <div
-          style={{
-            padding: '10px 12px',
-            borderBottom: '1px solid var(--color-border-subtle)',
-            color: 'var(--color-text-primary)',
-            fontWeight: 600,
-            display: 'flex',
-            alignItems: 'baseline',
-            gap: 6,
-          }}
-        >
-          <span style={{ flex: 1 }}>{t('archive.title')}</span>
-          <span style={{ color: 'var(--color-text-muted)', fontWeight: 400 }}>{topics.length}</span>
-        </div>
-        <div style={{ overflow: 'auto', flex: 1 }} data-testid="archive-topic-list">
-          {listState === 'loading' ? <div style={{ padding: 12, color: 'var(--color-text-muted)' }}>{t('common.loading')}</div> : null}
-          {listState === 'error' ? (
-            <div style={{ padding: 12, color: 'var(--color-danger)' }} data-testid="archive-topics-error">
-              {t('archive.list.loadFailed', { error: listError ?? '' })}
-            </div>
-          ) : null}
-          {listState === 'empty' ? (
-            <div style={{ padding: 12, color: 'var(--color-text-secondary)', lineHeight: 1.7 }} data-testid="archive-empty">
-              <div style={{ marginBottom: 6 }}>{emptyTopicsHint(t)}</div>
-              <div
-                style={{
-                  color: 'var(--color-text-muted)',
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  gap: 4,
-                  flexWrap: 'wrap',
-                }}
-              >
-                {emptyArchiveDirHint(t)}
-                <a
-                  href={pageHref('settings', window.location.search)}
-                  style={linkStyle}
-                  data-testid="archive-empty-settings-link"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    navigate(pageHref('settings', window.location.search));
-                  }}
-                >
-                  {t('archive.empty.goSettings')}
-                </a>
-              </div>
-            </div>
-          ) : null}
-          {topics.map((topic) => {
-            const badge = proposedBadge(topic, t);
-            return (
-              <button
-                key={topic.slug}
-                type="button"
-                data-testid="archive-topic-row"
-                data-slug={topic.slug}
-                style={rowStyle(topic.slug === selected)}
-                onClick={() => handleSelect(topic.slug)}
-                title={topic.path}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {topic.title ?? topic.slug}
-                  </span>
-                  {badge.visible ? (
-                    <span
-                      data-testid="archive-proposed-badge"
-                      style={{
-                        border: '1px solid var(--color-warning-dim)',
-                        color: 'var(--color-warning-soft)',
-                        borderRadius: 8,
-                        padding: '0 4px',
-                        fontSize: 10,
-                      }}
-                    >
-                      {badge.label}
-                    </span>
-                  ) : null}
-                  <span style={{ color: STATUS_COLOR[topic.status], fontSize: 11 }}>{t(STATUS_KEY[topic.status])}</span>
-                </div>
-                <div style={{ color: 'var(--color-text-muted)', fontSize: 11, marginTop: 2, display: 'flex', gap: 6 }}>
-                  <span style={{ flex: 1 }}>
-                    {topic.slug} · rev {topic.revision}
-                    {topic.human_edited === 0 ? '' : ` · ${t(HUMAN_KEY[topic.human_edited])}`}
-                  </span>
-                  {badge.canHandle ? (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      data-testid="archive-handle-proposal"
-                      style={{ color: 'var(--color-warning-soft)', textDecoration: 'underline', cursor: 'pointer' }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDialogError(null);
-                        setDialogSlug(topic.slug);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key !== 'Enter' && e.key !== ' ') return;
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setDialogError(null);
-                        setDialogSlug(topic.slug);
-                      }}
-                    >
-                      {t('archive.handle')}
-                    </span>
-                  ) : null}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </aside>
-
-      <section style={{ flex: 1, minWidth: 0, overflow: 'auto', padding: '12px 18px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-          <span style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
-            {t('archive.lastExport', { value: formatTimestamp(lastExport, t) })}
-          </span>
-          <span style={{ flex: 1 }} />
+    <div className="ledger archive-page">
+      <div className="ledger-head archive-head">
+        <div className="ledger-title">{t('archive.title')}</div>
+        <span className="ledger-meta archive-count">{topics.length}</span>
+        <span className="archive-last-export">
+          {t('archive.lastExport', { value: formatTimestamp(lastExport, t) })}
+        </span>
+        <div className="ledger-tools">
           <button
             type="button"
+            className="btn archive-rebuild"
             data-testid="archive-rebuild"
-            style={buttonStyle(rebuildDisabled(exporting, loading))}
-            disabled={rebuildDisabled(exporting, loading)}
+            disabled={rebuildOff}
             onClick={() => void handleRebuild()}
           >
             {rebuildLabel(exporting)}
           </button>
         </div>
+      </div>
 
-        {shown === null ? (
-          <div style={{ color: 'var(--color-text-muted)' }}>{t('archive.pick')}</div>
-        ) : (
-          <div>
-            <h2 style={{ margin: '0 0 4px', color: 'var(--color-text-primary)', fontSize: 16 }}>{shown.title ?? shown.slug}</h2>
-            <div style={{ color: 'var(--color-text-muted)', marginBottom: 10 }}>
-              {shown.slug} · rev {shown.revision} · {t(STATUS_KEY[shown.status])} · hash{' '}
-              {shortHash(shown.content_hash)} · derived_at {shown.derived_at ?? '—'}
-            </div>
-            {current !== null ? (
-              <dl
-                data-testid="archive-meta"
-                style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 10px', margin: '0 0 14px' }}
-              >
-                <dt style={metaLabelStyle}>topic_id</dt>
-                <dd style={{ margin: 0 }}>{String(shown.topic_id)}</dd>
-                <dt style={metaLabelStyle}>path</dt>
-                <dd style={{ margin: 0 }}>{shown.path}</dd>
-                <dt style={metaLabelStyle}>revision</dt>
-                <dd style={{ margin: 0 }}>{shown.revision}</dd>
-                <dt style={metaLabelStyle}>content_hash</dt>
-                <dd style={{ margin: 0, wordBreak: 'break-all' }}>{shown.content_hash ?? '—'}</dd>
-                <dt style={metaLabelStyle}>last_exported_at</dt>
-                <dd style={{ margin: 0 }}>{current.last_exported_at ?? '—'}</dd>
-                <dt style={metaLabelStyle}>human_edited</dt>
-                <dd style={{ margin: 0 }}>
-                  {t('archive.humanEditedValue', { edited: current.human_edited, label: t(HUMAN_KEY[current.human_edited]) })}
-                </dd>
-                <dt style={metaLabelStyle}>proposed_path</dt>
-                <dd style={{ margin: 0 }}>{current.proposed_path ?? '—'}</dd>
-              </dl>
+      <div className="archive-body">
+        <aside className="archive-aside">
+          <div className="archive-list-head" aria-hidden="true">
+            <span>topic</span>
+            <span>status</span>
+          </div>
+          <div className="archive-list" data-testid="archive-topic-list">
+            {listState === 'loading' ? <div className="archive-list-note">{t('common.loading')}</div> : null}
+            {listState === 'error' ? (
+              <div className="archive-list-error" data-testid="archive-topics-error">
+                {t('archive.list.loadFailed', { error: listError ?? '' })}
+              </div>
             ) : null}
-
-            <div data-testid="archive-preview-state" data-state={detailState}>
-              {detailState === 'loading' ? <div style={noticeStyle}>{t('archive.body.loading')}</div> : null}
-              {detailState === 'not_found' ? (
-                <div style={noticeStyle} data-testid="archive-preview-not-found">
-                  {t('archive.notFound')}
-                  <span
-                    role="button"
-                    tabIndex={0}
-                    style={{ ...linkStyle, marginLeft: 8 }}
-                    onClick={() => {
-                      setDetailNonce((n) => n + 1);
-                      void reloadTopics();
+            {listState === 'empty' ? (
+              <div className="archive-empty" data-testid="archive-empty">
+                <div>{emptyTopicsHint(t)}</div>
+                <div className="archive-empty-dir">
+                  {emptyArchiveDirHint(t)}
+                  <a
+                    href={pageHref('settings', window.location.search)}
+                    className="archive-link"
+                    data-testid="archive-empty-settings-link"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      navigate(pageHref('settings', window.location.search));
                     }}
                   >
-                    {t('archive.refresh')}
+                    {t('archive.empty.goSettings')}
+                  </a>
+                </div>
+              </div>
+            ) : null}
+            {topics.map((topic) => {
+              const badge = proposedBadge(topic, t);
+              return (
+                <button
+                  key={topic.slug}
+                  type="button"
+                  className="archive-topic"
+                  data-testid="archive-topic-row"
+                  data-slug={topic.slug}
+                  data-active={topic.slug === selected}
+                  onClick={() => handleSelect(topic.slug)}
+                  title={topic.path}
+                >
+                  <span className="archive-topic-title">{topic.title ?? topic.slug}</span>
+                  <span className="archive-topic-status" data-status={topic.status}>
+                    <span className="archive-lamp" aria-hidden="true" />
+                    {t(STATUS_KEY[topic.status])}
                   </span>
-                </div>
-              ) : null}
-              {detailState === 'file_missing' ? (
-                <div
-                  style={{ ...noticeStyle, borderColor: 'var(--color-warning-dim)', color: 'var(--color-warning-soft)' }}
-                  data-testid="archive-file-missing"
-                >
-                  {t('archive.fileMissing')}
-                  <div style={{ color: 'var(--color-warning)', fontSize: 12, marginTop: 4 }}>
-                    {t('archive.expectedPath', { path: detail?.path ?? current?.path ?? '—' })}
-                  </div>
-                </div>
-              ) : null}
-              {detailState === 'error' ? (
-                <div style={{ ...noticeStyle, borderColor: 'var(--color-danger-dim)', color: 'var(--color-danger)' }}>
-                  {t('archive.body.loadFailed', { error: detailError ?? '' })}
-                </div>
-              ) : null}
-              {detailState === 'ok' && detail?.markdown != null ? (
-                <div
-                  data-testid="archive-markdown"
-                  style={{
-                    maxWidth: 900,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    background: 'var(--color-bg-raised)',
-                    border: '1px solid var(--color-border-subtle)',
-                    borderRadius: 8,
-                    padding: '12px 14px',
-                    color: 'var(--color-text-secondary)',
-                    lineHeight: 1.7,
-                  }}
-                >
-                  {previewLines(detail.markdown).map((line, index) => {
-                    const key = `${String(index)}:${line.kind}`;
-                    if (line.kind === 'blank') return <div key={key} style={{ height: 8 }} />;
-                    if (line.kind === 'h1') {
-                      return (
-                        <div key={key} style={{ fontWeight: 700, fontSize: 16, color: 'var(--color-text-primary)', margin: '2px 0' }}>
-                          {line.text}
-                        </div>
-                      );
-                    }
-                    if (line.kind === 'h2') {
-                      return (
-                        <div key={key} style={{ fontWeight: 600, fontSize: 14, color: 'var(--color-text-primary)', margin: '2px 0' }}>
-                          {line.text}
-                        </div>
-                      );
-                    }
-                    if (line.kind === 'h3') {
-                      return (
-                        <div key={key} style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text-secondary)', margin: '2px 0' }}>
-                          {line.text}
-                        </div>
-                      );
-                    }
-                    if (line.kind === 'bullet') {
-                      return (
-                        <div key={key} style={{ paddingLeft: 16 }}>
-                          · {line.text}
-                        </div>
-                      );
-                    }
-                    return <div key={key}>{line.text}</div>;
-                  })}
-                </div>
-              ) : null}
-            </div>
+                  {badge.visible ? (
+                    <span className="archive-badge" data-testid="archive-proposed-badge">
+                      {badge.label}
+                    </span>
+                  ) : (
+                    <span />
+                  )}
+                  <span className="archive-topic-meta">
+                    <span className="archive-topic-slug">
+                      {topic.slug} · rev {topic.revision}
+                      {topic.human_edited === 0 ? '' : ` · ${t(HUMAN_KEY[topic.human_edited])}`}
+                    </span>
+                    {badge.canHandle ? (
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        className="archive-handle"
+                        data-testid="archive-handle-proposal"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDialogError(null);
+                          setDialogSlug(topic.slug);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key !== 'Enter' && e.key !== ' ') return;
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setDialogError(null);
+                          setDialogSlug(topic.slug);
+                        }}
+                      >
+                        {t('archive.handle')}
+                      </span>
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-        )}
-      </section>
+        </aside>
+
+        <section className="archive-main">
+          {shown === null ? (
+            <div className="archive-pick">{t('archive.pick')}</div>
+          ) : (
+            <div className="archive-detail">
+              <div className="archive-detail-head">
+                <h2 className="archive-detail-title">{shown.title ?? shown.slug}</h2>
+                <div className="archive-detail-readout">
+                  <span>{shown.slug}</span>
+                  <span>rev {shown.revision}</span>
+                  <span>{t(STATUS_KEY[shown.status])}</span>
+                  <span>hash {shortHash(shown.content_hash)}</span>
+                  <span>derived_at {shown.derived_at ?? '—'}</span>
+                </div>
+              </div>
+
+              {current !== null ? (
+                <dl className="archive-meta" data-testid="archive-meta">
+                  <div className="archive-meta-row">
+                    <dt>topic_id</dt>
+                    <dd>{String(shown.topic_id)}</dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>path</dt>
+                    <dd>{shown.path}</dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>revision</dt>
+                    <dd>{shown.revision}</dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>content_hash</dt>
+                    <dd>{shown.content_hash ?? '—'}</dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>last_exported_at</dt>
+                    <dd>{current.last_exported_at ?? '—'}</dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>human_edited</dt>
+                    <dd>
+                      {t('archive.humanEditedValue', {
+                        edited: current.human_edited,
+                        label: t(HUMAN_KEY[current.human_edited]),
+                      })}
+                    </dd>
+                  </div>
+                  <div className="archive-meta-row">
+                    <dt>proposed_path</dt>
+                    <dd>{current.proposed_path ?? '—'}</dd>
+                  </div>
+                </dl>
+              ) : null}
+
+              <div className="archive-preview" data-testid="archive-preview-state" data-state={detailState}>
+                {detailState === 'loading' ? (
+                  <div className="archive-notice">{t('archive.body.loading')}</div>
+                ) : null}
+                {detailState === 'not_found' ? (
+                  <div className="archive-notice" data-tone="warning" data-testid="archive-preview-not-found">
+                    {t('archive.notFound')}
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="archive-link archive-notice-link"
+                      onClick={() => {
+                        setDetailNonce((n) => n + 1);
+                        void reloadTopics();
+                      }}
+                    >
+                      {t('archive.refresh')}
+                    </span>
+                  </div>
+                ) : null}
+                {detailState === 'file_missing' ? (
+                  <div className="archive-notice" data-tone="warning" data-testid="archive-file-missing">
+                    {t('archive.fileMissing')}
+                    <div className="archive-notice-detail">
+                      {t('archive.expectedPath', { path: detail?.path ?? current?.path ?? '—' })}
+                    </div>
+                  </div>
+                ) : null}
+                {detailState === 'error' ? (
+                  <div className="archive-notice" data-tone="danger">
+                    {t('archive.body.loadFailed', { error: detailError ?? '' })}
+                  </div>
+                ) : null}
+                {detailState === 'ok' && detail?.markdown != null ? (
+                  <div className="archive-md" data-testid="archive-markdown">
+                    {previewLines(detail.markdown).map((line, index) => {
+                      const key = `${String(index)}:${line.kind}`;
+                      if (line.kind === 'blank') return <div key={key} className="archive-md-gap" />;
+                      if (line.kind === 'h1') {
+                        return (
+                          <div key={key} className="archive-md-h1">
+                            {line.text}
+                          </div>
+                        );
+                      }
+                      if (line.kind === 'h2') {
+                        return (
+                          <div key={key} className="archive-md-h2">
+                            {line.text}
+                          </div>
+                        );
+                      }
+                      if (line.kind === 'h3') {
+                        return (
+                          <div key={key} className="archive-md-h3">
+                            {line.text}
+                          </div>
+                        );
+                      }
+                      if (line.kind === 'bullet') {
+                        return (
+                          <div key={key} className="archive-md-bullet">
+                            · {line.text}
+                          </div>
+                        );
+                      }
+                      return <div key={key}>{line.text}</div>;
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
 
       {dialogSlug !== null && dialogTopic !== null ? (
         <ProposedDialog
@@ -591,23 +516,7 @@ export function ArchivePage(): ReactElement {
       ) : null}
 
       {toast !== null ? (
-        <div
-          data-testid="archive-toast"
-          data-kind={toast.kind}
-          style={{
-            position: 'fixed',
-            left: '50%',
-            bottom: 26,
-            transform: 'translateX(-50%)',
-            background: toast.kind === 'ok' ? 'var(--color-success-bg)' : 'var(--color-danger-bg)',
-            border: `1px solid ${toast.kind === 'ok' ? 'var(--color-success-dim)' : 'var(--color-danger-dim)'}`,
-            color: toast.kind === 'ok' ? 'var(--color-success-soft)' : 'var(--color-danger-soft)',
-            borderRadius: 8,
-            padding: '8px 14px',
-            zIndex: 50,
-            maxWidth: '80vw',
-          }}
-        >
+        <div className="toast archive-toast" data-testid="archive-toast" data-kind={toast.kind}>
           {toast.text}
         </div>
       ) : null}

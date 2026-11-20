@@ -40,27 +40,15 @@ const SEARCH_DEBOUNCE_MS = 300;
 /** 七列：时间 / 类型 / 内容(自适应) / 置信度 / 强度 / 状态 / 重要性 */
 const GRID = '132px 88px minmax(240px, 1fr) 64px 64px 96px 64px';
 
-const STATUS_COLOR: Record<string, string> = {
-  active: 'var(--color-success)',
-  disputed: 'var(--color-warning)',
-  invalidated: 'var(--color-danger)',
-  quarantined: 'var(--color-accent-alt)',
-  superseded: 'var(--color-text-muted)',
-};
-
-function chip(active: boolean): CSSProperties {
-  return {
-    background: active ? 'color-mix(in srgb, var(--color-accent) 14%, transparent)' : 'transparent',
-    color: active ? 'var(--color-accent-soft)' : 'var(--color-text-secondary)',
-    border: `1px solid ${active ? 'color-mix(in srgb, var(--color-accent) 38%, transparent)' : 'var(--color-border-subtle)'}`,
-    borderRadius: 999,
-    padding: '2px 11px',
-    cursor: active ? 'default' : 'pointer',
-    font: 'inherit',
-  };
+export interface FactsTableProps {
+  /**
+   * 顶部让开的像素：图谱页的 HUD 是绝对定位覆盖层（默认 148）；
+   * 记忆页把表格放进自己的台账布局里，传 0 即可。
+   */
+  topInset?: number;
 }
 
-export function FactsTable(): JSX.Element {
+export function FactsTable({ topInset = 148 }: FactsTableProps = {}): JSX.Element {
   const t = useT();
   // 深链 `?view=table&q=...&sort=importance` 首屏即按 URL 取数（URL 是唯一真相源）
   const initial = useMemo<TableViewState>(() => parseTableView(window.location.search), []);
@@ -283,29 +271,10 @@ export function FactsTable(): JSX.Element {
 
   return (
     <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--color-bg-base)',
-        color: 'var(--color-text-secondary)',
-        fontSize: 12,
-        // 顶部让开 main.tsx 的 HUD 覆盖层（标题行 + 视图按钮 + 筛选条 + 统计行）
-        paddingTop: 148,
-        boxSizing: 'border-box',
-      }}
+      className="facttable"
+      style={{ paddingTop: topInset, ['--table-grid' as string]: GRID } as CSSProperties}
     >
-      <div
-        style={{
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          padding: '6px 12px',
-          borderBottom: '1px solid var(--color-border-subtle)',
-          flexWrap: 'wrap',
-        }}
-      >
+      <div className="facttable-bar">
         <input
           type="search"
           value={qInput}
@@ -326,30 +295,22 @@ export function FactsTable(): JSX.Element {
               applyQuery('');
             }
           }}
-          style={{
-            background: 'var(--color-bg-overlay)',
-            color: 'var(--color-text-primary)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 999,
-            padding: '3px 11px',
-            font: 'inherit',
-            width: 260,
-          }}
+          className="input-line facttable-search"
         />
         {qInput !== '' && (
           <button
             type="button"
+            className="chip chip-action"
             onClick={() => {
               setQInput('');
               debouncedApply.cancel();
               applyQuery('');
             }}
-            style={chip(false)}
           >
             {t('common.clear')}
           </button>
         )}
-        <span style={{ color: 'var(--color-text-faint)', marginLeft: 4 }}>{t('table.sort.label')}</span>
+        <span className="facttable-hint" style={{ marginLeft: 4 }}>{t('table.sort.label')}</span>
         {(['time', 'importance'] as const).map((k) => (
           <button
             key={k}
@@ -357,115 +318,95 @@ export function FactsTable(): JSX.Element {
             onClick={() => changeSort(k)}
             disabled={sort === k}
             aria-pressed={sort === k}
+            data-on={sort === k ? 'true' : 'false'}
             title={t(k === 'time' ? 'table.sort.byTime' : 'table.sort.byImportance')}
-            style={chip(sort === k)}
+            className="chip"
           >
             {t(k === 'time' ? 'table.sort.time' : 'table.sort.importance')}
           </button>
         ))}
-        <span style={{ marginLeft: 'auto', color: 'var(--color-text-faint)' }}>
+        <span className="facttable-hint" style={{ marginLeft: 'auto' }}>
           {t('table.sort.cursor', { order: sort === 'time' ? 'valid_at DESC' : 'importance DESC' })}
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--color-border-subtle)', color: 'var(--color-text-muted)', fontSize: 11, letterSpacing: '.03em', background: 'transparent' }} role="row">
-        <span role="columnheader">{t('table.col.time')}</span>
-        <span role="columnheader">{t('table.col.ftype')}</span>
-        <span role="columnheader">{t('table.col.content')}</span>
-        <span role="columnheader" title={t('table.col.confidence.title')}>{t('table.col.confidence')}</span>
-        <span role="columnheader" title={t('table.col.strength.title')}>{t('table.col.strength')}</span>
-        <span role="columnheader">{t('table.col.status')}</span>
-        <span role="columnheader" title={t('table.col.importance.title')}>{t('table.col.importance')}</span>
-      </div>
-
-      <div
-        ref={scrollRef}
-        role="grid"
-        aria-rowcount={total}
-        aria-label={t('table.aria')}
-        style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', position: 'relative' }}
-      >
-        {rows.length === 0 && (
-          <div style={{ padding: '20px 16px', color: 'var(--color-text-muted)' }}>
-            {loading
-              ? t('table.empty.loading')
-              : error !== null
-                ? ''
-                : q === ''
-                  ? t('table.empty.none')
-                  : t('table.empty.noMatch', { q })}
+      <div className="facttable-sheet">
+        <div className="facttable-inner">
+          <div className="facttable-head" role="row">
+            <span role="columnheader" data-num="true">{t('table.col.time')}</span>
+            <span role="columnheader">{t('table.col.ftype')}</span>
+            <span role="columnheader">{t('table.col.content')}</span>
+            <span role="columnheader" data-num="true" title={t('table.col.confidence.title')}>{t('table.col.confidence')}</span>
+            <span role="columnheader" data-num="true" title={t('table.col.strength.title')}>{t('table.col.strength')}</span>
+            <span role="columnheader">{t('table.col.status')}</span>
+            <span role="columnheader" data-num="true" title={t('table.col.importance.title')}>{t('table.col.importance')}</span>
           </div>
-        )}
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
-          {virtualItems.map((item) => {
-            const row = rows[item.index];
-            if (row === undefined) return null;
-            const selected = row.id === focusId;
-            return (
-              <div
-                key={item.key}
-                role="row"
-                aria-selected={selected}
-                title={`${row.content}\n\n${row.id}`}
-                onClick={() => useSelection.getState().select(row.id)}
-                style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  width: '100%',
-                  height: ROW_HEIGHT,
-                  transform: `translateY(${String(item.start)}px)`,
-                  display: 'grid',
-                  gridTemplateColumns: GRID,
-                  gap: 8,
-                  alignItems: 'center',
-                  padding: '0 12px',
-                  boxSizing: 'border-box',
-                  borderBottom: '1px solid var(--color-border-subtle)',
-                  background: selected ? 'var(--color-bg-active)' : 'transparent',
-                  boxShadow: selected ? 'inset 2px 0 0 var(--color-accent)' : 'none',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                }}
-              >
-                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatLocalMinute(row.valid_at)}
-                </span>
-                <span role="gridcell" style={{ color: 'var(--color-accent-soft)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {enumLabel('ftype', row.ftype)}
-                </span>
-                <span role="gridcell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', color: 'var(--color-text-primary)' }}>
-                  {oneLine(row.content)}
-                </span>
-                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatScore(row.confidence)}
-                </span>
-                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatScore(row.strength)}
-                </span>
-                <span role="gridcell" style={{ color: STATUS_COLOR[row.epistemic_status] ?? 'var(--color-text-secondary)' }}>
-                  {enumLabel('epistemic', row.epistemic_status)}
-                </span>
-                <span role="gridcell" style={{ color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                  {formatScore(row.importance)}
-                </span>
+
+          <div
+            ref={scrollRef}
+            role="grid"
+            aria-rowcount={total}
+            aria-label={t('table.aria')}
+            className="facttable-scroll"
+          >
+            {rows.length === 0 && (
+              <div className="facttable-empty">
+                {loading
+                  ? t('table.empty.loading')
+                  : error !== null
+                    ? ''
+                    : q === ''
+                      ? t('table.empty.none')
+                      : t('table.empty.noMatch', { q })}
               </div>
-            );
-          })}
+            )}
+            <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+              {virtualItems.map((item) => {
+                const row = rows[item.index];
+                if (row === undefined) return null;
+                const selected = row.id === focusId;
+                return (
+                  <div
+                    key={item.key}
+                    role="row"
+                    aria-selected={selected}
+                    data-selected={selected ? 'true' : 'false'}
+                    title={`${row.content}\n\n${row.id}`}
+                    onClick={() => useSelection.getState().select(row.id)}
+                    className="facttable-row"
+                    style={{ height: ROW_HEIGHT, transform: `translateY(${String(item.start)}px)` }}
+                  >
+                    <span role="gridcell" className="facttable-cell facttable-num">
+                      {formatLocalMinute(row.valid_at)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-ftype">
+                      {enumLabel('ftype', row.ftype)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-content">
+                      {oneLine(row.content)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-num">
+                      {formatScore(row.confidence)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-num">
+                      {formatScore(row.strength)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-status" data-status={row.epistemic_status}>
+                      <span className="facttable-lamp" aria-hidden="true" />
+                      {enumLabel('epistemic', row.epistemic_status)}
+                    </span>
+                    <span role="gridcell" className="facttable-cell facttable-num">
+                      {formatScore(row.importance)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 14,
-          padding: '4px 12px',
-          borderTop: '1px solid var(--color-border-subtle)',
-          color: 'var(--color-text-faint)',
-          background: 'var(--color-bg-raised)',
-        }}
-      >
+      <div className="facttable-foot">
         <span>
           {t('table.footer.loaded', { rows: rows.length, total })}
         </span>
@@ -473,7 +414,7 @@ export function FactsTable(): JSX.Element {
           {t('table.footer.requests', { n: requests.length, limit: PAGE_LIMIT })}
         </span>
         <span>{done ? t('table.footer.done') : loading ? t('table.footer.loading') : t('table.footer.more')}</span>
-        {error !== null && <span style={{ color: 'var(--color-danger)' }}>{t('table.footer.error', { error })}</span>}
+        {error !== null && <span className="facttable-error">{t('table.footer.error', { error })}</span>}
         <span style={{ marginLeft: 'auto' }}>{t('table.footer.hint')}</span>
       </div>
     </div>

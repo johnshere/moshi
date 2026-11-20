@@ -63,6 +63,7 @@ import {
 } from './pure/trace.js';
 import { useTrace } from '../state/trace.js';
 import { SCAN_SPEED, SCAN_WIDTH } from './pure/fx.js';
+import { mountStageFrame } from './stageFrame.js';
 import {
   etypeHex,
   haloStops,
@@ -70,6 +71,7 @@ import {
   layerPlaneHexes,
   sceneBackdropCss,
   sceneVignetteCss,
+  selectionSweepRgb,
 } from './pure/palette.js';
 
 const MAX_LABELS = 48;
@@ -271,6 +273,8 @@ class GraphScene {
   private readonly labelRenderer: CSS2DRenderer;
   private readonly controls: OrbitControls;
   private readonly host: HTMLElement;
+  /** 舞台取景器卸载（与 2D 同一件外框，切视图不跳；见 graph/stageFrame.ts） */
+  private readonly unmountFrame: () => void;
   private readonly onStats: ((s: GraphStats) => void) | undefined;
 
   private raf = 0;
@@ -381,6 +385,9 @@ class GraphScene {
 
     this.labelRenderer = new CSS2DRenderer();
     this.labelRenderer.setSize(width, height);
+    // 标签层单独上遮罩（见 app.css 的 `.graph-label-layer`）：HUD 底边以上一律淡出，
+    // 否则亮色主题下标签白字会画到浅色 HUD 上。
+    this.labelRenderer.domElement.className = 'graph-label-layer';
     const labelStyle = this.labelRenderer.domElement.style;
     labelStyle.position = 'absolute';
     labelStyle.top = '0';
@@ -394,6 +401,8 @@ class GraphScene {
     vignette.style.cssText = `position:absolute;inset:0;pointer-events:none;z-index:2;background:${sceneVignetteCss()}`;
     host.appendChild(vignette);
     this.vignette = vignette;
+
+    this.unmountFrame = mountStageFrame(host);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
@@ -411,6 +420,19 @@ class GraphScene {
       material.depthWrite = false;
       this.grids.push(grid);
       this.scene.add(grid);
+      // 最底层的活跃刻度再叠一层 96 细格：32 格主网格 + 96 细格 = 两级刻度参照系。
+      // 只在**地板**加：加在天花板上会变成一张罩住云团的密网，节点全被压暗（试过，回退）。
+      // 代价 1 笔 draw call（8 → 9）；抬高 0.8 单位避免与主网格 z-fighting。
+      if (plane.y === LAYER_INVALID) {
+        const fine = new THREE.GridHelper(1600, 96, plane.color, plane.color);
+        fine.position.y = plane.y - 0.8;
+        const fineMaterial = fine.material as THREE.Material;
+        fineMaterial.transparent = true;
+        fineMaterial.opacity = 0.09;
+        fineMaterial.depthWrite = false;
+        this.grids.push(fine);
+        this.scene.add(fine);
+      }
     }
 
     this.resizeObserver = new ResizeObserver(() => {
@@ -824,6 +846,9 @@ class GraphScene {
       shader.uniforms['uTimeSel'] = { value: 0 };
       shader.uniforms['uScanSpeed'] = { value: SCAN_SPEED };
       shader.uniforms['uScanWidth'] = { value: SCAN_WIDTH };
+      // 扫描光的颜色来自 `--color-accent`：原来是纯白，白色在深场上过曝、也不承担信号语义
+      const sweep = new THREE.Color(...selectionSweepRgb());
+      shader.uniforms['uSweep'] = { value: sweep };
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
@@ -836,7 +861,7 @@ class GraphScene {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          '#include <common>\nuniform float uTimeSel;\nuniform float uScanSpeed;\nuniform float uScanWidth;\nvarying float vNodeAlpha;\nvarying float vNodeSel;\nvarying vec3 vViewNormal;\nfloat moshiSmooth(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-5), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }',
+          '#include <common>\nuniform float uTimeSel;\nuniform float uScanSpeed;\nuniform float uScanWidth;\nuniform vec3 uSweep;\nvarying float vNodeAlpha;\nvarying float vNodeSel;\nvarying vec3 vViewNormal;\nfloat moshiSmooth(float a, float b, float x) { float t = clamp((x - a) / max(b - a, 1e-5), 0.0, 1.0); return t * t * (3.0 - 2.0 * t); }',
         )
         .replace(
           'vec4 diffuseColor = vec4( diffuse, opacity );',
@@ -849,7 +874,7 @@ class GraphScene {
             'float scan = mod(uTimeSel * uScanSpeed, 6.2831853);',
             'float ad = abs(mod(ang - scan + 3.14159265, 6.2831853) - 3.14159265);',
             'float sweep = sel * (1.0 - smoothstep(0.0, uScanWidth, ad));',
-            'vec4 diffuseColor = vec4( diffuse * (0.62 + 1.2 * ring + 0.32 * core) + vec3(1.0) * (0.55 * sweep), opacity * vNodeAlpha * (0.82 + 0.18 * core + 0.45 * sweep) );',
+            'vec4 diffuseColor = vec4( diffuse * (0.62 + 1.2 * ring + 0.32 * core) + uSweep * (0.55 * sweep), opacity * vNodeAlpha * (0.82 + 0.18 * core + 0.45 * sweep) );',
           ].join('\n'),
         );
       this.nodeShader = shader as unknown as { uniforms: Record<string, { value: number }> };
@@ -1309,6 +1334,7 @@ class GraphScene {
     this.labelRenderer.domElement.remove();
     this.vignette?.remove();
     this.vignette = null;
+    this.unmountFrame();
     delete window.__moshiGraph;
   }
 }

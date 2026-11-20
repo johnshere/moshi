@@ -3,8 +3,10 @@
  *
  * 界面只做三件事：展示检查结果、触发下载、触发安装。版本比较与资产选择在
  * 后端（`GET /api/update`），这里不重复判定。
+ *
+ * 视觉（w10）：一条读数带；当前版本是等宽读数，更新说明与结果行用提示条/读数带脚。
  */
-import { useEffect, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 import type { DictKey } from '../i18n/dict.js';
@@ -56,29 +58,6 @@ async function post(path: string): Promise<unknown> {
 function mb(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
-
-const panelStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '12px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 8,
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-};
-
-const buttonStyle: CSSProperties = {
-  alignSelf: 'flex-start',
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  padding: '5px 12px',
-  fontSize: 12,
-  cursor: 'pointer',
-};
 
 export function UpdatePanel(): ReactElement {
   const t = useT();
@@ -132,67 +111,57 @@ export function UpdatePanel(): ReactElement {
     }
   };
 
+  const hasUpdate = status !== null && status.ok && status.available;
+
   return (
-    <div style={panelStyle} data-testid="update-panel">
-      <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{t('settings.update.title')}</div>
-      <div>
-        {t('settings.update.current', { version: status === null ? '—' : status.current })}
-        {status !== null && status.enabled && status.ok && !status.available && t('settings.update.upToDate')}
-        {status !== null && !status.enabled && t('settings.update.disabled')}
-      </div>
-      {status !== null && status.ok && status.available && (
-        <div>
-          {t('settings.update.found', { version: status.latest ?? '' })}
-          {status.published_at === null ? '' : t('settings.update.published', { date: status.published_at.slice(0, 10) })}
-          {status.asset_url === null && t('settings.update.noAsset')}
+    <section className="band" data-testid="update-panel">
+      <div className="band-head">
+        <span className="band-title">{t('settings.update.title')}</span>
+        <span className="readout">
+          {t('settings.update.current', { version: status === null ? '—' : status.current })}
+        </span>
+        <div className="band-tools">
+          <button type="button" className="btn" onClick={() => void check()} disabled={busy !== null}>
+            {busy === 'check' ? t('settings.update.checking') : t('settings.update.check')}
+          </button>
         </div>
-      )}
-      {status !== null && status.ok && status.available && status.notes !== null && (
-        <pre
-          style={{
-            margin: 0,
-            maxHeight: 120,
-            overflow: 'auto',
-            background: 'var(--color-bg-base)',
-            border: '1px solid var(--color-border-subtle)',
-            borderRadius: 8,
-            padding: 8,
-            fontSize: 12,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {status.notes}
-        </pre>
-      )}
-      {status !== null && !status.ok && (
-        <div style={{ color: 'var(--color-warning-soft)' }}>{t('settings.update.checkFailed', { error: status.error ?? '' })}</div>
-      )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" style={buttonStyle} onClick={() => void check()} disabled={busy !== null}>
-          {busy === 'check' ? t('settings.update.checking') : t('settings.update.check')}
-        </button>
-        {status !== null && status.ok && status.available && status.asset_url !== null && (
-          <button
-            type="button"
-            style={buttonStyle}
-            onClick={() => void download()}
-            disabled={busy !== null}
-          >
-            {busy === 'download' ? t('settings.update.downloading') : t('settings.update.download')}
-          </button>
+      </div>
+      <div className="band-body">
+        <span className="station-note">
+          {status !== null && status.enabled && status.ok && !status.available ? t('settings.update.upToDate') : null}
+          {status !== null && !status.enabled ? t('settings.update.disabled') : null}
+        </span>
+        {hasUpdate && (
+          <span className="tile-line tone-accent">
+            {t('settings.update.found', { version: status.latest ?? '' })}
+            {status.published_at === null ? '' : t('settings.update.published', { date: status.published_at.slice(0, 10) })}
+            {status.asset_url === null ? t('settings.update.noAsset') : ''}
+          </span>
         )}
-        {downloaded !== null && (
-          <button
-            type="button"
-            style={buttonStyle}
-            onClick={() => void install()}
-            disabled={busy !== null}
-          >
-            {busy === 'install' ? t('settings.update.installing') : t('settings.update.install')}
-          </button>
+        {hasUpdate && status.notes !== null && <pre className="dialog-pre">{status.notes}</pre>}
+        {status !== null && !status.ok && (
+          <div className="notice" data-tone="warn">
+            <span className="notice-text">{t('settings.update.checkFailed', { error: status.error ?? '' })}</span>
+          </div>
+        )}
+        <div className="btn-row">
+          {hasUpdate && status.asset_url !== null && (
+            <button type="button" className="btn" onClick={() => void download()} disabled={busy !== null}>
+              {busy === 'download' ? t('settings.update.downloading') : t('settings.update.download')}
+            </button>
+          )}
+          {downloaded !== null && (
+            <button type="button" className="btn btn-primary" onClick={() => void install()} disabled={busy !== null}>
+              {busy === 'install' ? t('settings.update.installing') : t('settings.update.install')}
+            </button>
+          )}
+        </div>
+        {message !== null && (
+          <div className="notice" data-tone="info">
+            <span className="notice-text">{t(message.key, message.vars)}</span>
+          </div>
         )}
       </div>
-      {message !== null && <div>{t(message.key, message.vars)}</div>}
-    </div>
+    </section>
   );
 }

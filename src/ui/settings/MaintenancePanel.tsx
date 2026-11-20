@@ -7,8 +7,10 @@
  * - 四个按钮：FTS / 向量 / 度数 / 全部
  * - 「只统计不重建」= dry_run，用于先看 before 计数
  * - 结果展示 before/after 的 mismatch 计数与耗时；向量在 sidecar 不可用时会 skipped
+ *
+ * 视觉（w10）：一条读数带；四个目标是一排 `.btn`，结果用读数行（before / after 右对齐）。
  */
-import { useState, type CSSProperties, type ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import { resolveToken } from '../api.js';
 import { useT } from '../i18n/index.js';
 import { t as translate } from '../i18n/index.js';
@@ -65,28 +67,6 @@ async function postRebuild(target: string, dryRun: boolean): Promise<RebuildResu
   return body as RebuildResult;
 }
 
-const panelStyle: CSSProperties = {
-  background: 'var(--color-bg-raised)',
-  border: '1px solid var(--color-border-subtle)',
-  borderRadius: 8,
-  padding: '12px 14px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 10,
-  color: 'var(--color-text-secondary)',
-  fontSize: 13,
-};
-
-const buttonStyle: CSSProperties = {
-  background: 'var(--color-bg-hover)',
-  color: 'var(--color-text-primary)',
-  border: '1px solid var(--color-border-strong)',
-  borderRadius: 8,
-  padding: '6px 12px',
-  fontSize: 12,
-  cursor: 'pointer',
-};
-
 export function MaintenancePanel(): ReactElement {
   const t = useT();
   const [dryRun, setDryRun] = useState(true);
@@ -109,92 +89,81 @@ export function MaintenancePanel(): ReactElement {
   };
 
   return (
-    <section data-testid="maintenance-panel" style={panelStyle}>
-      <div style={{ color: 'var(--color-text-primary)', fontSize: 14, fontWeight: 600 }}>{t('settings.maint.title')}</div>
-      <div style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
-        {t('settings.maint.desc')}
+    <section className="band" data-testid="maintenance-panel">
+      <div className="band-head">
+        <span className="band-title">{t('settings.maint.title')}</span>
+        <span className="band-tag">{dryRun ? 'dry_run' : t('settings.maint.done')}</span>
       </div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--color-text-secondary)', fontSize: 12 }}>
-        <input
-          type="checkbox"
-          data-testid="maintenance-dry-run"
-          checked={dryRun}
-          disabled={running !== null}
-          onChange={(e) => { setDryRun(e.target.checked); }}
-        />
-        {t('settings.maint.dryRun')}
-      </label>
+      <div className="band-body">
+        <span className="station-note">{t('settings.maint.desc')}</span>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {TARGETS.map((item) => (
-          <button
-            key={item.target}
-            type="button"
-            data-testid={`rebuild-${item.target}`}
-            style={{ ...buttonStyle, opacity: running !== null ? 0.5 : 1 }}
+        <label className="switch" style={{ paddingTop: 0 }}>
+          <input
+            type="checkbox"
+            data-testid="maintenance-dry-run"
+            checked={dryRun}
             disabled={running !== null}
-            onClick={() => { void run(item.target); }}
-          >
-            {running === item.target ? t('settings.maint.running') : t(item.labelKey)}
-          </button>
-        ))}
-      </div>
+            onChange={(e) => { setDryRun(e.target.checked); }}
+          />
+          <span className="switch-body">
+            <span className="switch-label">{t('settings.maint.dryRun')}</span>
+          </span>
+        </label>
 
-      {error !== null && (
-        <div
-          data-testid="maintenance-error"
-          style={{ color: 'var(--color-danger-soft)', background: 'var(--color-danger-bg)', border: '1px solid var(--color-danger-dim)', borderRadius: 8, padding: '6px 8px' }}
-        >
-          {error}
-        </div>
-      )}
-
-      {result !== null && (
-        <div data-testid="maintenance-result" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ color: 'var(--color-text-secondary)', fontSize: 12 }}>
-            {result.target} · {result.dry_run ? 'dry_run' : t('settings.maint.done')} · {String(result.elapsed_ms)}ms
-            {result.skipped !== undefined && result.skipped.length > 0
-              ? t('settings.maint.skipped', { list: result.skipped.join(', ') })
-              : ''}
-          </div>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12, width: 'min(520px, 100%)' }}>
-            <thead>
-              <tr style={{ color: 'var(--color-text-muted)', textAlign: 'left' }}>
-                <th style={{ padding: '2px 8px 2px 0', fontWeight: 500 }}>{t('settings.maint.col.metric')}</th>
-                <th style={{ padding: '2px 8px', fontWeight: 500 }}>before</th>
-                <th style={{ padding: '2px 0', fontWeight: 500 }}>after</th>
-              </tr>
-            </thead>
-            <tbody>
-              {COUNT_LABELS.map((c) => (
-                <tr key={c.key} style={{ color: 'var(--color-text-secondary)' }}>
-                  <td style={{ padding: '2px 8px 2px 0' }}>{t(c.labelKey)}</td>
-                  <td style={{ padding: '2px 8px' }}>{result.before[c.key]}</td>
-                  <td style={{ padding: '2px 0', color: result.after[c.key] < result.before[c.key] ? 'var(--color-success-soft)' : 'var(--color-text-primary)' }}>
-                    {result.after[c.key]}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {result.details !== undefined && (
-            <pre
-              style={{
-                margin: 0,
-                color: 'var(--color-text-secondary)',
-                fontSize: 11,
-                background: 'var(--color-bg-overlay)',
-                border: '1px solid var(--color-border-subtle)',
-                borderRadius: 8,
-                padding: '6px 8px',
-                overflow: 'auto',
-              }}
+        <div className="btn-row">
+          {TARGETS.map((item) => (
+            <button
+              key={item.target}
+              type="button"
+              className="btn"
+              data-testid={`rebuild-${item.target}`}
+              disabled={running !== null}
+              onClick={() => { void run(item.target); }}
             >
-              {JSON.stringify(result.details, null, 2)}
-            </pre>
-          )}
+              {running === item.target ? t('settings.maint.running') : t(item.labelKey)}
+            </button>
+          ))}
         </div>
-      )}
+
+        {error !== null && (
+          <div className="notice" data-tone="error" data-testid="maintenance-error">
+            <span className="notice-text">{error}</span>
+          </div>
+        )}
+
+        {result !== null && (
+          <div data-testid="maintenance-result">
+            <div className="data-table">
+              <div className="data-head cols-rebuild">
+                <span>{t('settings.maint.col.metric')}</span>
+                <span data-num="true">before</span>
+                <span data-num="true">after</span>
+              </div>
+              {COUNT_LABELS.map((c) => (
+                <div key={c.key} className="data-row cols-rebuild">
+                  <span>{t(c.labelKey)}</span>
+                  <span className="data-num tone-mute">{result.before[c.key]}</span>
+                  <span
+                    className={`data-num ${result.after[c.key] < result.before[c.key] ? 'tone-ok' : ''}`}
+                  >
+                    {result.after[c.key]}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="tile-line tone-mute" style={{ marginTop: 6 }}>
+              {result.target} · {result.dry_run ? 'dry_run' : t('settings.maint.done')} ·{' '}
+              {String(result.elapsed_ms)}ms
+              {result.skipped !== undefined && result.skipped.length > 0
+                ? t('settings.maint.skipped', { list: result.skipped.join(', ') })
+                : ''}
+            </div>
+            {result.details !== undefined && (
+              <pre className="dialog-pre">{JSON.stringify(result.details, null, 2)}</pre>
+            )}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

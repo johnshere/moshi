@@ -1,14 +1,17 @@
 /**
  * 统一日志页（P4；开发方案 §7「日志页三段」）。
  *
- * 三段：①顶部状态条（只读 chip + 时间窗 + 「日志与保留」弹框入口）②按接入点统计卡片
+ * 三段：①顶部状态条（只读读数 + 时间窗 + 「日志与保留」弹框入口）②按接入点统计列
  * ③统一日志流（两源合并、可搜索、瀑布流加载）。
  *
  * **本页没有任何写入控件**：配置唯一写入口是「日志与保留」弹框（`LogConfigModal` 里挂
  * `AccessLogsPanel`），右上角按钮只是打开它的快捷入口（用户 m02743；用户 m00882 把配置
  * 从设置挪进接入，用户 m01083 又把它从独立页改成弹框）。
+ *
+ * 视觉（w10）：页头读数 + 筛选货架 + 读数带；统计是四格小面板（`.tile`），日志流是
+ * 等宽读数行（`.data-row`），状态靠 5px 方灯 + 色调类，不再用彩色文字堆卡片。
  */
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { LogConfigModal } from './LogConfigModal.js';
 import { useT } from '../i18n/index.js';
 import { enumLabel } from '../i18n/enums.js';
@@ -25,14 +28,13 @@ import {
 const REFRESH_MS = 10_000;
 const PAGE_SIZE = 20;
 
-const STATUS_COLOR: Record<string, string> = {
-  ok: 'var(--color-success, #3fb950)',
-  ready: 'var(--color-success, #3fb950)',
-  degraded: 'var(--color-warning, #d29922)',
-  empty: 'var(--color-text-muted)',
-  skipped: 'var(--color-text-muted)',
-  error: 'var(--color-danger, #f85149)',
-};
+/** 状态 → 色调类（只上色，不上底；底留给行 hover） */
+function statusTone(status: string | null): string {
+  if (status === 'ok' || status === 'ready') return 'tone-ok';
+  if (status === 'degraded') return 'tone-warn';
+  if (status === 'error') return 'tone-err';
+  return 'tone-mute';
+}
 
 function fmtBytes(value: number | null): string {
   if (value === null) return '—';
@@ -59,20 +61,12 @@ function kindLabel(kind: string): string {
 function sparkline(buckets: readonly number[]): ReactElement {
   const max = Math.max(1, ...buckets);
   return (
-    <div
-      data-testid="logs-summary-spark"
-      aria-hidden="true"
-      style={{ display: 'flex', alignItems: 'flex-end', gap: 1, height: 18, marginTop: 4 }}
-    >
+    <div className="spark" data-testid="logs-summary-spark" aria-hidden="true">
       {buckets.map((value, index) => (
         <span
           key={index}
-          style={{
-            flex: '1 1 auto',
-            height: `${String(Math.max(value === 0 ? 0 : 2, Math.round((value / max) * 18)))}px`,
-            background: value === 0 ? 'var(--color-border, #2a333d)' : 'var(--color-accent, #58a6ff)',
-            borderRadius: 1,
-          }}
+          data-zero={value === 0 ? 'true' : 'false'}
+          style={{ height: `${String(Math.max(value === 0 ? 0 : 2, Math.round((value / max) * 18)))}px` }}
         />
       ))}
     </div>
@@ -83,35 +77,6 @@ function hitRate(group: LogsSummaryGroup): string {
   if (group.count === 0) return '—';
   return `${((group.ok / group.count) * 100).toFixed(0)}%`;
 }
-
-const cardStyle: CSSProperties = {
-  border: '1px solid var(--color-border, #2a333d)',
-  borderRadius: 8,
-  background: 'var(--color-bg-raised)',
-  padding: '10px 12px',
-  minWidth: 200,
-};
-
-const chipStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 6,
-  padding: '3px 9px',
-  borderRadius: 999,
-  border: '1px solid var(--color-border, #2a333d)',
-  fontSize: 12,
-  color: 'var(--color-text-secondary)',
-};
-
-const tabStyle = (active: boolean): CSSProperties => ({
-  padding: '3px 10px',
-  borderRadius: 8,
-  border: '1px solid ' + (active ? 'var(--color-border-strong, #3a4a5a)' : 'transparent'),
-  background: active ? 'var(--color-bg-raised)' : 'transparent',
-  color: active ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
-  fontSize: 12,
-  cursor: 'pointer',
-});
 
 export function LogsPage(): ReactElement {
   const t = useT();
@@ -188,218 +153,240 @@ export function LogsPage(): ReactElement {
   const groups = useMemo(() => summary?.groups ?? [], [summary]);
 
   return (
-    <div
-      data-testid="logs-page"
-      style={{ position: 'absolute', inset: 0, overflow: 'auto', background: 'var(--color-bg-base)' }}
-    >
-      {/* ① 顶部：只读状态条 + 时间窗 + 「日志与保留」弹框入口（唯一写入口不在本页） */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 18px 0', flexWrap: 'wrap' }}>
-        <span style={{ color: 'var(--color-text-primary)', fontSize: 15, fontWeight: 600 }}>{t('logs.title')}</span>
-        <span style={chipStyle} data-testid="logs-total">
-          {t('logs.total', { n: totals?.count ?? 0 })}
-        </span>
-        <span style={chipStyle} data-testid="logs-ok">
-          {t('logs.ok', { n: totals?.ok ?? 0 })}
-        </span>
-        <span style={chipStyle} data-testid="logs-degraded">
-          {t('logs.degraded', { n: totals?.degraded ?? 0 })}
-        </span>
-        <span style={chipStyle} data-testid="logs-updated">
-          {t('logs.updatedAt', { time: updatedAt === null ? '—' : new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false }) })}
-        </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-          {(['1h', '24h', '7d'] as const).map((key) => (
-            <button
-              key={key}
-              type="button"
-              data-testid={`logs-window-${key}`}
-              data-active={windowKey === key ? 'true' : 'false'}
-              style={tabStyle(windowKey === key)}
-              onClick={() => setWindowKey(key)}
-            >
-              {key}
-            </button>
-          ))}
-          <button type="button" style={tabStyle(false)} data-testid="logs-settings-link" onClick={() => setConfigOpen(true)}>
+    <div className="ledger ledger-fill" data-testid="logs-page">
+      {/* ① 顶部：只读读数 + 时间窗 + 「日志与保留」弹框入口（唯一写入口不在本页） */}
+      <header className="ledger-head">
+        <div className="ledger-title">{t('logs.title')}</div>
+        <div className="head-meters">
+          <span className="readout" data-testid="logs-total">
+            {t('logs.total', { n: totals?.count ?? 0 })}
+          </span>
+          <span className="readout" data-testid="logs-ok">
+            {t('logs.ok', { n: totals?.ok ?? 0 })}
+          </span>
+          <span className="readout" data-testid="logs-degraded">
+            {t('logs.degraded', { n: totals?.degraded ?? 0 })}
+          </span>
+          <span className="readout" data-testid="logs-updated">
+            {t('logs.updatedAt', {
+              time:
+                updatedAt === null
+                  ? '—'
+                  : new Date(updatedAt).toLocaleTimeString('zh-CN', { hour12: false }),
+            })}
+          </span>
+        </div>
+        <div className="ledger-tools">
+          <div className="seg" role="group">
+            {(['1h', '24h', '7d'] as const).map((key) => (
+              <button
+                key={key}
+                type="button"
+                className="seg-item"
+                data-testid={`logs-window-${key}`}
+                data-active={windowKey === key ? 'true' : 'false'}
+                onClick={() => setWindowKey(key)}
+              >
+                {key}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="btn" data-testid="logs-settings-link" onClick={() => setConfigOpen(true)}>
             {t('logs.config')}
           </button>
         </div>
-      </div>
-      {summaryError !== null ? (
-        <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '6px 18px 0' }}>
-          {t('logs.summaryError', { error: summaryError })}
-        </div>
-      ) : null}
+      </header>
 
-      {/* ② 按接入点统计 */}
-      <div
-        data-testid="logs-summary"
-        style={{ display: 'flex', gap: 10, padding: '10px 18px 0', overflowX: 'auto', flexWrap: 'wrap' }}
-      >
-        {groups.length === 0 ? (
-          <div style={{ ...cardStyle, color: 'var(--color-text-muted)', fontSize: 12 }}>
-            {t('logs.summaryEmpty')}
-          </div>
-        ) : (
-          groups.map((group) => (
-            <div key={`${group.caller_id}:${group.caller_kind}`} style={cardStyle} data-testid="logs-summary-card">
-              <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>
-                {kindLabel(group.caller_kind)} · {group.caller_id}
-              </div>
-              <div style={{ fontSize: 20, color: 'var(--color-text-primary)', margin: '2px 0' }}>
-                {group.count}
-                <span style={{ fontSize: 11, color: 'var(--color-text-muted)', marginLeft: 6 }}>{t('logs.unit')}</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-secondary)', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                <span>{t('logs.hit', { rate: hitRate(group) })}</span>
-                <span>P95 {fmtMs(group.p95_ms)}</span>
-                <span>{t('logs.in', { bytes: fmtBytes(group.in_bytes) })}</span>
-                <span>{t('logs.out', { bytes: fmtBytes(group.out_bytes) })}</span>
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
-                {t('logs.last', { time: group.last_ts === null ? '—' : fmtTime(group.last_ts) })}
-              </div>
-              {sparkline(group.buckets)}
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* ③ 统一日志流 */}
-      <div style={{ display: 'flex', gap: 8, padding: '12px 18px 6px', flexWrap: 'wrap', alignItems: 'center' }}>
-        <select
-          value={source}
-          data-testid="logs-filter-source"
-          onChange={(event) => setSource(event.target.value as LogSourceFilter)}
-          style={{ fontSize: 12, padding: '3px 6px' }}
-        >
-          <option value="all">{t('logs.filter.allSources')}</option>
-          <option value="query">{t('logs.filter.source.query')}</option>
-          <option value="trace">{t('logs.filter.source.trace')}</option>
-        </select>
-        <select
-          value={status}
-          data-testid="logs-filter-status"
-          onChange={(event) => setStatus(event.target.value)}
-          style={{ fontSize: 12, padding: '3px 6px' }}
-        >
-          <option value="">{t('logs.filter.allStatus')}</option>
-          {(['ok', 'degraded', 'ready', 'empty', 'skipped'] as const).map((value) => (
-            <option key={value} value={value}>
-              {enumLabel('logStatus', value)}
-            </option>
-          ))}
-        </select>
-        <input
-          value={qInput}
-          data-testid="logs-filter-q"
-          placeholder={t('logs.searchPlaceholder')}
-          onChange={(event) => setQInput(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') setQ(qInput.trim());
-          }}
-          style={{ fontSize: 12, padding: '3px 6px', minWidth: 200 }}
-        />
-        <button type="button" style={tabStyle(false)} onClick={() => setQ(qInput.trim())}>
-          {t('logs.search')}
-        </button>
-        <button type="button" style={tabStyle(false)} data-testid="logs-refresh" onClick={() => loadFirstPage()}>
-          {t('logs.refresh')}
-        </button>
-      </div>
-      {listError !== null ? (
-        <div style={{ color: 'var(--color-danger, #f85149)', fontSize: 12, padding: '0 18px' }}>
-          {t('logs.listError', { error: listError })}
-        </div>
-      ) : null}
-
-      <div data-testid="logs-list" style={{ padding: '0 18px 24px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {items.length === 0 && !loading ? (
-          <div style={{ color: 'var(--color-text-muted)', fontSize: 12 }}>{t('logs.listEmpty')}</div>
-        ) : null}
-        {items.map((item) => {
-          const isOpen = expanded === item.id;
-          return (
-            <div
-              key={item.id}
-              data-testid="logs-row"
-              style={{
-                border: '1px solid var(--color-border, #2a333d)',
-                borderRadius: 8,
-                background: 'var(--color-bg-raised)',
-                fontSize: 12,
-              }}
-            >
-              <div
-                role="button"
-                tabIndex={0}
-                onClick={() => setExpanded(isOpen ? null : item.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') setExpanded(isOpen ? null : item.id);
-                }}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '70px 96px 1fr 72px 72px 84px 1fr',
-                  gap: 8,
-                  padding: '6px 10px',
-                  alignItems: 'center',
-                  cursor: 'pointer',
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 11,
-                    color: item.source === 'trace' ? 'var(--color-text-secondary)' : 'var(--color-text-muted)',
-                  }}
-                >
-                  {item.source === 'trace' ? t('logs.row.source.trace') : t('logs.row.source.query')}
-                </span>
-                <span style={{ color: 'var(--color-text-secondary)' }}>{kindLabel(item.caller_kind)}</span>
-                <span style={{ color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {item.caller_id}
-                </span>
-                <span style={{ color: 'var(--color-text-muted)' }}>{fmtBytes(item.in_bytes)}</span>
-                <span style={{ color: 'var(--color-text-muted)' }}>{fmtBytes(item.out_bytes)}</span>
-                <span style={{ color: STATUS_COLOR[item.status ?? ''] ?? 'var(--color-text-secondary)' }}>
-                  {item.status === null || item.status === undefined ? enumLabel('logStatus', 'unknown') : enumLabel('logStatus', item.status)}
-                </span>
-                <span style={{ color: 'var(--color-text-muted)', display: 'flex', gap: 8 }}>
-                  <span>{fmtTime(item.ts)}</span>
-                  <span>{fmtMs(item.latency_ms)}</span>
-                  {item.corr_id === null ? null : <span>corr {item.corr_id.slice(0, 8)}</span>}
-                </span>
-              </div>
-              {isOpen ? (
-                <div
-                  data-testid="logs-row-detail"
-                  style={{
-                    borderTop: '1px solid var(--color-border, #2a333d)',
-                    padding: '6px 10px',
-                    color: 'var(--color-text-secondary)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 4,
-                  }}
-                >
-                  <span>id {item.id}</span>
-                  <span>{t('logs.row.meta', { plugin: item.plugin_id ?? '—', evidence: item.evidence ?? '—', corr: item.corr_id ?? '—' })}</span>
-                  {item.text === null ? (
-                    <span style={{ color: 'var(--color-text-muted)' }}>
-                      {t('logs.row.noBody')}
-                    </span>
-                  ) : (
-                    <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 11 }}>{item.text}</pre>
-                  )}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-        {cursor !== null ? (
-          <button type="button" style={tabStyle(false)} data-testid="logs-load-more" onClick={loadMore} disabled={loading}>
-            {loading ? t('table.footer.loading') : t('logs.more')}
+      {/* 筛选：只筛不写，货架上一条线排开 */}
+      <div className="ledger-shelf">
+        <div className="btn-row">
+          <select
+            value={source}
+            className="scope-select"
+            data-testid="logs-filter-source"
+            onChange={(event) => setSource(event.target.value as LogSourceFilter)}
+          >
+            <option value="all">{t('logs.filter.allSources')}</option>
+            <option value="query">{t('logs.filter.source.query')}</option>
+            <option value="trace">{t('logs.filter.source.trace')}</option>
+          </select>
+          <select
+            value={status}
+            className="scope-select"
+            data-testid="logs-filter-status"
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            <option value="">{t('logs.filter.allStatus')}</option>
+            {(['ok', 'degraded', 'ready', 'empty', 'skipped'] as const).map((value) => (
+              <option key={value} value={value}>
+                {enumLabel('logStatus', value)}
+              </option>
+            ))}
+          </select>
+          <input
+            value={qInput}
+            className="input-line"
+            data-testid="logs-filter-q"
+            placeholder={t('logs.searchPlaceholder')}
+            onChange={(event) => setQInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') setQ(qInput.trim());
+            }}
+          />
+          <button type="button" className="btn" onClick={() => setQ(qInput.trim())}>
+            {t('logs.search')}
           </button>
+          <button type="button" className="btn" data-testid="logs-refresh" onClick={() => loadFirstPage()}>
+            {t('logs.refresh')}
+          </button>
+        </div>
+      </div>
+
+      <div className="station-body">
+        {summaryError !== null ? (
+          <div className="notice" data-tone="error">
+            <span className="notice-text">{t('logs.summaryError', { error: summaryError })}</span>
+          </div>
         ) : null}
+        {listError !== null ? (
+          <div className="notice" data-tone="error">
+            <span className="notice-text">{t('logs.listError', { error: listError })}</span>
+          </div>
+        ) : null}
+
+        {/* ② 按接入点统计：四格小面板，够几列排几列 */}
+        <div className="tile-grid" data-testid="logs-summary">
+          {groups.length === 0 ? (
+            <div className="tile">
+              <span className="tile-note">{t('logs.summaryEmpty')}</span>
+            </div>
+          ) : (
+            groups.map((group) => (
+              <div key={`${group.caller_id}:${group.caller_kind}`} className="tile" data-testid="logs-summary-card">
+                <div className="tile-title">
+                  <span>{kindLabel(group.caller_kind)}</span>
+                  <span className="tone-mute">·</span>
+                  <span>{group.caller_id}</span>
+                </div>
+                <div className="tile-num">
+                  {group.count}
+                  <span className="tile-unit">{t('logs.unit')}</span>
+                </div>
+                <div className="tile-line">
+                  <span>{t('logs.hit', { rate: hitRate(group) })}</span>
+                  <span className="tone-faint"> · </span>
+                  <span>P95 {fmtMs(group.p95_ms)}</span>
+                  <span className="tone-faint"> · </span>
+                  <span>{t('logs.in', { bytes: fmtBytes(group.in_bytes) })}</span>
+                  <span className="tone-faint"> · </span>
+                  <span>{t('logs.out', { bytes: fmtBytes(group.out_bytes) })}</span>
+                </div>
+                <div className="tile-note">
+                  {t('logs.last', { time: group.last_ts === null ? '—' : fmtTime(group.last_ts) })}
+                </div>
+                {sparkline(group.buckets)}
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* ③ 统一日志流 */}
+        <div className="data-scroll">
+          <div className="data-table" data-testid="logs-list">
+            <div className="data-head cols-log">
+              <span>{t('logs.row.source')}</span>
+              <span>{t('logs.row.kind')}</span>
+              <span>{t('logs.row.caller')}</span>
+              <span data-num="true">{t('logs.row.in')}</span>
+              <span data-num="true">{t('logs.row.out')}</span>
+              <span>{t('logs.row.status')}</span>
+              <span>{t('logs.row.when')}</span>
+            </div>
+            {items.length === 0 && !loading ? <div className="data-empty">{t('logs.listEmpty')}</div> : null}
+            {items.map((item) => {
+              const isOpen = expanded === item.id;
+              return (
+                <div key={item.id}>
+                  <div
+                    className="data-row cols-log"
+                    role="button"
+                    tabIndex={0}
+                    data-click="true"
+                    data-open={isOpen ? 'true' : 'false'}
+                    data-testid="logs-row"
+                    onClick={() => setExpanded(isOpen ? null : item.id)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') setExpanded(isOpen ? null : item.id);
+                    }}
+                  >
+                    <span className="readout">
+                      <span className="cell-label">{t('logs.row.source')}</span>
+                      {item.source === 'trace' ? t('logs.row.source.trace') : t('logs.row.source.query')}
+                    </span>
+                    <span className="tone-mute">
+                      <span className="cell-label">{t('logs.row.kind')}</span>
+                      {kindLabel(item.caller_kind)}
+                    </span>
+                    <span className="data-line">
+                      <span className="cell-label">{t('logs.row.caller')}</span>
+                      {item.caller_id}
+                    </span>
+                    <span className="data-num tone-mute">
+                      <span className="cell-label">{t('logs.row.in')}</span>
+                      {fmtBytes(item.in_bytes)}
+                    </span>
+                    <span className="data-num tone-mute">
+                      <span className="cell-label">{t('logs.row.out')}</span>
+                      {fmtBytes(item.out_bytes)}
+                    </span>
+                    <span className={`readout-status ${statusTone(item.status)}`}>
+                      <span className="cell-label">{t('logs.row.status')}</span>
+                      <i className="lamp" aria-hidden="true" />
+                      {item.status === null || item.status === undefined
+                        ? enumLabel('logStatus', 'unknown')
+                        : enumLabel('logStatus', item.status)}
+                    </span>
+                    <span className="readout">
+                      <span className="cell-label">{t('logs.row.when')}</span>
+                      {fmtTime(item.ts)} · {fmtMs(item.latency_ms)}
+                      {item.corr_id === null ? null : ` · corr ${item.corr_id.slice(0, 8)}`}
+                    </span>
+                  </div>
+                  {isOpen ? (
+                    <div className="data-detail" data-testid="logs-row-detail">
+                      <span>id {item.id}</span>
+                      <span>
+                        {t('logs.row.meta', {
+                          plugin: item.plugin_id ?? '—',
+                          evidence: item.evidence ?? '—',
+                          corr: item.corr_id ?? '—',
+                        })}
+                      </span>
+                      {item.text === null ? (
+                        <span className="tone-mute">{t('logs.row.noBody')}</span>
+                      ) : (
+                        <pre>{item.text}</pre>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {cursor !== null ? (
+              <div className="data-foot">
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="logs-load-more"
+                  onClick={loadMore}
+                  disabled={loading}
+                >
+                  {loading ? t('table.footer.loading') : t('logs.more')}
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
 
       {/* 「日志与保留」弹框（用户 m01083：不再有独立菜单页） */}

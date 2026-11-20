@@ -14,6 +14,7 @@ import Sigma from 'sigma';
 import type { GraphEdge, GraphNode, GraphPayload } from '../api.js';
 import { useActivity } from '../state/activity.js';
 import { useSelection } from '../state/selection.js';
+import { mountStageFrame } from './stageFrame.js';
 import { edgeKey, type ActivitySnapshot } from './pure/activity.js';
 import { ACTIVITY_TTL_MS, clamp01, type VisualState } from './pure/encoding.js';
 import { edge2DAttrs, focusAttrs, node2DAttrs } from './pure/graph2d.js';
@@ -42,7 +43,16 @@ import {
   bgBaseHex,
   boxBorderCss,
   boxFillCss,
+  directionArrowCss,
   gridCss,
+  hoverChipCss,
+  labelBgCss,
+  labelColorCss,
+  labelFontFamilyCss,
+  neighborEdgeCss,
+  neighborRingCss,
+  neighborRingSoftCss,
+  reticleColorCss,
   stageGlowCss,
 } from './pure/palette.js';
 import {
@@ -82,14 +92,30 @@ const SIGMA_STYLES = {
     label: { attribute: 'label' },
     labelVisibility: { attribute: 'labelVisibility' },
     labelSize: 11,
+    // 标签统一走舞台字色 + 深场底片：压在亮节点/密边上也读得清（值全部来自 token）
+    labelColor: labelColorCss(),
+    labelFont: labelFontFamilyCss(),
+    labelBackgroundColor: labelBgCss(),
+    labelBackgroundPadding: 2,
   },
   edges: {
     size: { attribute: 'size' },
     color: { attribute: 'color' },
     opacity: { attribute: 'opacity' },
   },
-  stage: { background: bgBaseHex() },
+  // 舞台透明：底色与网格由 DOM 层提供（画在 canvas 之下），画布本身不铺不透明底，
+  // 这样网格才不会被 sigma 的 canvas 整块盖住。
+  stage: { background: 'transparent' },
 } as const;
+
+/** 选中仪器件的上限：框选几千个点时不能每帧画几千个准星 */
+const SELECTION_RING_MAX = 64;
+/** 选中节点的 1 跳邻域环上限 */
+const NEIGHBOR_RING_MAX = 96;
+/** 选中节点关联边的静态方向箭头上限 */
+const SELECTION_ARROW_MAX = 128;
+/** 环/准星的绘制阈值：太小的点看不出环，反而糊成一团 */
+const RING_MIN_RADIUS = 3;
 
 class SigmaScene {
   private readonly host: HTMLElement;
@@ -115,12 +141,18 @@ class SigmaScene {
   private drag: DragState | null = null;
   /** 半透明选框是普通 DOM，不新增 WebGL draw call（渲染管线上限 12 不破） */
   private readonly boxEl: HTMLDivElement;
+  /** 舞台底色层（z0）：sigma 的 stage 透明，底色由它铺，网格才能透过 canvas 看见 */
+  private readonly baseEl: HTMLDivElement;
   /** P2-19-B 背景层：网格雾 + 径向光晕（DOM，不占 sigma 的 draw call） */
   private readonly gridEl: HTMLDivElement;
   private readonly glowEl: HTMLDivElement;
   /** 方向箭头层：2D canvas 叠加，只在有 trace（aFlow>0）时绘制 */
   private readonly arrowCanvas: HTMLCanvasElement;
   private readonly arrowCtx: CanvasRenderingContext2D | null;
+  /** 悬停读数牌（等宽读数，贴光标；不占 WebGL draw call） */
+  private readonly hoverEl: HTMLDivElement;
+  /** 舞台取景器卸载（四角准星 + 刻度尺，见 graph/stageFrame.ts） */
+  private readonly unmountFrame: () => void;
   private readonly startedAt = performance.now();
   /** 拖框结束后的第一次 click 要吞掉：否则 sigma 的 clickStage 会把刚选好的框选清空 */
   private suppressClick = false;
@@ -150,20 +182,26 @@ class SigmaScene {
       `border:1px solid ${boxBorderCss()}`,
       `background:${boxFillCss()}`,
       'border-radius:2px',
-      'z-index:4',
+      'z-index:5',
     ].join(';');
     host.appendChild(this.boxEl);
     // P2-19-B 背景：底色 + 网格雾（随缩放调透明度）+ 径向光晕。都是 DOM 层，
     // 不进入 sigma 的渲染管线——`__moshiGraph2d` 的 node/edge draw 数不受影响。
-    host.style.background = bgBaseHex();
+    // sigma 会把容器自身背景刷成 stage 色，所以底色必须由这一层（z0）来铺。
+    host.style.background = 'transparent';
+    this.baseEl = document.createElement('div');
+    this.baseEl.style.cssText = ['position:absolute', 'inset:0', 'pointer-events:none', 'z-index:0', `background:${bgBaseHex()}`].join(';');
+    host.appendChild(this.baseEl);
     this.gridEl = document.createElement('div');
     this.gridEl.style.cssText = [
       'position:absolute',
       'inset:0',
       'pointer-events:none',
-      'z-index:1',
+      // z0：网格必须落在 sigma 的 canvas **之下**（canvas 透明，透过它看见网格），
+      // 否则细线会压在节点上，读起来像脏点
+      'z-index:0',
       `background:${gridCss()}`,
-      'opacity:0.28',
+      'opacity:0.72',
     ].join(';');
     host.appendChild(this.gridEl);
     this.glowEl = document.createElement('div');
@@ -177,9 +215,15 @@ class SigmaScene {
     ].join(';');
     host.appendChild(this.glowEl);
     this.arrowCanvas = document.createElement('canvas');
-    this.arrowCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:3;width:100%;height:100%';
+    this.arrowCanvas.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:4;width:100%;height:100%';
     host.appendChild(this.arrowCanvas);
     this.arrowCtx = this.arrowCanvas.getContext('2d');
+    // 悬停读数牌：只在 hover 节点时出现，纯 DOM（不加 draw call）
+    this.hoverEl = document.createElement('div');
+    this.hoverEl.className = 'graph-hover';
+    this.hoverEl.style.cssText = hoverChipCss();
+    host.appendChild(this.hoverEl);
+    this.unmountFrame = mountStageFrame(host);
     // 命令式渲染器订阅 store：3D 点选 / 框选后切到 2D，这里要立刻高亮（不是等下一次刷新）
     this.unsubSelection = useSelection.subscribe((state, prev) => {
       if (state.selectedIds === prev.selectedIds && state.focusId === prev.focusId) return;
@@ -282,6 +326,13 @@ class SigmaScene {
       if (this.consumeSuppressedClick()) return;
       useSelection.getState().select(payload.node);
     });
+    // 悬停读数（等宽）：只读展示，不写选中态——悬停不等于选中
+    renderer.on('enterNode', (payload) => {
+      this.showHover(payload.node, payload.event);
+    });
+    renderer.on('leaveNode', () => {
+      this.hideHover();
+    });
     // 点空白 = 取消选中：2D 的使命是确认，点完一定会想收拾（概设 §8.7），空白区域也远大于 3D。
     renderer.on('clickStage', () => {
       // 刚结束一次框选：这一次 click 是拖拽的尾巴，不能把框选结果清掉
@@ -366,6 +417,35 @@ class SigmaScene {
 
   private publishSelected(): void {
     publishSelectedIds([...this.selectedIds]);
+  }
+
+  /**
+   * 悬停读数：类型 / 强度 / 重要度 / 访问次数，一行等宽字贴光标。
+   *
+   * 悬停**不参与**选中态（不调 useSelection）：读数只是"这是什么"，不是"我确认它"。
+   * 位置用 sigma 的视口坐标，靠近右/下边时翻到光标另一侧，避免被裁掉。
+   */
+  private showHover(id: string, event: { x: number; y: number }): void {
+    const node = this.rawNodeById.get(id);
+    if (node === undefined) return;
+    const rect = this.host.getBoundingClientRect();
+    const flipX = event.x > rect.width - 260;
+    const flipY = event.y > rect.height - 70;
+    this.hoverEl.textContent = [
+      node.ftype,
+      node.id.slice(-10),
+      `str ${node.strength.toFixed(2)}`,
+      `imp ${node.importance.toFixed(2)}`,
+      `acc ${String(node.access_count)}`,
+    ].join('  ·  ');
+    this.hoverEl.style.transform = `translate(${flipX ? '-100%' : '0'}, ${flipY ? '-100%' : '0'}) translate(${flipX ? -14 : 14}px, ${flipY ? -14 : 14}px)`;
+    this.hoverEl.style.left = `${event.x}px`;
+    this.hoverEl.style.top = `${event.y}px`;
+    this.hoverEl.style.display = 'block';
+  }
+
+  private hideHover(): void {
+    this.hoverEl.style.display = 'none';
   }
 
   /**
@@ -566,8 +646,117 @@ class SigmaScene {
     ctx.restore();
   }
 
-  private loop = (): void => {
-    if (this.disposed) return;
+  /**
+   * 选中仪器件：选中节点的淡环 + 四角准星、1 跳邻域的细环与连线、关联边的静态方向箭头。
+   *
+   * 全部画在箭头 canvas 上且**只在有选中时**才画：沉默态零额外开销，框选几千个点也只画
+   * 前 N 个（见 `*_MAX`）。颜色用 accent / glow 的低透明度 1px 线——强调色只做信号，
+   * 不做实底，节点自身的 ftype 色相仍是信息主通道。
+   */
+  private drawSelection(): void {
+    const ctx = this.arrowCtx;
+    const renderer = this.renderer;
+    if (ctx === null || renderer === null) return;
+    const selected = this.selectedIds;
+    const focus = this.selectedId;
+    if (selected.size === 0 && focus === null) return;
+    const dpr = Math.min(window.devicePixelRatio, 1.5);
+    const viewportOf = (id: string): { x: number; y: number } | null => {
+      if (!this.graph.hasNode(id)) return null;
+      return renderer.graphToViewport({
+        x: this.graph.getNodeAttribute(id, 'x') as number,
+        y: this.graph.getNodeAttribute(id, 'y') as number,
+      });
+    };
+    // 用当前 `size`（选中态已被放大 1.9×），不是 baseSize：否则环会画在节点里面看不见
+    const nodeRadius = (id: string): number => {
+      const size = this.graph.getNodeAttribute(id, 'size') as number | undefined;
+      return Math.max(size ?? 4, RING_MIN_RADIUS);
+    };
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.lineWidth = 1;
+
+    // ① 选中的每个节点：淡环 + 四角准星（准星是"我在测量这个点"的符号）
+    const primary =
+      selected.size > 0 ? [...selected].slice(0, SELECTION_RING_MAX) : focus === null ? [] : [focus];
+    const drawn = new Set<string>();
+    for (const id of primary) {
+      const at = viewportOf(id);
+      if (at === null) continue;
+      drawn.add(id);
+      const r = nodeRadius(id) + 6;
+      ctx.strokeStyle = neighborRingCss();
+      ctx.beginPath();
+      ctx.arc(at.x, at.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      const gap = r + 5;
+      const len = 6;
+      ctx.strokeStyle = reticleColorCss();
+      ctx.beginPath();
+      // 四向正交刻度（上下左右），不做对角斜线：斜线与标签/邻域线糊在一起
+      ctx.moveTo(at.x, at.y - gap);
+      ctx.lineTo(at.x, at.y - gap - len);
+      ctx.moveTo(at.x, at.y + gap);
+      ctx.lineTo(at.x, at.y + gap + len);
+      ctx.moveTo(at.x - gap, at.y);
+      ctx.lineTo(at.x - gap - len, at.y);
+      ctx.moveTo(at.x + gap, at.y);
+      ctx.lineTo(at.x + gap + len, at.y);
+      ctx.stroke();
+    }
+
+    // ② 主选中节点的 1 跳邻域：更淡的环 + 一条连线（"它与谁相邻"）
+    if (focus !== null && this.graph.hasNode(focus)) {
+      const center = viewportOf(focus);
+      let rings = 0;
+      if (center !== null) {
+        for (const id of this.graph.neighbors(focus)) {
+          if (rings >= NEIGHBOR_RING_MAX) break;
+          rings += 1;
+          const at = viewportOf(id);
+          if (at === null) continue;
+          ctx.strokeStyle = neighborEdgeCss();
+          ctx.beginPath();
+          ctx.moveTo(center.x, center.y);
+          ctx.lineTo(at.x, at.y);
+          ctx.stroke();
+          if (drawn.has(id)) continue;
+          ctx.strokeStyle = neighborRingSoftCss();
+          ctx.beginPath();
+          ctx.arc(at.x, at.y, nodeRadius(id) + 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      // ③ 关联边的方向箭头：读方向（src → dst）；2D 的通道是静态确认，不做流动动画
+      let arrows = 0;
+      ctx.fillStyle = directionArrowCss();
+      for (const key of this.graph.edges(focus)) {
+        if (arrows >= SELECTION_ARROW_MAX) break;
+        const a = viewportOf(this.graph.source(key));
+        const b = viewportOf(this.graph.target(key));
+        if (a === null || b === null) continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        if (Math.hypot(dx, dy) < 24) continue;
+        arrows += 1;
+        const size = 4;
+        ctx.save();
+        ctx.translate(a.x + dx * 0.52, a.y + dy * 0.52);
+        ctx.rotate(Math.atan2(dy, dx));
+        ctx.beginPath();
+        ctx.moveTo(size, 0);
+        ctx.lineTo(-size * 0.7, size * 0.6);
+        ctx.lineTo(-size * 0.7, -size * 0.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+    ctx.restore();
+  }
+
+  private loop = (): void => {    if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
     const now = performance.now();
     if (document.hidden) {
@@ -591,9 +780,11 @@ class SigmaScene {
     // sigma 是按需渲染的，主循环不会自己跑：这里每帧排一次渲染，
     // fps 才是"这张图一帧多贵"（与 3D 的持续 rAF 同口径，可横向比较）
     this.renderer?.scheduleRender();
-    // 网格雾随缩放变淡；箭头层只跟证据边数量走（无 trace 时只是清一层空画布）
-    this.gridEl.style.opacity = gridOpacity(this.renderer?.getCamera().ratio ?? 0.5).toFixed(3);
+    // 网格雾随缩放变淡（0.56–0.72）；箭头层只跟证据边数量走（无 trace 时只是清一层空画布）
+    const zoomFade = gridOpacity(this.renderer?.getCamera().ratio ?? 0.5);
+    this.gridEl.style.opacity = (0.55 + 0.45 * zoomFade).toFixed(3);
     this.drawArrows(now);
+    this.drawSelection();
     this.publish(now);
   };
 
@@ -607,9 +798,12 @@ class SigmaScene {
     this.unsubTrace();
     this.unsubKey();
     this.boxEl.remove();
+    this.baseEl.remove();
     this.gridEl.remove();
     this.glowEl.remove();
     this.arrowCanvas.remove();
+    this.hoverEl.remove();
+    this.unmountFrame();
     this.renderer?.kill();
     this.renderer = null;
     delete window.__moshiGraph2d;
@@ -644,5 +838,5 @@ export function Graph2D({ data, onStats }: Graph2DProps): JSX.Element {
     sceneRef.current?.setData(data);
   }, [data]);
 
-  return <div ref={hostRef} style={{ position: 'absolute', inset: 0, background: bgBaseHex() }} />;
+  return <div ref={hostRef} className="graph-canvas-2d" style={{ position: 'absolute', inset: 0, background: bgBaseHex() }} />;
 }
